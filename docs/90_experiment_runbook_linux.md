@@ -36,7 +36,7 @@ export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
 # DeepSeek（知识含量过滤）
-export DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
+export DEEPSEEK_API_KEY="sk-e31c18d1fc4f445bb3f65eca3226fbce"
 ```
 
 ### 1.2 一键构建 raw context + KVBank（表格优先 + DeepSeek 过滤）
