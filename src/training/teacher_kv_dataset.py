@@ -46,6 +46,7 @@ class BuildTeacherKVDatasetConfig:
     max_samples: Optional[int] = None
     device: Optional[str] = None
     dtype: Optional[str] = None  # float16|bfloat16|float32
+    trust_remote_code: bool = True
 
 
 @dataclass(frozen=True)
@@ -77,8 +78,10 @@ def build_teacher_kv_dataset(
     elif dev.type == "cuda":
         torch_dtype = torch.bfloat16  # L40 上通常 OK
 
-    tok = AutoTokenizer.from_pretrained(cfg.model_name_or_path, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(cfg.model_name_or_path, torch_dtype=torch_dtype)
+    tok = AutoTokenizer.from_pretrained(cfg.model_name_or_path, use_fast=True, trust_remote_code=bool(cfg.trust_remote_code))
+    model = AutoModelForCausalLM.from_pretrained(
+        cfg.model_name_or_path, torch_dtype=torch_dtype, trust_remote_code=bool(cfg.trust_remote_code)
+    )
     model.to(dev)
     model.eval()
 

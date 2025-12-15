@@ -52,7 +52,7 @@ def main() -> None:
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tok = AutoTokenizer.from_pretrained(args.model, use_fast=True)
+    tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16 if device.type == "cuda" else None)
     model.to(device)
     model.eval()

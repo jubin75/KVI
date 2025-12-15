@@ -28,6 +28,7 @@ class RawToBlocksConfig:
     chunk_overlap: int = 256
     block_tokens: int = 256
     drop_last_incomplete_block: bool = True
+    trust_remote_code: bool = True
 
 
 def _load_text(path: Path) -> str:
@@ -51,7 +52,7 @@ def build_memory_blocks_from_raw_text(
 
     from transformers import AutoTokenizer  # type: ignore
 
-    tok = AutoTokenizer.from_pretrained(cfg.tokenizer_name_or_path, use_fast=True)
+    tok = AutoTokenizer.from_pretrained(cfg.tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(cfg.trust_remote_code))
     ids = tok(raw_text, return_tensors=None, add_special_tokens=False)["input_ids"]
     n = len(ids)
 

@@ -41,6 +41,7 @@ class HFSentenceEncoderConfig:
     normalize: bool = True
     device: Optional[str] = None
     dtype: Optional[str] = None  # float16|bfloat16|float32
+    trust_remote_code: bool = True
 
 
 class HFSentenceEncoder:
@@ -55,8 +56,12 @@ class HFSentenceEncoder:
         elif dev.type == "cuda":
             torch_dtype = torch.float16
 
-        self.tokenizer = AutoTokenizer.from_pretrained(cfg.model_name_or_path, use_fast=True)
-        self.model = AutoModel.from_pretrained(cfg.model_name_or_path, torch_dtype=torch_dtype)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            cfg.model_name_or_path, use_fast=True, trust_remote_code=bool(cfg.trust_remote_code)
+        )
+        self.model = AutoModel.from_pretrained(
+            cfg.model_name_or_path, torch_dtype=torch_dtype, trust_remote_code=bool(cfg.trust_remote_code)
+        )
         self.model.to(dev)
         self.model.eval()
         self.device = dev

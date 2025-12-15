@@ -137,6 +137,7 @@ class RawChunkConfig:
     chunk_overlap: int = 256
     ocr: str = "auto"  # off|auto|on
     extract_tables: bool = True
+    trust_remote_code: bool = True
     # extraction guardrails
     fail_on_empty_extract: bool = True
     min_extracted_chars: int = 300
@@ -183,7 +184,9 @@ def build_raw_context_chunks_from_pdf_dir(
 
     from transformers import AutoTokenizer  # type: ignore
 
-    tok = AutoTokenizer.from_pretrained(cfg.tokenizer_name_or_path, use_fast=True)
+    tok = AutoTokenizer.from_pretrained(
+        cfg.tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(cfg.trust_remote_code)
+    )
     pdfs = sorted([p for p in pdf_dir.rglob("*.pdf") if p.is_file()])
     if not pdfs:
         raise RuntimeError(f"No .pdf files found under pdf_dir={pdf_dir}")

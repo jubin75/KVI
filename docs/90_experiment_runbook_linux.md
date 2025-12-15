@@ -15,6 +15,13 @@ python -m pip install -U pip
 pip install -r requirements.txt
 ```
 
+如果你用的是旧版 `transformers`，加载 Qwen2/DeepSeek 可能报：
+`Tokenizer class Qwen2Tokenizer does not exist ...`。建议升级：
+
+```bash
+pip install -U "transformers>=4.41" accelerate safetensors tokenizers sentencepiece
+```
+
 ### 0.2 系统依赖（OCR）
 
 如果你要处理扫描 PDF（OCR），需要安装 `tesseract`：
@@ -36,7 +43,7 @@ export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
 # DeepSeek（知识含量过滤）
-export DEEPSEEK_API_KEY="sk-e31c18d1fc4f445bb3f65eca3226fbce"
+export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
 ```
 
 ### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常

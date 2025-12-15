@@ -84,8 +84,8 @@ def build_faiss_kvbank_from_chunkstore(
     elif dev.type == "cuda":
         torch_dtype = torch.float16
 
-    tok = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype)
+    tok = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype, trust_remote_code=True)
     model.to(dev)
     model.eval()
 

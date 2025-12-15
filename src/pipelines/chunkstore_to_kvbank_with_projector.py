@@ -69,8 +69,10 @@ def build_faiss_kvbank_with_projector(
     elif dev.type == "cuda":
         torch_dtype = torch.bfloat16
 
-    tok = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast=True)
-    base = AutoModelForCausalLM.from_pretrained(base_model_name_or_path, torch_dtype=torch_dtype)
+    tok = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast=True, trust_remote_code=True)
+    base = AutoModelForCausalLM.from_pretrained(
+        base_model_name_or_path, torch_dtype=torch_dtype, trust_remote_code=True
+    )
     base.to(dev)
     base.eval()
     for p in base.parameters():

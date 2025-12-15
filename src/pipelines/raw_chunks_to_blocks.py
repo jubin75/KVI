@@ -29,6 +29,7 @@ def build_blocks_from_raw_chunks(
     tokenizer_name_or_path: str,
     block_tokens: int = 256,
     drop_last_incomplete_block: bool = True,
+    trust_remote_code: bool = True,
 ) -> int:
     """
     对每条 raw chunk 的 text：tokenizer 级切分为 256-token blocks。
@@ -36,7 +37,7 @@ def build_blocks_from_raw_chunks(
 
     from transformers import AutoTokenizer  # type: ignore
 
-    tok = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True)
+    tok = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(trust_remote_code))
     out_blocks_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0

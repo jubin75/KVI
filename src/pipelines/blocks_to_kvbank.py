@@ -52,6 +52,7 @@ def build_kvbank_from_blocks_jsonl(
     max_blocks: Optional[int] = None,
     device: Optional[str] = None,
     dtype: Optional[str] = None,
+    trust_remote_code: bool = True,
 ) -> BuildBlocksKVBankStats:
     """
     对每条 block：
@@ -71,8 +72,10 @@ def build_kvbank_from_blocks_jsonl(
     elif dev.type == "cuda":
         torch_dtype = torch.bfloat16
 
-    tok = AutoTokenizer.from_pretrained(base_llm_name_or_path, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(base_llm_name_or_path, torch_dtype=torch_dtype)
+    tok = AutoTokenizer.from_pretrained(base_llm_name_or_path, use_fast=True, trust_remote_code=bool(trust_remote_code))
+    model = AutoModelForCausalLM.from_pretrained(
+        base_llm_name_or_path, torch_dtype=torch_dtype, trust_remote_code=bool(trust_remote_code)
+    )
     model.to(dev)
     model.eval()
 
