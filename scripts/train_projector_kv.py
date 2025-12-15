@@ -10,12 +10,21 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any, Dict, List
 
 import torch
 from torch.utils.data import DataLoader
 
-from external_kv_injection.src.training.projector_kv import KVProjector, ProjectorConfig, masked_mse_kv
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.training.projector_kv import KVProjector, ProjectorConfig, masked_mse_kv  # type: ignore
+except ModuleNotFoundError:
+    from src.training.projector_kv import KVProjector, ProjectorConfig, masked_mse_kv  # type: ignore
 
 
 def _collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:

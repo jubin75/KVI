@@ -10,10 +10,25 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
-from external_kv_injection.src.pipelines.pdf_to_raw_context_chunks import RawChunkConfig, build_raw_context_chunks_from_pdf_dir
-from external_kv_injection.src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks
-from external_kv_injection.src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.pipelines.pdf_to_raw_context_chunks import (  # type: ignore
+        RawChunkConfig,
+        build_raw_context_chunks_from_pdf_dir,
+    )
+    from external_kv_injection.src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks  # type: ignore
+    from external_kv_injection.src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
+except ModuleNotFoundError:
+    # Repo layout where `scripts/` and `src/` live at the repo root (no outer package dir).
+    from src.pipelines.pdf_to_raw_context_chunks import RawChunkConfig, build_raw_context_chunks_from_pdf_dir  # type: ignore
+    from src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks  # type: ignore
+    from src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
 
 
 def main() -> None:

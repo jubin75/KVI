@@ -29,19 +29,20 @@ sudo apt-get install -y tesseract-ocr
 ### 1.1 设置实验参数
 
 ```bash
-export PDF_DIR="kvi/pdfs"
-export WORK_DIR="kvi/_exp_prod"
+# 建议使用绝对路径；如果你已经 cd /home/jb/KVI，也可以用相对路径 ./pdfs
+export PDF_DIR="/home/jb/KVI/pdfs"
+export WORK_DIR="/home/jb/KVI/_exp_prod"
 export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
 # DeepSeek（知识含量过滤）
-export DEEPSEEK_API_KEY="sk-a72d4e8b6b2d4e379c4fe6a01493a28f"
+export DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
 ```
 
 ### 1.2 一键构建 raw context + KVBank（表格优先 + DeepSeek 过滤）
 
 ```bash
-python external_kv_injection/scripts/build_kvbank_from_pdf_dir_multistep.py \
+python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --pdf_dir "$PDF_DIR" \
   --work_dir "$WORK_DIR" \
   --base_llm "$BASE_LLM" \

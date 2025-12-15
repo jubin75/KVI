@@ -6,9 +6,19 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
-from external_kv_injection.src.pipelines.pdf_to_chunkstore import build_chunkstore_from_pdfs
-from external_kv_injection.src.pipelines.chunkstore_to_kvbank import build_faiss_kvbank_from_chunkstore
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.pipelines.pdf_to_chunkstore import build_chunkstore_from_pdfs  # type: ignore
+    from external_kv_injection.src.pipelines.chunkstore_to_kvbank import build_faiss_kvbank_from_chunkstore  # type: ignore
+except ModuleNotFoundError:
+    from src.pipelines.pdf_to_chunkstore import build_chunkstore_from_pdfs  # type: ignore
+    from src.pipelines.chunkstore_to_kvbank import build_faiss_kvbank_from_chunkstore  # type: ignore
 
 
 def main() -> None:

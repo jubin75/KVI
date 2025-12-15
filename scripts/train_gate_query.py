@@ -21,15 +21,26 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from external_kv_injection.src.kv_bank import FaissKVBank
-from external_kv_injection.src.retriever import Retriever
-from external_kv_injection.src.training.gate_query import GateConfig, QueryEmbeddingGate
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+    from external_kv_injection.src.retriever import Retriever  # type: ignore
+    from external_kv_injection.src.training.gate_query import GateConfig, QueryEmbeddingGate  # type: ignore
+except ModuleNotFoundError:
+    from src.kv_bank import FaissKVBank  # type: ignore
+    from src.retriever import Retriever  # type: ignore
+    from src.training.gate_query import GateConfig, QueryEmbeddingGate  # type: ignore
 
 
 class GateDataset(Dataset):

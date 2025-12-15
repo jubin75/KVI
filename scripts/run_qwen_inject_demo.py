@@ -20,19 +20,32 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any, Dict, List
 
 import numpy as np
 import torch
 
-from external_kv_injection.src.kv_bank import FaissKVBank
-from external_kv_injection.src.retriever import Retriever
-from external_kv_injection.src.runtime.hf_cache_prefix_injection import (
-    build_past_key_values_prefix,
-    stack_ext_kv_items_by_layer,
-)
-from external_kv_injection.src.training.gate_query import GateConfig, QueryEmbeddingGate
-from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+    from external_kv_injection.src.retriever import Retriever  # type: ignore
+    from external_kv_injection.src.runtime.hf_cache_prefix_injection import (  # type: ignore
+        build_past_key_values_prefix,
+        stack_ext_kv_items_by_layer,
+    )
+    from external_kv_injection.src.training.gate_query import GateConfig, QueryEmbeddingGate  # type: ignore
+    from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
+except ModuleNotFoundError:
+    from src.kv_bank import FaissKVBank  # type: ignore
+    from src.retriever import Retriever  # type: ignore
+    from src.runtime.hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer  # type: ignore
+    from src.training.gate_query import GateConfig, QueryEmbeddingGate  # type: ignore
+    from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
 
 
 def _mean_pool_last_hidden(last_hidden: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:

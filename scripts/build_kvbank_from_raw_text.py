@@ -17,9 +17,22 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
-from external_kv_injection.src.pipelines.raw_context_to_blocks import RawToBlocksConfig, build_memory_blocks_from_raw_text
-from external_kv_injection.src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    from external_kv_injection.src.pipelines.raw_context_to_blocks import (  # type: ignore
+        RawToBlocksConfig,
+        build_memory_blocks_from_raw_text,
+    )
+    from external_kv_injection.src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
+except ModuleNotFoundError:
+    from src.pipelines.raw_context_to_blocks import RawToBlocksConfig, build_memory_blocks_from_raw_text  # type: ignore
+    from src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
 
 
 def main() -> None:
