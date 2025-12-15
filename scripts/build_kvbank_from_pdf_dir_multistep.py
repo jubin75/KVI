@@ -41,6 +41,11 @@ def main() -> None:
     p.add_argument("--chunk_tokens", type=int, default=4096)
     p.add_argument("--chunk_overlap", type=int, default=256)
     p.add_argument("--block_tokens", type=int, default=256)
+    p.add_argument(
+        "--keep_last_incomplete_block",
+        action="store_true",
+        help="If set, keep the last block even if it has <block_tokens tokens (recommended; avoids 0 blocks on short docs).",
+    )
     p.add_argument("--max_blocks", type=int, default=None)
     p.add_argument("--ocr", default="auto", choices=["off", "auto", "on"])
     p.add_argument("--no_tables", action="store_true")
@@ -74,15 +79,25 @@ def main() -> None:
         ),
     )
     print(f"Wrote {n_chunks} raw chunks to {raw_chunks}")
+    if n_chunks == 0:
+        raise RuntimeError(
+            "No raw chunks written. Common causes: pdf_dir has no .pdf files, PDF text extraction/OCR produced empty text, "
+            "or --knowledge_filter dropped all paragraphs. Check raw_chunks.jsonl."
+        )
 
     n_blocks = build_blocks_from_raw_chunks(
         raw_chunks_jsonl=raw_chunks,
         out_blocks_jsonl=blocks,
         tokenizer_name_or_path=args.base_llm,
         block_tokens=args.block_tokens,
-        drop_last_incomplete_block=True,
+        drop_last_incomplete_block=not bool(args.keep_last_incomplete_block),
     )
     print(f"Wrote {n_blocks} blocks to {blocks}")
+    if n_blocks == 0:
+        raise RuntimeError(
+            "No blocks written. Most likely the remaining text is <block_tokens after filtering/cleanup. "
+            "Fix: rerun with --keep_last_incomplete_block (recommended) and/or disable --knowledge_filter to validate."
+        )
 
     layer_ids = [int(x.strip()) for x in args.layers.split(",") if x.strip() != ""]
     stats = build_kvbank_from_blocks_jsonl(

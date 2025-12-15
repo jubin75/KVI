@@ -45,6 +45,11 @@ def main() -> None:
     p.add_argument("--chunk_tokens", type=int, default=4096)
     p.add_argument("--chunk_overlap", type=int, default=256)
     p.add_argument("--block_tokens", type=int, default=256)
+    p.add_argument(
+        "--keep_last_incomplete_block",
+        action="store_true",
+        help="If set, keep the last block even if it has <block_tokens tokens (recommended).",
+    )
     p.add_argument("--max_blocks", type=int, default=None)
     args = p.parse_args()
 
@@ -59,7 +64,7 @@ def main() -> None:
         chunk_tokens=args.chunk_tokens,
         chunk_overlap=args.chunk_overlap,
         block_tokens=args.block_tokens,
-        drop_last_incomplete_block=True,
+        drop_last_incomplete_block=not bool(args.keep_last_incomplete_block),
     )
     n = build_memory_blocks_from_raw_text(raw_text=raw_text, source_id=Path(args.raw_text).stem, out_jsonl=blocks_jsonl, cfg=cfg)
     print(f"Wrote {n} blocks to {blocks_jsonl}")

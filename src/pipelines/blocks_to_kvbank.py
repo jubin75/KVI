@@ -93,6 +93,8 @@ def build_kvbank_from_blocks_jsonl(
     total_written = 0
     skipped_bad_len = 0
     skipped_errors = 0
+    error_types: Dict[str, int] = {}
+    first_error: Optional[str] = None
 
     for rec in _read_jsonl(blocks_jsonl):
         total_read += 1
@@ -166,12 +168,26 @@ def build_kvbank_from_blocks_jsonl(
             metas.append(meta)
             total_written += 1
 
-        except Exception:
+        except Exception as e:
             skipped_errors += 1
+            name = type(e).__name__
+            error_types[name] = int(error_types.get(name, 0)) + 1
+            if first_error is None:
+                first_error = f"{name}: {e}"
             continue
 
     if total_written == 0:
-        raise RuntimeError("No blocks written; check blocks_jsonl.")
+        hint = (
+            f"No blocks written from {blocks_jsonl}. "
+            f"read={total_read}, skipped_empty_text={skipped_bad_len}, skipped_errors={skipped_errors}. "
+        )
+        if skipped_errors > 0:
+            top = sorted(error_types.items(), key=lambda kv: kv[1], reverse=True)[:5]
+            hint += f"error_types={dict(top)}. first_error={first_error}. "
+            hint += "Common fixes: try a smaller base model, set device=cpu, ensure enough GPU RAM, and confirm model supports past_key_values."
+        else:
+            hint += "Common fixes: ensure blocks.jsonl has non-empty 'text' fields; rerun blocks step with --keep_last_incomplete_block."
+        raise RuntimeError(hint)
 
     bank = FaissKVBank.build(
         retrieval_keys=np.stack(retrieval_keys, axis=0),

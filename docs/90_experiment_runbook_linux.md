@@ -39,6 +39,22 @@ export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 export DEEPSEEK_API_KEY="sk-e31c18d1fc4f445bb3f65eca3226fbce"
 ```
 
+### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常
+
+如果这一步失败，说明是 PDF 抽取/OCR/依赖问题（不是 block 切分问题）。
+
+```bash
+python scripts/build_raw_context_from_pdfs.py \
+  --pdf_dir "$PDF_DIR" \
+  --out "$WORK_DIR/raw_chunks.jsonl" \
+  --tokenizer "$BASE_LLM" \
+  --chunk_tokens 4096 \
+  --chunk_overlap 256 \
+  --ocr auto \
+  --knowledge_filter \
+  --deepseek_model deepseek-chat
+```
+
 ### 1.2 一键构建 raw context + KVBank（表格优先 + DeepSeek 过滤）
 
 ```bash
@@ -51,6 +67,7 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --chunk_tokens 4096 \
   --chunk_overlap 256 \
   --block_tokens 256 \
+  --keep_last_incomplete_block \
   --ocr auto \
   --knowledge_filter \
   --deepseek_model deepseek-chat

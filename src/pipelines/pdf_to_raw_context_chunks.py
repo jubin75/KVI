@@ -137,6 +137,9 @@ class RawChunkConfig:
     chunk_overlap: int = 256
     ocr: str = "auto"  # off|auto|on
     extract_tables: bool = True
+    # extraction guardrails
+    fail_on_empty_extract: bool = True
+    min_extracted_chars: int = 300
     # knowledge filter (DeepSeek)
     knowledge_filter: bool = False
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -182,6 +185,8 @@ def build_raw_context_chunks_from_pdf_dir(
 
     tok = AutoTokenizer.from_pretrained(cfg.tokenizer_name_or_path, use_fast=True)
     pdfs = sorted([p for p in pdf_dir.rglob("*.pdf") if p.is_file()])
+    if not pdfs:
+        raise RuntimeError(f"No .pdf files found under pdf_dir={pdf_dir}")
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0
@@ -190,6 +195,16 @@ def build_raw_context_chunks_from_pdf_dir(
             doc_id = pdf.stem
             # 1) ingestion（支持 OCR）
             doc = ingest_pdf(pdf, ocr=cfg.ocr, extract_tables=cfg.extract_tables)
+            doc_text_chars = int(sum(len((p.text or "").strip()) for p in doc.pages))
+            doc_table_chars = int(sum(len((p.tables_markdown or "").strip()) for p in doc.pages))
+            if cfg.fail_on_empty_extract and (doc_text_chars + doc_table_chars) < int(cfg.min_extracted_chars):
+                raise RuntimeError(
+                    "PDF extraction produced near-empty text. "
+                    f"pdf={pdf} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
+                    f"text_chars={doc_text_chars} table_chars={doc_table_chars}. "
+                    "Common fixes: set --ocr on (or auto), ensure system 'tesseract' is installed for OCR, "
+                    "and verify PyMuPDF can extract text from this PDF."
+                )
             # 把表格（markdown）追加到每页末尾，确保表格信息进入 raw context
             page_texts: List[str] = []
             # doc-level table metadata（用于 chunk/block 的结构化 metadata）
@@ -224,6 +239,12 @@ def build_raw_context_chunks_from_pdf_dir(
                     )
                 )
                 paras, filter_stats = kf.filter_paragraphs(paras)
+            if cfg.fail_on_empty_extract and not paras:
+                raise RuntimeError(
+                    "No paragraphs remained after cleaning/filtering. "
+                    f"pdf={pdf} ocr_used={doc.ocr_used} text_chars={doc_text_chars} table_chars={doc_table_chars}. "
+                    "Common fixes: rerun without --knowledge_filter to validate extraction, or lower filtering aggressiveness."
+                )
             full_text = "\n\n".join(paras)
 
             enc = tok(full_text, return_tensors=None, add_special_tokens=False)
@@ -245,6 +266,12 @@ def build_raw_context_chunks_from_pdf_dir(
                     "chunk_window": [int(start), int(end)],
                     "text": text,
                     "metadata": {
+                        "extraction_stats": {
+                            "pages": int(len(doc.pages)),
+                            "text_chars": int(doc_text_chars),
+                            "table_chars": int(doc_table_chars),
+                            "ocr_used": bool(doc.ocr_used),
+                        },
                         "paragraph_type": _infer_para_type(text),
                         "disease": _infer_disease(text),
                         "date": _extract_year(text),

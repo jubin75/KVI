@@ -105,7 +105,8 @@ def ingest_pdf(
 
     # naive scan detection
     avg_chars = (total_chars / max(1, len(pages))) if pages else 0.0
-    likely_scanned = avg_chars < 50
+    # NOTE: false negatives exist (some scanned PDFs return a small amount of junk text).
+    likely_scanned = (avg_chars < 50) or (total_chars < 500)
 
     if ocr in {"auto", "on"} and likely_scanned:
         # 实际 OCR：使用 tesseract（通过 pytesseract）
