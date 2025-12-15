@@ -1,0 +1,46 @@
+# 示例配置（字段占位 + 注释说明）
+
+model:
+  # HF 模型名或本地路径
+  name_or_path: "Qwen/Qwen2.5-7B-Instruct"
+
+inject:
+  # 总开关：false 时必须退化为原模型行为
+  enabled: true
+  # 注入层集合（示例：前 4 层）
+  layers: [0, 1, 2, 3]
+  # 融合策略：concat | gate
+  strategy: "gate"
+  # 当 strategy=gate 时的 γ（常数或 gate 输出上限）
+  gamma:
+    mode: "constant"     # constant | learned
+    value: 0.08
+    clamp_max: 0.10
+  # decode/prefill 行为约束（实现需保证一致）
+  cache_mode_policy:
+    ext_kv_is_static_prefix: true
+    write_ext_kv_to_cache: false
+
+retriever:
+  # top-k 外部知识条数（影响延迟与显存）
+  top_k: 32
+  # 过滤条件（示例）
+  filters:
+    lang: ["zh", "en"]
+    source_priority: ["guideline", "textbook", "paper"]
+
+kv_bank:
+  # ANN 类型与版本（用于可复现与回滚）
+  index_type: "faiss"   # faiss | hnsw
+  index_version: "v0"
+  # 向量压缩/量化（可选）
+  compression:
+    enabled: false
+
+observability:
+  export_debug: true
+  export_citations: true
+  export_gamma_stats: true
+  export_latency_breakdown: true
+
+

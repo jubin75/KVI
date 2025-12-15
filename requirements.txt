@@ -1,0 +1,11 @@
+numpy==2.2.1
+torch>=2.2.0
+transformers>=4.45.0
+pymupdf>=1.24.0
+faiss-cpu>=1.8.0
+pillow>=10.0.0
+pytesseract>=0.3.10
+pdfplumber>=0.11.0
+requests>=2.31.0
+
+
