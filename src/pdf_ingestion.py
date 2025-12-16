@@ -94,6 +94,9 @@ def ingest_pdf(
 ) -> PdfDocument:
     fitz = _require_pymupdf()
     doc = fitz.open(pdf_path)
+    if int(getattr(doc, "page_count", 0)) <= 0:
+        doc.close()
+        raise RuntimeError(f"PDF has 0 pages (corrupted or unsupported): {pdf_path}")
     pages: List[PdfPage] = []
     total_chars = 0
     for i in range(doc.page_count):
@@ -121,6 +124,9 @@ def ingest_pdf(
 
         fitz = _require_pymupdf()
         doc = fitz.open(pdf_path)
+        if int(getattr(doc, "page_count", 0)) <= 0:
+            doc.close()
+            raise RuntimeError(f"PDF has 0 pages (corrupted or unsupported): {pdf_path}")
         ocr_pages: List[PdfPage] = []
         for i in range(doc.page_count):
             page = doc.load_page(i)

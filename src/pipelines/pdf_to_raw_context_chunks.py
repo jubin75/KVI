@@ -139,6 +139,7 @@ class RawChunkConfig:
     extract_tables: bool = True
     trust_remote_code: bool = True
     verbose: bool = True
+    continue_on_pdf_error: bool = True
     # extraction guardrails
     fail_on_empty_extract: bool = True
     min_extracted_chars: int = 300
@@ -197,119 +198,134 @@ def build_raw_context_chunks_from_pdf_dir(
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0
+    skipped_pdfs = 0
     with out_jsonl.open("w", encoding="utf-8") as f:
         if cfg.verbose:
             print(f"[pdf_to_raw_chunks] Found {len(pdfs)} PDFs under {pdf_dir}", flush=True)
         for pdf in pdfs:
             t0 = time.time()
-            doc_id = pdf.stem
-            # 1) ingestion（支持 OCR）
-            doc = ingest_pdf(pdf, ocr=cfg.ocr, extract_tables=cfg.extract_tables)
-            doc_text_chars = int(sum(len((p.text or "").strip()) for p in doc.pages))
-            doc_table_chars = int(sum(len((p.tables_markdown or "").strip()) for p in doc.pages))
-            if cfg.verbose:
-                print(
-                    f"[pdf_to_raw_chunks] pdf={pdf.name} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
-                    f"text_chars={doc_text_chars} table_chars={doc_table_chars}",
-                    flush=True,
-                )
-            if cfg.fail_on_empty_extract and (doc_text_chars + doc_table_chars) < int(cfg.min_extracted_chars):
-                raise RuntimeError(
-                    "PDF extraction produced near-empty text. "
-                    f"pdf={pdf} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
-                    f"text_chars={doc_text_chars} table_chars={doc_table_chars}. "
-                    "Common fixes: set --ocr on (or auto), ensure system 'tesseract' is installed for OCR, "
-                    "and verify PyMuPDF can extract text from this PDF."
-                )
-            # 把表格（markdown）追加到每页末尾，确保表格信息进入 raw context
-            page_texts: List[str] = []
-            # doc-level table metadata（用于 chunk/block 的结构化 metadata）
-            doc_tables: List[Dict[str, Any]] = []
-            for p in doc.pages:
-                t = p.text or ""
-                if p.tables_markdown:
-                    t = t + "\n\n" + p.tables_markdown
-                if p.tables_meta:
-                    for tm in p.tables_meta:
-                        doc_tables.append(
-                            {
-                                "page": int(p.page_number),
-                                **tm,
-                            }
-                        )
-                page_texts.append(t)
-            raw = "\n\n".join(page_texts)
-
-            # 2) cleaning + paragraphing
-            cleaned = clean_noise(raw)
-            cleaned = normalize_text(cleaned)
-            paras = split_paragraphs(cleaned)
-            filter_stats = None
-            if cfg.knowledge_filter:
-                kf = DeepSeekKnowledgeFilter(
-                    KnowledgeFilterConfig(
-                        deepseek_base_url=cfg.deepseek_base_url,
-                        deepseek_model=cfg.deepseek_model,
-                        api_key_env=cfg.deepseek_api_key_env,
-                        strict_drop_uncertain=cfg.strict_drop_uncertain,
-                        verbose=bool(cfg.verbose),
-                    )
-                )
-                paras, filter_stats = kf.filter_paragraphs(paras)
+            try:
+                doc_id = pdf.stem
+                # 1) ingestion（支持 OCR）
+                doc = ingest_pdf(pdf, ocr=cfg.ocr, extract_tables=cfg.extract_tables)
+                doc_text_chars = int(sum(len((p.text or "").strip()) for p in doc.pages))
+                doc_table_chars = int(sum(len((p.tables_markdown or "").strip()) for p in doc.pages))
                 if cfg.verbose:
-                    kept = int(filter_stats.get("kept", 0)) if isinstance(filter_stats, dict) else -1
-                    dropped = int(filter_stats.get("dropped", 0)) if isinstance(filter_stats, dict) else -1
-                    print(f"[pdf_to_raw_chunks] knowledge_filter kept={kept} dropped={dropped}", flush=True)
-            if cfg.fail_on_empty_extract and not paras:
-                raise RuntimeError(
-                    "No paragraphs remained after cleaning/filtering. "
-                    f"pdf={pdf} ocr_used={doc.ocr_used} text_chars={doc_text_chars} table_chars={doc_table_chars}. "
-                    "Common fixes: rerun without --knowledge_filter to validate extraction, or lower filtering aggressiveness."
+                    print(
+                        f"[pdf_to_raw_chunks] pdf={pdf.name} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
+                        f"text_chars={doc_text_chars} table_chars={doc_table_chars}",
+                        flush=True,
+                    )
+                if cfg.fail_on_empty_extract and (doc_text_chars + doc_table_chars) < int(cfg.min_extracted_chars):
+                    raise RuntimeError(
+                        "PDF extraction produced near-empty text. "
+                        f"pdf={pdf} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
+                        f"text_chars={doc_text_chars} table_chars={doc_table_chars}. "
+                        "Common fixes: set --ocr on (or auto), ensure system 'tesseract' is installed for OCR, "
+                        "and verify PyMuPDF can extract text from this PDF."
+                    )
+                # 把表格（markdown）追加到每页末尾，确保表格信息进入 raw context
+                page_texts: List[str] = []
+                # doc-level table metadata（用于 chunk/block 的结构化 metadata）
+                doc_tables: List[Dict[str, Any]] = []
+                for p in doc.pages:
+                    t = p.text or ""
+                    if p.tables_markdown:
+                        t = t + "\n\n" + p.tables_markdown
+                    if p.tables_meta:
+                        for tm in p.tables_meta:
+                            doc_tables.append(
+                                {
+                                    "page": int(p.page_number),
+                                    **tm,
+                                }
+                            )
+                    page_texts.append(t)
+                raw = "\n\n".join(page_texts)
+
+                # 2) cleaning + paragraphing
+                cleaned = clean_noise(raw)
+                cleaned = normalize_text(cleaned)
+                paras = split_paragraphs(cleaned)
+                filter_stats = None
+                if cfg.knowledge_filter:
+                    kf = DeepSeekKnowledgeFilter(
+                        KnowledgeFilterConfig(
+                            deepseek_base_url=cfg.deepseek_base_url,
+                            deepseek_model=cfg.deepseek_model,
+                            api_key_env=cfg.deepseek_api_key_env,
+                            strict_drop_uncertain=cfg.strict_drop_uncertain,
+                            verbose=bool(cfg.verbose),
+                        )
+                    )
+                    paras, filter_stats = kf.filter_paragraphs(paras)
+                    if cfg.verbose:
+                        kept = int(filter_stats.get("kept", 0)) if isinstance(filter_stats, dict) else -1
+                        dropped = int(filter_stats.get("dropped", 0)) if isinstance(filter_stats, dict) else -1
+                        print(f"[pdf_to_raw_chunks] knowledge_filter kept={kept} dropped={dropped}", flush=True)
+                if cfg.fail_on_empty_extract and not paras:
+                    raise RuntimeError(
+                        "No paragraphs remained after cleaning/filtering. "
+                        f"pdf={pdf} ocr_used={doc.ocr_used} text_chars={doc_text_chars} table_chars={doc_table_chars}. "
+                        "Common fixes: rerun without --knowledge_filter to validate extraction, or lower filtering aggressiveness."
+                    )
+                full_text = "\n\n".join(paras)
+
+                enc = tok(full_text, return_tensors=None, add_special_tokens=False)
+                ids: List[int] = enc["input_ids"]
+
+                chunks = chunk_tokens_4096(
+                    token_ids=ids, chunk_tokens=cfg.chunk_tokens, chunk_overlap=cfg.chunk_overlap
                 )
-            full_text = "\n\n".join(paras)
-
-            enc = tok(full_text, return_tensors=None, add_special_tokens=False)
-            ids: List[int] = enc["input_ids"]
-
-            chunks = chunk_tokens_4096(token_ids=ids, chunk_tokens=cfg.chunk_tokens, chunk_overlap=cfg.chunk_overlap)
-            for i, (start, end, cids) in enumerate(chunks):
-                text = tok.decode(cids, skip_special_tokens=True)
-                # chunk-level table metadata：通过 table marker 识别本 chunk 引用了哪些 table_id
-                table_ids = [int(x) for x in re.findall(r"<!--\s*table:(\d+)\s*-->", text)]
-                # map to structured meta (page/rows/cols/header_hash)
-                table_meta = [t for t in doc_tables if int(t.get("table_id", -1)) in set(table_ids)]
-                rec = {
-                    "doc_id": doc_id,
-                    "chunk_id": f"{doc_id}_chunk{i}_t{start}-{end}",
-                    "source_uri": str(pdf),
-                    "ocr_used": bool(doc.ocr_used),
-                    "chunk_tokens": int(len(cids)),
-                    "chunk_window": [int(start), int(end)],
-                    "text": text,
-                    "metadata": {
-                        "extraction_stats": {
-                            "pages": int(len(doc.pages)),
-                            "text_chars": int(doc_text_chars),
-                            "table_chars": int(doc_table_chars),
-                            "ocr_used": bool(doc.ocr_used),
+                for i, (start, end, cids) in enumerate(chunks):
+                    text = tok.decode(cids, skip_special_tokens=True)
+                    # chunk-level table metadata：通过 table marker 识别本 chunk 引用了哪些 table_id
+                    table_ids = [int(x) for x in re.findall(r"<!--\s*table:(\d+)\s*-->", text)]
+                    # map to structured meta (page/rows/cols/header_hash)
+                    table_meta = [t for t in doc_tables if int(t.get("table_id", -1)) in set(table_ids)]
+                    rec = {
+                        "doc_id": doc_id,
+                        "chunk_id": f"{doc_id}_chunk{i}_t{start}-{end}",
+                        "source_uri": str(pdf),
+                        "ocr_used": bool(doc.ocr_used),
+                        "chunk_tokens": int(len(cids)),
+                        "chunk_window": [int(start), int(end)],
+                        "text": text,
+                        "metadata": {
+                            "extraction_stats": {
+                                "pages": int(len(doc.pages)),
+                                "text_chars": int(doc_text_chars),
+                                "table_chars": int(doc_table_chars),
+                                "ocr_used": bool(doc.ocr_used),
+                            },
+                            "paragraph_type": _infer_para_type(text),
+                            "disease": _infer_disease(text),
+                            "date": _extract_year(text),
+                            "tables": {
+                                "doc_table_count": int(len(doc_tables)),
+                                "table_ids": table_ids,
+                                "table_meta": table_meta,
+                            },
+                            "knowledge_filter": filter_stats,
                         },
-                        "paragraph_type": _infer_para_type(text),
-                        "disease": _infer_disease(text),
-                        "date": _extract_year(text),
-                        "tables": {
-                            "doc_table_count": int(len(doc_tables)),
-                            "table_ids": table_ids,
-                            "table_meta": table_meta,
-                        },
-                        "knowledge_filter": filter_stats,
-                    },
-                }
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                written += 1
-            if cfg.verbose:
-                dt = time.time() - t0
-                print(f"[pdf_to_raw_chunks] wrote_chunks={len(chunks)} total_written={written} time_sec={dt:.1f}", flush=True)
+                    }
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    written += 1
+                if cfg.verbose:
+                    dt = time.time() - t0
+                    print(
+                        f"[pdf_to_raw_chunks] wrote_chunks={len(chunks)} total_written={written} skipped_pdfs={skipped_pdfs} time_sec={dt:.1f}",
+                        flush=True,
+                    )
+            except Exception as e:
+                skipped_pdfs += 1
+                if cfg.verbose:
+                    print(f"[pdf_to_raw_chunks] SKIP pdf={pdf.name} err={type(e).__name__}: {e}", flush=True)
+                if not cfg.continue_on_pdf_error:
+                    raise
 
+    if cfg.verbose:
+        print(f"[pdf_to_raw_chunks] done total_written={written} skipped_pdfs={skipped_pdfs}", flush=True)
     return written
 
 
