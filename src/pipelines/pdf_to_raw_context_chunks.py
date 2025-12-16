@@ -252,6 +252,7 @@ def build_raw_context_chunks_from_pdf_dir(
                         deepseek_model=cfg.deepseek_model,
                         api_key_env=cfg.deepseek_api_key_env,
                         strict_drop_uncertain=cfg.strict_drop_uncertain,
+                        verbose=bool(cfg.verbose),
                     )
                 )
                 paras, filter_stats = kf.filter_paragraphs(paras)

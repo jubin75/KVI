@@ -64,6 +64,9 @@ python scripts/build_raw_context_from_pdfs.py \
 
 ### 1.2 一键构建 raw context + KVBank（表格优先 + DeepSeek 过滤）
 
+注意：如果开启 `--knowledge_filter`，会对**每个段落**调用一次 DeepSeek 接口（串行），因此在网络/限流情况下可能很慢、CPU/GPU 负载也会很低，这是正常的。
+建议首次验证链路时先不加 `--knowledge_filter`，确认 PDF 抽取与分块没问题后再开启过滤。
+
 ```bash
 python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --pdf_dir "$PDF_DIR" \

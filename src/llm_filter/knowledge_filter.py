@@ -47,6 +47,8 @@ class KnowledgeFilterConfig:
     deepseek_model: str = "deepseek-chat"
     api_key_env: str = "DEEPSEEK_API_KEY"
     strict_drop_uncertain: bool = False
+    verbose: bool = True
+    log_every: int = 25
 
 
 def _looks_like_table(text: str) -> bool:
@@ -100,9 +102,16 @@ class DeepSeekKnowledgeFilter:
         return obj
 
     def filter_paragraphs(self, paragraphs: List[str]) -> Tuple[List[str], Dict[str, Any]]:
+        import time
+
         kept: List[str] = []
         stats = {"kept": 0, "dropped": 0, "uncertain": 0, "details": []}
-        for p in paragraphs:
+        t0 = time.time()
+        total = int(len(paragraphs))
+        if self.cfg.verbose:
+            print(f"[knowledge_filter] start paragraphs={total} strict_drop_uncertain={self.cfg.strict_drop_uncertain}", flush=True)
+
+        for idx, p in enumerate(paragraphs, start=1):
             res = self.classify(p)
             label = res["label"]
             if label == "KEEP":
@@ -118,6 +127,15 @@ class DeepSeekKnowledgeFilter:
                     kept.append(p)
                     stats["kept"] += 1
             stats["details"].append(res)
+
+            if self.cfg.verbose and (idx == 1 or idx % max(1, int(self.cfg.log_every)) == 0 or idx == total):
+                dt = time.time() - t0
+                rate = (idx / dt) if dt > 0 else 0.0
+                print(
+                    f"[knowledge_filter] {idx}/{total} kept={stats['kept']} dropped={stats['dropped']} uncertain={stats['uncertain']} "
+                    f"elapsed_sec={dt:.1f} rate_para_per_sec={rate:.3f}",
+                    flush=True,
+                )
         return kept, stats
 
 
