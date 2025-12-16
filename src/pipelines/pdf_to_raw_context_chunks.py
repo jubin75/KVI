@@ -138,6 +138,7 @@ class RawChunkConfig:
     ocr: str = "auto"  # off|auto|on
     extract_tables: bool = True
     trust_remote_code: bool = True
+    verbose: bool = True
     # extraction guardrails
     fail_on_empty_extract: bool = True
     min_extracted_chars: int = 300
@@ -182,8 +183,11 @@ def build_raw_context_chunks_from_pdf_dir(
     每条记录是一条 4096-token chunk（来自段落串联后的全文 token stream）。
     """
 
+    import time
     from transformers import AutoTokenizer  # type: ignore
 
+    if cfg.verbose:
+        print(f"[pdf_to_raw_chunks] Loading tokenizer: {cfg.tokenizer_name_or_path}", flush=True)
     tok = AutoTokenizer.from_pretrained(
         cfg.tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(cfg.trust_remote_code)
     )
@@ -194,12 +198,21 @@ def build_raw_context_chunks_from_pdf_dir(
 
     written = 0
     with out_jsonl.open("w", encoding="utf-8") as f:
+        if cfg.verbose:
+            print(f"[pdf_to_raw_chunks] Found {len(pdfs)} PDFs under {pdf_dir}", flush=True)
         for pdf in pdfs:
+            t0 = time.time()
             doc_id = pdf.stem
             # 1) ingestion（支持 OCR）
             doc = ingest_pdf(pdf, ocr=cfg.ocr, extract_tables=cfg.extract_tables)
             doc_text_chars = int(sum(len((p.text or "").strip()) for p in doc.pages))
             doc_table_chars = int(sum(len((p.tables_markdown or "").strip()) for p in doc.pages))
+            if cfg.verbose:
+                print(
+                    f"[pdf_to_raw_chunks] pdf={pdf.name} pages={len(doc.pages)} ocr_used={doc.ocr_used} "
+                    f"text_chars={doc_text_chars} table_chars={doc_table_chars}",
+                    flush=True,
+                )
             if cfg.fail_on_empty_extract and (doc_text_chars + doc_table_chars) < int(cfg.min_extracted_chars):
                 raise RuntimeError(
                     "PDF extraction produced near-empty text. "
@@ -242,6 +255,10 @@ def build_raw_context_chunks_from_pdf_dir(
                     )
                 )
                 paras, filter_stats = kf.filter_paragraphs(paras)
+                if cfg.verbose:
+                    kept = int(filter_stats.get("kept", 0)) if isinstance(filter_stats, dict) else -1
+                    dropped = int(filter_stats.get("dropped", 0)) if isinstance(filter_stats, dict) else -1
+                    print(f"[pdf_to_raw_chunks] knowledge_filter kept={kept} dropped={dropped}", flush=True)
             if cfg.fail_on_empty_extract and not paras:
                 raise RuntimeError(
                     "No paragraphs remained after cleaning/filtering. "
@@ -288,6 +305,9 @@ def build_raw_context_chunks_from_pdf_dir(
                 }
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 written += 1
+            if cfg.verbose:
+                dt = time.time() - t0
+                print(f"[pdf_to_raw_chunks] wrote_chunks={len(chunks)} total_written={written} time_sec={dt:.1f}", flush=True)
 
     return written
 

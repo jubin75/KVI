@@ -72,12 +72,14 @@ def build_kvbank_from_blocks_jsonl(
     elif dev.type == "cuda":
         torch_dtype = torch.bfloat16
 
+    print(f"[blocks_to_kvbank] Loading base tokenizer/model: {base_llm_name_or_path}", flush=True)
     tok = AutoTokenizer.from_pretrained(base_llm_name_or_path, use_fast=True, trust_remote_code=bool(trust_remote_code))
     model = AutoModelForCausalLM.from_pretrained(
         base_llm_name_or_path, torch_dtype=torch_dtype, trust_remote_code=bool(trust_remote_code)
     )
     model.to(dev)
     model.eval()
+    print(f"[blocks_to_kvbank] model_loaded device={dev.type} dtype={torch_dtype}", flush=True)
 
     num_layers = int(model.config.num_hidden_layers)
     layer_ids = list(layers)
@@ -85,7 +87,10 @@ def build_kvbank_from_blocks_jsonl(
         if li < 0 or li >= num_layers:
             raise ValueError(f"layer {li} out of range [0,{num_layers-1}]")
 
-    encoder = HFSentenceEncoder(HFSentenceEncoderConfig(model_name_or_path=retrieval_encoder_model, max_length=block_tokens, normalize=True))
+    print(f"[blocks_to_kvbank] Loading retrieval encoder: {retrieval_encoder_model}", flush=True)
+    encoder = HFSentenceEncoder(
+        HFSentenceEncoderConfig(model_name_or_path=retrieval_encoder_model, max_length=block_tokens, normalize=True)
+    )
 
     retrieval_keys: List[np.ndarray] = []
     metas: List[Dict[str, Any]] = []
@@ -99,7 +104,7 @@ def build_kvbank_from_blocks_jsonl(
     error_types: Dict[str, int] = {}
     first_error: Optional[str] = None
 
-    for rec in _read_jsonl(blocks_jsonl):
+    for idx, rec in enumerate(_read_jsonl(blocks_jsonl), start=1):
         total_read += 1
         if max_blocks is not None and total_written >= max_blocks:
             break
@@ -170,6 +175,11 @@ def build_kvbank_from_blocks_jsonl(
             v_list.append(v_item)
             metas.append(meta)
             total_written += 1
+            if idx % 50 == 0:
+                print(
+                    f"[blocks_to_kvbank] processed_blocks={idx} written={total_written} skipped_empty_text={skipped_bad_len} skipped_errors={skipped_errors}",
+                    flush=True,
+                )
 
         except Exception as e:
             skipped_errors += 1
@@ -192,6 +202,7 @@ def build_kvbank_from_blocks_jsonl(
             hint += "Common fixes: ensure blocks.jsonl has non-empty 'text' fields; rerun blocks step with --keep_last_incomplete_block."
         raise RuntimeError(hint)
 
+    print(f"[blocks_to_kvbank] Building FAISS KVBank: written={total_written} out_dir={out_dir}", flush=True)
     bank = FaissKVBank.build(
         retrieval_keys=np.stack(retrieval_keys, axis=0),
         k_ext=np.stack(k_list, axis=0),
@@ -201,6 +212,7 @@ def build_kvbank_from_blocks_jsonl(
         metric="ip",
     )
     bank.save(out_dir)
+    print("[blocks_to_kvbank] KVBank saved.", flush=True)
 
     return BuildBlocksKVBankStats(
         total_read=total_read,

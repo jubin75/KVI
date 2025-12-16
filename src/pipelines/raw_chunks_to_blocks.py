@@ -37,12 +37,16 @@ def build_blocks_from_raw_chunks(
 
     from transformers import AutoTokenizer  # type: ignore
 
+    print(
+        f"[raw_chunks_to_blocks] Loading tokenizer: {tokenizer_name_or_path} (block_tokens={block_tokens})",
+        flush=True,
+    )
     tok = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(trust_remote_code))
     out_blocks_jsonl.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0
     with out_blocks_jsonl.open("w", encoding="utf-8") as out:
-        for rec in _read_jsonl(raw_chunks_jsonl):
+        for idx, rec in enumerate(_read_jsonl(raw_chunks_jsonl), start=1):
             doc_id = rec.get("doc_id")
             chunk_id = rec.get("chunk_id")
             text = rec.get("text") or ""
@@ -78,7 +82,10 @@ def build_blocks_from_raw_chunks(
                 }
                 out.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
                 written += 1
+            if idx % 50 == 0:
+                print(f"[raw_chunks_to_blocks] processed_chunks={idx} written_blocks={written}", flush=True)
 
+    print(f"[raw_chunks_to_blocks] done written_blocks={written} out={out_blocks_jsonl}", flush=True)
     return written
 
 
