@@ -83,6 +83,27 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --deepseek_model deepseek-chat
 ```
 
+### 1.3 质量检查：如何确认 blocks 文本“抽取质量好”
+
+在跑 `blocks.jsonl` 生成后，建议做两步：
+
+1) **整体统计**（空块率、token 分布、重复率、疑似乱码比例、表格覆盖率）
+
+```bash
+python -u scripts/inspect_blocks_quality.py \
+  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --sample 10
+```
+
+2) **只抽样表格相关 blocks**（医学场景优先确认表格是否保留下来）
+
+```bash
+python -u scripts/inspect_blocks_quality.py \
+  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --tables_only \
+  --sample 10
+```
+
 产物：
 - `$WORK_DIR/raw_chunks.jsonl`（raw context 存储层，不进 attention）
 - `$WORK_DIR/blocks.jsonl`（256-token memory blocks）
