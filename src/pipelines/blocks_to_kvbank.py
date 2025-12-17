@@ -39,6 +39,7 @@ class BuildBlocksKVBankStats:
     total_written: int
     skipped_bad_len: int
     skipped_errors: int
+    shards_written: int = 0
 
 
 def build_kvbank_from_blocks_jsonl(
@@ -53,6 +54,7 @@ def build_kvbank_from_blocks_jsonl(
     device: Optional[str] = None,
     dtype: Optional[str] = None,
     trust_remote_code: bool = True,
+    shard_size: Optional[int] = None,
 ) -> BuildBlocksKVBankStats:
     """
     对每条 block：
@@ -101,6 +103,7 @@ def build_kvbank_from_blocks_jsonl(
     total_written = 0
     skipped_bad_len = 0
     skipped_errors = 0
+    shards_written = 0
     error_types: Dict[str, int] = {}
     first_error: Optional[str] = None
 
@@ -189,6 +192,30 @@ def build_kvbank_from_blocks_jsonl(
                 first_error = f"{name}: {e}"
             continue
 
+        # Sharded flushing (方案A): write every `shard_size` items to disk to control RAM.
+        if shard_size is not None and shard_size > 0 and len(retrieval_keys) >= int(shard_size):
+            shard_root = out_dir / "shards"
+            shard_root.mkdir(parents=True, exist_ok=True)
+            shard_dir = shard_root / f"{shards_written:05d}"
+            print(
+                f"[blocks_to_kvbank] flushing_shard={shards_written} items={len(retrieval_keys)} out_dir={shard_dir}",
+                flush=True,
+            )
+            bank = FaissKVBank.build(
+                retrieval_keys=np.stack(retrieval_keys, axis=0),
+                k_ext=np.stack(k_list, axis=0),
+                v_ext=np.stack(v_list, axis=0),
+                metas=metas,
+                normalize=True,
+                metric="ip",
+            )
+            bank.save(shard_dir)
+            shards_written += 1
+            retrieval_keys.clear()
+            k_list.clear()
+            v_list.clear()
+            metas.clear()
+
     if total_written == 0:
         hint = (
             f"No blocks written from {blocks_jsonl}. "
@@ -202,23 +229,62 @@ def build_kvbank_from_blocks_jsonl(
             hint += "Common fixes: ensure blocks.jsonl has non-empty 'text' fields; rerun blocks step with --keep_last_incomplete_block."
         raise RuntimeError(hint)
 
-    print(f"[blocks_to_kvbank] Building FAISS KVBank: written={total_written} out_dir={out_dir}", flush=True)
-    bank = FaissKVBank.build(
-        retrieval_keys=np.stack(retrieval_keys, axis=0),
-        k_ext=np.stack(k_list, axis=0),
-        v_ext=np.stack(v_list, axis=0),
-        metas=metas,
-        normalize=True,
-        metric="ip",
-    )
-    bank.save(out_dir)
-    print("[blocks_to_kvbank] KVBank saved.", flush=True)
+    # Finalize: single-bank or sharded
+    if shard_size is not None and shard_size > 0:
+        # flush remainder
+        if retrieval_keys:
+            shard_root = out_dir / "shards"
+            shard_root.mkdir(parents=True, exist_ok=True)
+            shard_dir = shard_root / f"{shards_written:05d}"
+            print(
+                f"[blocks_to_kvbank] flushing_shard={shards_written} items={len(retrieval_keys)} out_dir={shard_dir}",
+                flush=True,
+            )
+            bank = FaissKVBank.build(
+                retrieval_keys=np.stack(retrieval_keys, axis=0),
+                k_ext=np.stack(k_list, axis=0),
+                v_ext=np.stack(v_list, axis=0),
+                metas=metas,
+                normalize=True,
+                metric="ip",
+            )
+            bank.save(shard_dir)
+            shards_written += 1
+
+        # write top-level sharded manifest
+        shard_rel = [f"shards/{i:05d}" for i in range(shards_written)]
+        manifest = {
+            "format": "sharded",
+            "shard_size": int(shard_size),
+            "shards": shard_rel,
+            "total_written": int(total_written),
+            "block_tokens": int(block_tokens),
+            "layers": list(layers),
+            "retrieval_encoder_model": str(retrieval_encoder_model),
+            "base_llm_name_or_path": str(base_llm_name_or_path),
+        }
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"[blocks_to_kvbank] Sharded KVBank saved. shards={shards_written} out_dir={out_dir}", flush=True)
+    else:
+        print(f"[blocks_to_kvbank] Building FAISS KVBank: written={total_written} out_dir={out_dir}", flush=True)
+        bank = FaissKVBank.build(
+            retrieval_keys=np.stack(retrieval_keys, axis=0),
+            k_ext=np.stack(k_list, axis=0),
+            v_ext=np.stack(v_list, axis=0),
+            metas=metas,
+            normalize=True,
+            metric="ip",
+        )
+        bank.save(out_dir)
+        print("[blocks_to_kvbank] KVBank saved.", flush=True)
 
     return BuildBlocksKVBankStats(
         total_read=total_read,
         total_written=total_written,
         skipped_bad_len=skipped_bad_len,
         skipped_errors=skipped_errors,
+        shards_written=int(shards_written),
     )
 
 

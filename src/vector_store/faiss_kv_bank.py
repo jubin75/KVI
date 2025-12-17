@@ -239,6 +239,10 @@ class FaissKVBank:
             raise FileNotFoundError(f"manifest.json not found in: {p}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
+        # Sharded KVBank: return a bank-like object that implements the same `search()` API.
+        if isinstance(manifest, dict) and manifest.get("format") == "sharded":
+            return ShardedFaissKVBank.load(p)  # type: ignore[return-value]
+
         index = faiss.read_index(str(p / manifest["files"]["index"]))
         retrieval_keys = np.load(p / manifest["files"]["retrieval_keys"])
         k_ext = np.load(p / manifest["files"]["k_ext"])
@@ -261,6 +265,102 @@ class FaissKVBank:
             normalize=bool(manifest.get("normalize", True)),
             metric=str(manifest.get("metric", "ip")),
         )
+
+
+class ShardedFaissKVBank:
+    """
+    A sharded wrapper around multiple `FaissKVBank` shards.
+
+    Disk layout:
+      out_dir/
+        manifest.json            # format="sharded", shards=["shards/00000", ...]
+        shards/00000/manifest.json  # normal FaissKVBank manifest
+        shards/00001/...
+
+    Search strategy:
+      - Run per-shard search with `per_shard_top_k`
+      - Merge by score (global top_k)
+      - Optionally apply the same metadata filters
+    """
+
+    def __init__(self, *, shards: List[FaissKVBank], shard_dirs: List[Path]) -> None:
+        if not shards:
+            raise ValueError("ShardedFaissKVBank requires at least 1 shard")
+        self.shards = shards
+        self.shard_dirs = shard_dirs
+
+        # sanity: all dims must match
+        d0 = shards[0].dim
+        for s in shards[1:]:
+            if s.dim != d0:
+                raise ValueError(f"Shard dim mismatch: {s.dim} != {d0}")
+
+    @property
+    def size(self) -> int:
+        return int(sum(s.size for s in self.shards))
+
+    @property
+    def dim(self) -> int:
+        return int(self.shards[0].dim)
+
+    @classmethod
+    def load(cls, out_dir: Union[str, Path]) -> "ShardedFaissKVBank":
+        p = Path(out_dir)
+        manifest_path = p / "manifest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"manifest.json not found in: {p}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("format") != "sharded":
+            raise ValueError(f"Not a sharded KVBank manifest: {manifest_path}")
+
+        shard_rel = manifest.get("shards") or []
+        if not isinstance(shard_rel, list) or not shard_rel:
+            raise ValueError("sharded manifest missing non-empty 'shards' list")
+
+        shard_dirs: List[Path] = []
+        shards: List[FaissKVBank] = []
+        for rel in shard_rel:
+            sd = (p / str(rel)).resolve()
+            shard_dirs.append(sd)
+            shards.append(FaissKVBank.load(sd))
+        return cls(shards=shards, shard_dirs=shard_dirs)
+
+    def search(
+        self,
+        query: np.ndarray,
+        *,
+        top_k: int = 32,
+        filters: Optional[Dict[str, Any]] = None,
+        oversample: int = 5,
+        per_shard_top_k: Optional[int] = None,
+    ) -> Tuple[List[KVItem], Dict[str, Any]]:
+        if top_k <= 0:
+            return [], {"top_k": top_k, "shards": len(self.shards), "filtered_out": 0}
+
+        # Ensure enough candidates from each shard; this prevents "missed" global top_k when many shards exist.
+        if per_shard_top_k is None:
+            per_shard_top_k = max(1, int(top_k))
+
+        all_items: List[KVItem] = []
+        shard_debug: List[Dict[str, Any]] = []
+        for i, s in enumerate(self.shards):
+            items, dbg = s.search(query, top_k=per_shard_top_k, filters=filters, oversample=oversample)
+            all_items.extend(items)
+            shard_debug.append({"shard": i, "dir": str(self.shard_dirs[i]), **dbg})
+
+        # Merge by score (descending)
+        all_items.sort(key=lambda it: float(it.score), reverse=True)
+        merged = all_items[: min(int(top_k), len(all_items))]
+        debug = {
+            "top_k": int(top_k),
+            "shards": int(len(self.shards)),
+            "per_shard_top_k": int(per_shard_top_k),
+            "candidates": int(len(all_items)),
+            "size": int(self.size),
+            "dim": int(self.dim),
+            "shard_debug": shard_debug[:5],  # keep small
+        }
+        return merged, debug
 
     def search(
         self,

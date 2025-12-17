@@ -90,7 +90,7 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
 1) **整体统计**（空块率、token 分布、重复率、疑似乱码比例、表格覆盖率）
 
 ```bash
-python -u scripts/inspect_blocks_quality.py \
+python -u external_kv_injection/scripts/inspect_blocks_quality.py \
   --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
   --sample 10
 ```
@@ -98,7 +98,7 @@ python -u scripts/inspect_blocks_quality.py \
 2) **只抽样表格相关 blocks**（医学场景优先确认表格是否保留下来）
 
 ```bash
-python -u scripts/inspect_blocks_quality.py \
+python -u external_kv_injection/scripts/inspect_blocks_quality.py \
   --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
   --tables_only \
   --sample 10
@@ -108,6 +108,40 @@ python -u scripts/inspect_blocks_quality.py \
 - `$WORK_DIR/raw_chunks.jsonl`（raw context 存储层，不进 attention）
 - `$WORK_DIR/blocks.jsonl`（256-token memory blocks）
 - `$WORK_DIR/kvbank_blocks/`（FAISS KVBank：embedding + K/V + metadata）
+
+### 1.4 后台构建 KVBank（blocks → kvbank，nohup + 实时看日志）
+
+> `blocks_to_kvbank` 阶段计算量大且**非常吃内存**。建议启用**方案A：分片 KVBank**（`--shard_size`），让它边处理边落盘，避免一次性 `np.stack` 把内存打爆。
+
+1) 启动后台任务（日志同时写文件，方便随时 `tail -f`）
+
+```bash
+mkdir -p "$WORK_DIR/logs"
+
+nohup bash -lc "python -u external_kv_injection/scripts/build_kvbank_from_blocks.py \
+  --blocks '$WORK_DIR/blocks.jsonl' \
+  --out_dir '$WORK_DIR/kvbank_blocks' \
+  --base_llm '$BASE_LLM' \
+  --retrieval_encoder_model '$DOMAIN_ENCODER' \
+  --layers 0,1,2,3 \
+  --block_tokens 256 \
+  --shard_size 1024 2>&1 | tee -a '$WORK_DIR/logs/blocks_to_kvbank.log'" \
+  >/dev/null 2>&1 &
+echo "started, log=$WORK_DIR/logs/blocks_to_kvbank.log"
+```
+
+2) 在当前终端“实时看输出”（不影响后台运行）
+
+```bash
+tail -f "$WORK_DIR/logs/blocks_to_kvbank.log"
+```
+
+3) 检查是否落盘成功（分片模式下，会出现 `kvbank_blocks/manifest.json` + `kvbank_blocks/shards/00000/...`）
+
+```bash
+ls -alh "$WORK_DIR/kvbank_blocks"
+ls -alh "$WORK_DIR/kvbank_blocks/shards" | head
+```
 
 ## 2) 测试：多步注入（Multi-step Injection，2×V100 友好）
 

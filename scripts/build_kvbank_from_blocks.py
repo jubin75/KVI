@@ -28,6 +28,12 @@ def main() -> None:
     p.add_argument("--layers", default="0,1,2,3")
     p.add_argument("--block_tokens", type=int, default=256)
     p.add_argument("--max_blocks", type=int, default=None)
+    p.add_argument(
+        "--shard_size",
+        type=int,
+        default=0,
+        help="方案A：分片 KVBank。每 shard 写入 N 个 blocks（0=关闭，推荐 512~2048，视显存/内存而定）",
+    )
     args = p.parse_args()
 
     layer_ids = [int(x.strip()) for x in args.layers.split(",") if x.strip() != ""]
@@ -39,6 +45,7 @@ def main() -> None:
         layers=layer_ids,
         block_tokens=args.block_tokens,
         max_blocks=args.max_blocks,
+        shard_size=(int(args.shard_size) if int(args.shard_size) > 0 else None),
     )
     print("BuildBlocksKVBankStats:", stats)
     print(f"Saved KVBank to: {args.out_dir}")

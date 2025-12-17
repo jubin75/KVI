@@ -47,6 +47,12 @@ def main() -> None:
         help="If set, keep the last block even if it has <block_tokens tokens (recommended; avoids 0 blocks on short docs).",
     )
     p.add_argument("--max_blocks", type=int, default=None)
+    p.add_argument(
+        "--shard_size",
+        type=int,
+        default=0,
+        help="方案A：分片 KVBank。每 shard 写入 N 个 blocks（0=关闭，推荐 512~2048）",
+    )
     p.add_argument("--ocr", default="auto", choices=["off", "auto", "on"])
     p.add_argument("--no_tables", action="store_true")
     p.add_argument("--knowledge_filter", action="store_true")
@@ -108,6 +114,7 @@ def main() -> None:
         layers=layer_ids,
         block_tokens=args.block_tokens,
         max_blocks=args.max_blocks,
+        shard_size=(int(args.shard_size) if int(args.shard_size) > 0 else None),
     )
     print("BuildBlocksKVBankStats:", stats)
     print(f"Saved KVBank to: {kv_dir}")
