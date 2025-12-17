@@ -90,7 +90,7 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
 1) **整体统计**（空块率、token 分布、重复率、疑似乱码比例、表格覆盖率）
 
 ```bash
-python -u external_kv_injection/scripts/inspect_blocks_quality.py \
+python -u scripts/inspect_blocks_quality.py \
   --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
   --sample 10
 ```
@@ -98,11 +98,14 @@ python -u external_kv_injection/scripts/inspect_blocks_quality.py \
 2) **只抽样表格相关 blocks**（医学场景优先确认表格是否保留下来）
 
 ```bash
-python -u external_kv_injection/scripts/inspect_blocks_quality.py \
+python -u scripts/inspect_blocks_quality.py \
   --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
   --tables_only \
   --sample 10
 ```
+
+> 如果你的仓库是“monorepo 布局”（即 repo root 下还有 `external_kv_injection/` 子目录），则把上述命令里的脚本路径改为：
+> `python -u external_kv_injection/scripts/inspect_blocks_quality.py ...`
 
 产物：
 - `$WORK_DIR/raw_chunks.jsonl`（raw context 存储层，不进 attention）
@@ -118,7 +121,7 @@ python -u external_kv_injection/scripts/inspect_blocks_quality.py \
 ```bash
 mkdir -p "$WORK_DIR/logs"
 
-nohup bash -lc "python -u external_kv_injection/scripts/build_kvbank_from_blocks.py \
+nohup bash -lc "python -u scripts/build_kvbank_from_blocks.py \
   --blocks '$WORK_DIR/blocks.jsonl' \
   --out_dir '$WORK_DIR/kvbank_blocks' \
   --base_llm '$BASE_LLM' \
