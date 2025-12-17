@@ -25,6 +25,12 @@ def main() -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--tokenizer", required=True)
     p.add_argument("--block_tokens", type=int, default=256)
+    p.add_argument(
+        "--block_overlap_tokens",
+        type=int,
+        default=64,
+        help="Overlap between consecutive blocks (reduces sentence/table-row truncation). Must be < block_tokens.",
+    )
     p.add_argument("--keep_last_incomplete_block", action="store_true")
     args = p.parse_args()
 
@@ -33,6 +39,7 @@ def main() -> None:
         out_blocks_jsonl=Path(args.out),
         tokenizer_name_or_path=args.tokenizer,
         block_tokens=args.block_tokens,
+        block_overlap_tokens=int(args.block_overlap_tokens),
         drop_last_incomplete_block=not args.keep_last_incomplete_block,
     )
     print(f"Wrote {n} blocks to {args.out}")

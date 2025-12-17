@@ -17,8 +17,24 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
+
+
 def normalize_text(text: str) -> str:
+    # Keep newlines (they carry paragraph/table structure), but normalize common PDF/OCR artifacts.
     text = text.replace("\r", "\n")
+    # remove C0 controls except \n/\t/\r (already normalized) to reduce non-printable ratio
+    text = _CTRL_CHARS_RE.sub("", text)
+    # remove zero-width chars
+    text = _ZERO_WIDTH_RE.sub("", text)
+    # soft hyphen + common ligatures
+    text = text.replace("\u00ad", "")
+    text = text.replace("ﬁ", "fi").replace("ﬂ", "fl")
+    # drop replacement char (often indicates decode issues)
+    text = text.replace("\ufffd", "")
+    # de-hyphenate linebreaks: "inter-\nnational" -> "international"
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

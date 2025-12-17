@@ -28,6 +28,7 @@ def build_blocks_from_raw_chunks(
     out_blocks_jsonl: Path,
     tokenizer_name_or_path: str,
     block_tokens: int = 256,
+    block_overlap_tokens: int = 64,
     drop_last_incomplete_block: bool = True,
     trust_remote_code: bool = True,
 ) -> int:
@@ -37,8 +38,15 @@ def build_blocks_from_raw_chunks(
 
     from transformers import AutoTokenizer  # type: ignore
 
+    if block_overlap_tokens < 0:
+        raise ValueError("block_overlap_tokens must be >= 0")
+    if block_overlap_tokens >= block_tokens:
+        raise ValueError("block_overlap_tokens must be < block_tokens")
+    stride = int(block_tokens - block_overlap_tokens)
+
     print(
-        f"[raw_chunks_to_blocks] Loading tokenizer: {tokenizer_name_or_path} (block_tokens={block_tokens})",
+        f"[raw_chunks_to_blocks] Loading tokenizer: {tokenizer_name_or_path} "
+        f"(block_tokens={block_tokens} block_overlap_tokens={block_overlap_tokens} stride={stride})",
         flush=True,
     )
     tok = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True, trust_remote_code=bool(trust_remote_code))
@@ -53,7 +61,7 @@ def build_blocks_from_raw_chunks(
             meta = rec.get("metadata") or {}
 
             ids = tok(text, return_tensors=None, add_special_tokens=False)["input_ids"]
-            for i in range(0, len(ids), block_tokens):
+            for i in range(0, len(ids), stride):
                 block_ids = ids[i : i + block_tokens]
                 if drop_last_incomplete_block and len(block_ids) < block_tokens:
                     continue
@@ -72,6 +80,9 @@ def build_blocks_from_raw_chunks(
                 ]
                 # propagate + override
                 meta2 = dict(meta)
+                meta2["block_window_in_chunk_tokens"] = [int(i), int(i + len(block_ids))]
+                meta2["block_overlap_tokens"] = int(block_overlap_tokens)
+                meta2["block_stride_tokens"] = int(stride)
                 if isinstance(meta2.get("tables"), dict):
                     t = dict(meta2["tables"])
                     t["table_ids"] = sorted(set((t.get("table_ids") or []) + table_ids))
@@ -79,7 +90,7 @@ def build_blocks_from_raw_chunks(
                 else:
                     meta2["tables"] = {"table_ids": table_ids}
                 out_rec = {
-                    "block_id": f"{chunk_id}_block{i//block_tokens}",
+                    "block_id": f"{chunk_id}_t{i}-{i+len(block_ids)}",
                     "parent_chunk_id": chunk_id,
                     "doc_id": doc_id,
                     "token_count": int(len(block_ids)),

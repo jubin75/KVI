@@ -23,6 +23,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--blocks", required=True, help="blocks.jsonl from build_blocks_from_raw_text.py")
     p.add_argument("--out_dir", required=True)
+    p.add_argument("--split_tables", action="store_true", help="Split table-like blocks into a separate KVBank.")
+    p.add_argument("--out_dir_tables", default=None, help="Output dir for tables KVBank (required if --split_tables).")
     p.add_argument("--base_llm", required=True, help="Base LLM for extracting past_key_values")
     p.add_argument("--retrieval_encoder_model", required=True, help="DomainEncoder for retrieval_keys")
     p.add_argument("--layers", default="0,1,2,3")
@@ -40,6 +42,8 @@ def main() -> None:
     stats = build_kvbank_from_blocks_jsonl(
         blocks_jsonl=Path(args.blocks),
         out_dir=Path(args.out_dir),
+        split_tables=bool(args.split_tables),
+        out_dir_tables=(Path(args.out_dir_tables) if args.out_dir_tables else None),
         base_llm_name_or_path=args.base_llm,
         retrieval_encoder_model=args.retrieval_encoder_model,
         layers=layer_ids,

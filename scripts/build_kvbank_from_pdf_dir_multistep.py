@@ -42,6 +42,12 @@ def main() -> None:
     p.add_argument("--chunk_overlap", type=int, default=256)
     p.add_argument("--block_tokens", type=int, default=256)
     p.add_argument(
+        "--block_overlap_tokens",
+        type=int,
+        default=64,
+        help="Overlap between consecutive 256-token blocks (recommended 32~96).",
+    )
+    p.add_argument(
         "--keep_last_incomplete_block",
         action="store_true",
         help="If set, keep the last block even if it has <block_tokens tokens (recommended; avoids 0 blocks on short docs).",
@@ -55,6 +61,11 @@ def main() -> None:
     )
     p.add_argument("--ocr", default="auto", choices=["off", "auto", "on"])
     p.add_argument("--no_tables", action="store_true")
+    p.add_argument(
+        "--split_tables",
+        action="store_true",
+        help="If set, keep tables but build a separate KVBank under work_dir/kvbank_tables (tables are still in blocks.jsonl).",
+    )
     p.add_argument("--knowledge_filter", action="store_true")
     p.add_argument("--deepseek_base_url", default="https://api.deepseek.com")
     p.add_argument("--deepseek_model", default="deepseek-chat")
@@ -67,6 +78,7 @@ def main() -> None:
     raw_chunks = work / "raw_chunks.jsonl"
     blocks = work / "blocks.jsonl"
     kv_dir = work / "kvbank_blocks"
+    kv_dir_tables = work / "kvbank_tables"
 
     n_chunks = build_raw_context_chunks_from_pdf_dir(
         pdf_dir=Path(args.pdf_dir),
@@ -96,6 +108,7 @@ def main() -> None:
         out_blocks_jsonl=blocks,
         tokenizer_name_or_path=args.base_llm,
         block_tokens=args.block_tokens,
+        block_overlap_tokens=int(args.block_overlap_tokens),
         drop_last_incomplete_block=not bool(args.keep_last_incomplete_block),
     )
     print(f"Wrote {n_blocks} blocks to {blocks}")
@@ -109,6 +122,8 @@ def main() -> None:
     stats = build_kvbank_from_blocks_jsonl(
         blocks_jsonl=blocks,
         out_dir=kv_dir,
+        split_tables=bool(args.split_tables),
+        out_dir_tables=(kv_dir_tables if bool(args.split_tables) else None),
         base_llm_name_or_path=args.base_llm,
         retrieval_encoder_model=args.retrieval_encoder_model,
         layers=layer_ids,
@@ -118,6 +133,8 @@ def main() -> None:
     )
     print("BuildBlocksKVBankStats:", stats)
     print(f"Saved KVBank to: {kv_dir}")
+    if bool(args.split_tables):
+        print(f"Saved Tables KVBank to: {kv_dir_tables}")
 
 
 if __name__ == "__main__":

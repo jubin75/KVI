@@ -62,6 +62,56 @@ def clean_noise(text: str) -> str:
     text = re.sub(r"\r", "\n", text)
     text = re.sub(r"[ \t]+", " ", text)
 
+    # strip non-printable control chars early (keeps newlines)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = text.replace("\ufffd", "")
+    text = text.replace("\u00ad", "")
+    text = text.replace("ﬁ", "fi").replace("ﬂ", "fl")
+
+    # repair common PDF line-break artifacts in NON-table segments:
+    # - de-hyphenate word breaks
+    # - join single newlines that are likely "wrapped lines" (keep blank lines as paragraph separators)
+    def _repair_wrapped_lines(seg: str) -> str:
+        seg = re.sub(r"(\w)-\n(\w)", r"\1\2", seg)
+        lines = seg.split("\n")
+        out_lines: List[str] = []
+        buf = ""
+        for ln in lines:
+            s = ln.strip()
+            if not s:
+                if buf:
+                    out_lines.append(buf.strip())
+                    buf = ""
+                out_lines.append("")
+                continue
+            # Join wrapped lines unless previous ends with strong punctuation.
+            if not buf:
+                buf = s
+            else:
+                if re.search(r"[\.!\?。！？:;]$", buf):
+                    out_lines.append(buf.strip())
+                    buf = s
+                else:
+                    buf = (buf + " " + s).strip()
+        if buf:
+            out_lines.append(buf.strip())
+        return "\n".join(out_lines)
+
+    # Preserve table markdown structure: split by table markers.
+    parts: List[str] = []
+    cursor = 0
+    for m in re.finditer(r"(?im)^\s*<\s*!\s*-\s*-\s*table\s*:\s*\d+\s*-\s*-\s*>\s*$", text):
+        start, end = m.span()
+        before = text[cursor:start]
+        if before:
+            parts.append(_repair_wrapped_lines(before))
+        parts.append(text[start:end])  # marker line
+        cursor = end
+    tail = text[cursor:]
+    if tail:
+        parts.append(_repair_wrapped_lines(tail))
+    text = "\n".join(parts)
+
     # strip figure captions (keep table content elsewhere)
     lines = []
     for ln in text.split("\n"):
