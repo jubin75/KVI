@@ -27,6 +27,14 @@ def _ensure_repo_root_on_syspath() -> None:
     s = str(repo_root)
     if s not in sys.path:
         sys.path.insert(0, s)
+    # Also add `<repo_root>/src` for the repo-root layout where we may want to import
+    # modules directly (e.g. `import cleaning_and_dedupe`) even if `src` isn't treated
+    # as a package in some environments.
+    src_dir = repo_root / "src"
+    if src_dir.exists():
+        s2 = str(src_dir)
+        if s2 not in sys.path:
+            sys.path.insert(0, s2)
 
 
 _ensure_repo_root_on_syspath()
@@ -34,8 +42,12 @@ _ensure_repo_root_on_syspath()
 try:
     from external_kv_injection.src.cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
 except ModuleNotFoundError:
-    # Fallback for repo layouts where `src/` is at repo root.
-    from src.cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
+    try:
+        # Repo-root KVI layout: `<repo_root>/src/...`
+        from src.cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
+    except ModuleNotFoundError:
+        # Fallback when `<repo_root>/src` is on sys.path: import the module directly.
+        from cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
 
 
 def _read_jsonl(path: Path, *, limit: Optional[int] = None) -> List[Dict[str, Any]]:
