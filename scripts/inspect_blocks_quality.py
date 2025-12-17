@@ -36,6 +36,28 @@ def _ensure_repo_root_on_syspath() -> None:
         if s2 not in sys.path:
             sys.path.insert(0, s2)
 
+    # Extra robustness: locate `cleaning_and_dedupe.py` even if the repo was moved/renamed.
+    candidates = [
+        repo_root / "src" / "cleaning_and_dedupe.py",
+        repo_root / "external_kv_injection" / "src" / "cleaning_and_dedupe.py",
+    ]
+    found_parent: Path | None = None
+    for c in candidates:
+        if c.exists():
+            found_parent = c.parent
+            break
+    if found_parent is None:
+        try:
+            for p in repo_root.rglob("cleaning_and_dedupe.py"):
+                found_parent = p.parent
+                break
+        except Exception:
+            found_parent = None
+    if found_parent is not None:
+        sp = str(found_parent)
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
+
 
 _ensure_repo_root_on_syspath()
 
@@ -46,8 +68,20 @@ except ModuleNotFoundError:
         # Repo-root KVI layout: `<repo_root>/src/...`
         from src.cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
     except ModuleNotFoundError:
-        # Fallback when `<repo_root>/src` is on sys.path: import the module directly.
-        from cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
+        try:
+            # Fallback when `<repo_root>/src` (or the discovered parent dir) is on sys.path.
+            from cleaning_and_dedupe import normalize_text, quality_score, simhash64  # type: ignore
+        except ModuleNotFoundError as e:
+            repo_root = Path(__file__).resolve().parents[2]
+            src_dir = repo_root / "src"
+            raise ModuleNotFoundError(
+                "Failed to import `cleaning_and_dedupe`. "
+                f"repo_root={repo_root} src_exists={src_dir.exists()}. "
+                "Expected one of: "
+                "`<repo_root>/src/cleaning_and_dedupe.py` (KVI root layout) or "
+                "`<repo_root>/external_kv_injection/src/cleaning_and_dedupe.py` (monorepo layout). "
+                "Fix: ensure you pulled the full repo, and that `src/cleaning_and_dedupe.py` exists."
+            ) from e
 
 
 def _read_jsonl(path: Path, *, limit: Optional[int] = None) -> List[Dict[str, Any]]:
