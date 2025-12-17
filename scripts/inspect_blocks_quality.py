@@ -140,6 +140,22 @@ def _extract_table_ids(meta: Dict[str, Any]) -> List[int]:
     return sorted(set(out))
 
 
+_TABLE_MARKER_RE = re.compile(
+    r"<\s*!\s*-\s*-\s*table\s*:\s*(\d+)\s*-\s*-\s*>",
+    flags=re.IGNORECASE,
+)
+
+
+def _has_table(text: str, meta: Dict[str, Any]) -> bool:
+    if _extract_table_ids(meta):
+        return True
+    if _TABLE_MARKER_RE.search(text):
+        return True
+    if text.count("|") >= 8:
+        return True
+    return False
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--blocks_jsonl", required=True)
@@ -173,7 +189,7 @@ def main() -> None:
         if _nonprintable_ratio(text) >= 0.02:
             nonprint_high += 1
         meta = r.get("metadata") or {}
-        if _extract_table_ids(meta) or ("<!-- table:" in text):
+        if _has_table(text, meta):
             has_table += 1
         simhashes.append(simhash64(text))
 
@@ -209,7 +225,7 @@ def main() -> None:
             continue
         meta = r.get("metadata") or {}
         if args.tables_only:
-            if not (_extract_table_ids(meta) or ("<!-- table:" in text)):
+            if not _has_table(text, meta):
                 continue
         candidates.append(r)
 

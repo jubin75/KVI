@@ -61,8 +61,15 @@ def build_blocks_from_raw_chunks(
                 # block-level table ids: re-scan the block text (table markers are preserved in text)
                 # Note: if a marker is split across blocks it may be missed; acceptable for now.
                 import re
-
-                table_ids = [int(x) for x in re.findall(r"<!--\s*table:(\d+)\s*-->", block_text)]
+                table_ids = [
+                    int(x)
+                    for x in re.findall(
+                        # Robust to tokenizer decode inserting spaces between punctuation
+                        r"<\s*!\s*-\s*-\s*table\s*:\s*(\d+)\s*-\s*-\s*>",
+                        block_text,
+                        flags=re.IGNORECASE,
+                    )
+                ]
                 # propagate + override
                 meta2 = dict(meta)
                 if isinstance(meta2.get("tables"), dict):

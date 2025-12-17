@@ -22,6 +22,13 @@ from ..cleaning_and_dedupe import normalize_text
 from ..pdf_ingestion import ingest_pdf
 from ..llm_filter.knowledge_filter import DeepSeekKnowledgeFilter, KnowledgeFilterConfig
 
+
+_TABLE_MARKER_RE = re.compile(
+    # Robust to tokenizer decode inserting spaces between punctuation, e.g. "< ! -- table : 3 -- >"
+    r"<\s*!\s*-\s*-\s*table\s*:\s*(\d+)\s*-\s*-\s*>",
+    flags=re.IGNORECASE,
+)
+
 def _require_pymupdf():
     try:
         import fitz  # type: ignore
@@ -280,7 +287,7 @@ def build_raw_context_chunks_from_pdf_dir(
                 for i, (start, end, cids) in enumerate(chunks):
                     text = tok.decode(cids, skip_special_tokens=True)
                     # chunk-level table metadata：通过 table marker 识别本 chunk 引用了哪些 table_id
-                    table_ids = [int(x) for x in re.findall(r"<!--\s*table:(\d+)\s*-->", text)]
+                    table_ids = [int(x) for x in _TABLE_MARKER_RE.findall(text)]
                     # map to structured meta (page/rows/cols/header_hash)
                     table_meta = [t for t in doc_tables if int(t.get("table_id", -1)) in set(table_ids)]
                     rec = {
