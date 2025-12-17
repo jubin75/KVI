@@ -152,6 +152,9 @@ ls -alh "$WORK_DIR/kvbank_blocks/shards" | head
 python external_kv_injection/scripts/run_multistep_inject_demo.py \
   --model "$BASE_LLM" \
   --kv_dir "$WORK_DIR/kvbank_blocks" \
+  --kv_dir_tables "$WORK_DIR/kvbank_tables" \
+  --enable_table_routing \
+  --table_top_k 4 \
   --domain_encoder_model "$DOMAIN_ENCODER" \
   --prompt "请结合知识库逐步推理回答：SFTSV 的主要传播途径是什么？并给出依据。" \
   --layers 0,1,2,3 \

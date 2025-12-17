@@ -34,7 +34,9 @@ python external_kv_injection/scripts/build_kvbank_from_pdf_dir_multistep.py \
   --chunk_tokens 4096 \
   --chunk_overlap 256 \
   --block_tokens 256 \
+  --block_overlap_tokens 64 \
   --ocr auto \
+  --split_tables \
   --knowledge_filter \
   --deepseek_model deepseek-chat
 ```
@@ -101,6 +103,7 @@ python external_kv_injection/scripts/build_raw_context_from_pdfs.py \
 产物：
 - `$WORK_DIR/raw_chunks.jsonl`（raw context）
 - `$WORK_DIR/blocks.jsonl`（memory blocks）
-- `$WORK_DIR/kvbank_blocks/`（FAISS KVBank，存 blocks 的 embedding+K/V+metadata）
+- `$WORK_DIR/kvbank_blocks/`（FAISS KVBank：主库，存文本 blocks 的 embedding+K/V+metadata）
+- `$WORK_DIR/kvbank_tables/`（可选：表格库，`--split_tables` 时生成；用于“检索侧路由”按需查询表格 blocks）
 
 

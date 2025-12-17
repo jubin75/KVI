@@ -161,7 +161,7 @@ class MultiStepInjector:
                 query_vec = pooled[0].to(torch.float32).cpu().numpy()
 
             # ---- retrieve & select blocks ----
-            result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None)
+            result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None, query_text=prompt)
             selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_vec)
 
             if not selected:

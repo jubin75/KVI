@@ -54,6 +54,9 @@ python external_kv_injection/scripts/build_kvbank_from_raw_text.py \
 python external_kv_injection/scripts/run_multistep_inject_demo.py \
   --model "$BASE_LLM" \
   --kv_dir "$WORK_DIR/kvbank_blocks" \
+  --kv_dir_tables "$WORK_DIR/kvbank_tables" \
+  --enable_table_routing \
+  --table_top_k 4 \
   --domain_encoder_model "$DOMAIN_ENCODER" \
   --prompt "请结合知识库逐步推理回答：SFTSV 的主要传播途径是什么？并给出依据。" \
   --layers 0,1,2,3 \
@@ -65,6 +68,13 @@ python external_kv_injection/scripts/run_multistep_inject_demo.py \
   --entropy_threshold 0.35 \
   --max_new_tokens 128
 ```
+
+## 检索侧路由（Keep+Split Tables）
+当你在建库阶段启用了 `--split_tables` 产生 `kvbank_tables/`，运行多步注入时可以开启检索侧路由：
+
+- **默认只查主库**（`kvbank_blocks`），用于一般叙述/机制/指南类问题
+- 当 prompt 中出现 **数值/统计/阈值/对照** 等提示（例如 AUC/OR/HR/95%CI/p-value/阈值/敏感度/特异度/表1），会 **额外查询表格库**（`kvbank_tables`）并合并结果
+- 用 `--table_top_k` 控制表格候选上限（建议小一些，避免噪声淹没正文）
 
 ## 禁止项对照（已规避）
 - 不把 raw context 直接注入 attention（raw 仅建库）

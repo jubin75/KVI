@@ -23,12 +23,12 @@ if _REPO_ROOT_STR not in sys.path:
 
 try:
     from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
-    from external_kv_injection.src.retriever import Retriever  # type: ignore
+    from external_kv_injection.src.retriever import Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
-    from src.retriever import Retriever  # type: ignore
+    from src.retriever import Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
 
@@ -37,6 +37,9 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
     p.add_argument("--kv_dir", required=True)
+    p.add_argument("--kv_dir_tables", default=None, help="Optional tables KVBank dir (built by --split_tables).")
+    p.add_argument("--enable_table_routing", action="store_true", help="If set, route table-like queries to kv_dir_tables.")
+    p.add_argument("--table_top_k", type=int, default=4, help="When routing hits, retrieve up to N table blocks.")
     p.add_argument("--prompt", required=True)
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
@@ -58,7 +61,15 @@ def main() -> None:
     model.eval()
 
     bank = FaissKVBank.load(Path(args.kv_dir))
-    retriever = Retriever(bank)
+    if bool(args.enable_table_routing) and args.kv_dir_tables:
+        table_bank = FaissKVBank.load(Path(args.kv_dir_tables))
+        retriever = RoutedRetriever(
+            kv_bank=bank,
+            table_kv_bank=table_bank,
+            cfg=RoutedRetrieverConfig(enable_table_routing=True, table_top_k=int(args.table_top_k)),
+        )
+    else:
+        retriever = Retriever(bank)
 
     enc = HFSentenceEncoder(HFSentenceEncoderConfig(model_name_or_path=args.domain_encoder_model, max_length=256, normalize=True))
 
