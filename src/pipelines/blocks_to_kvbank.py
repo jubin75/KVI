@@ -37,10 +37,10 @@ def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
 class BuildBlocksKVBankStats:
     total_read: int
     total_written: int
-    text_written: int = 0
-    tables_written: int = 0
     skipped_bad_len: int
     skipped_errors: int
+    text_written: int = 0
+    tables_written: int = 0
     shards_written: int = 0
     text_shards_written: int = 0
     tables_shards_written: int = 0
