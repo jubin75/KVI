@@ -282,14 +282,75 @@ class MultiStepInjector:
                 break
 
         # final generation using last injected state: simplest approach is do generate without further injection
+        # NOTE: do NOT use `model.generate(past_key_values=...)` here; HF generation will treat
+        # `past_length` as already-consumed prompt tokens and may slice input_ids to empty when
+        # past_length (external prefix length) >> prompt_length.
+        txt = self._greedy_generate_with_past_prefix(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            device=device,
+            past_key_values=last_past_key_values,
+            max_new_tokens=max_new_tokens,
+        )
+        return txt, step_debugs
+
+    @staticmethod
+    def _greedy_generate_with_past_prefix(
+        *,
+        model: torch.nn.Module,
+        tokenizer: Any,
+        prompt: str,
+        device: torch.device,
+        past_key_values: Any,
+        max_new_tokens: int,
+    ) -> str:
+        """
+        Greedy decode that supports an *external prefix* cache.
+
+        We cannot reliably use `model.generate(past_key_values=...)` here because HF generation
+        assumes `past_length == prompt_length` and will slice away the prompt when past_length>0.
+        For prefix-injection, past_length is external KV length, so we do manual decoding.
+        """
+
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
+
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+
+        # First step: consume full prompt with the injected prefix cache.
         with torch.no_grad():
-            out_ids = model.generate(
-                **inputs,
-                past_key_values=last_past_key_values,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
+            out = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
                 use_cache=True,
+                return_dict=True,
             )
-        return tokenizer.decode(out_ids[0], skip_special_tokens=True), step_debugs
+        past = out.past_key_values
+        next_token = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)  # [1,1]
+        generated = [next_token]
+        attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
+
+        # Subsequent steps: feed one token at a time with cache.
+        for _ in range(max(0, int(max_new_tokens) - 1)):
+            if isinstance(eos_id, int) and int(next_token.item()) == int(eos_id):
+                break
+            with torch.no_grad():
+                out = model(
+                    input_ids=next_token,
+                    attention_mask=attention_mask,
+                    past_key_values=past,
+                    use_cache=True,
+                    return_dict=True,
+                )
+            past = out.past_key_values
+            next_token = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+            generated.append(next_token)
+            attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
+
+        full = torch.cat([input_ids] + generated, dim=1)
+        return tokenizer.decode(full[0], skip_special_tokens=True)
 
 
