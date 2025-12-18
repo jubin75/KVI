@@ -60,6 +60,13 @@ def main() -> None:
         help="If tokenizer supports it, format the model prompt using tokenizer.apply_chat_template. "
         "This often reduces chat transcript artifacts like 'Human:' in outputs.",
     )
+    p.add_argument(
+        "--rewrite_query_for_retrieval",
+        choices=["off", "acronym_lexicon_from_blocks"],
+        default="acronym_lexicon_from_blocks",
+        help="Rewrite ONLY the retrieval query (not the model prompt). "
+        "This improves acronym disambiguation without requiring users to type expansions.",
+    )
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
     p.add_argument("--max_steps", type=int, default=8)
@@ -83,6 +90,11 @@ def main() -> None:
     model.to(device)
     model.eval()
 
+    _ACRONYM_PAREN_RE = re.compile(
+        r"\b([A-Z][A-Z0-9]{2,11})\b\s*[（(]\s*([^）)\n\r]{3,120}?)\s*[）)]"
+    )
+    _ACRONYM_IN_QUERY_RE = re.compile(r"\b([A-Z][A-Z0-9]{2,11})\b")
+
     def _format_model_prompt(user_prompt: str) -> str:
         if not bool(args.use_chat_template):
             return user_prompt
@@ -102,8 +114,78 @@ def main() -> None:
             text = text[: m.start()]
         return text.strip()
 
+    def _build_acronym_lexicon_from_blocks(blocks_jsonl: Path, max_lines: int = 200_000) -> dict[str, str]:
+        """
+        Build a lightweight acronym->expansion mapping by scanning blocks text for patterns like:
+        'SFTSV（Severe Fever with Thrombocytopenia Syndrome Virus）'
+        'ABC (some expansion)'
+        """
+        counts: dict[str, dict[str, int]] = {}
+        n = 0
+        with blocks_jsonl.open("r", encoding="utf-8") as f:
+            for line in f:
+                if n >= max_lines:
+                    break
+                n += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                txt = str(rec.get("text") or "")
+                if not txt:
+                    continue
+                for m in _ACRONYM_PAREN_RE.finditer(txt):
+                    ac = m.group(1)
+                    exp = m.group(2).strip()
+                    if not exp or len(exp) < 3:
+                        continue
+                    counts.setdefault(ac, {})
+                    counts[ac][exp] = counts[ac].get(exp, 0) + 1
+
+        out: dict[str, str] = {}
+        for ac, exp_counts in counts.items():
+            # pick the most frequent expansion
+            best = max(exp_counts.items(), key=lambda kv: kv[1])[0]
+            out[ac] = best
+        return out
+
+    def _rewrite_query_for_retrieval(user_prompt: str) -> str:
+        if str(args.rewrite_query_for_retrieval) == "off":
+            return user_prompt
+        if str(args.rewrite_query_for_retrieval) == "acronym_lexicon_from_blocks":
+            if not args.blocks_jsonl:
+                return user_prompt
+            blocks_path = Path(str(args.blocks_jsonl))
+            try:
+                lex = _build_acronym_lexicon_from_blocks(blocks_path)
+            except Exception as e:
+                print(f"[query_rewrite] disabled (failed to build lexicon): {type(e).__name__}: {e}", flush=True)
+                return user_prompt
+            acronyms = sorted(set(_ACRONYM_IN_QUERY_RE.findall(user_prompt)))
+            if not acronyms:
+                return user_prompt
+            aug_parts = []
+            for ac in acronyms:
+                exp = lex.get(ac)
+                if exp:
+                    aug_parts.append(f"{ac}（{exp}）")
+            if not aug_parts:
+                return user_prompt
+            rewritten = user_prompt + "\n\n" + "缩写解释：" + "；".join(aug_parts)
+            print(
+                f"[query_rewrite] mode=acronym_lexicon_from_blocks acronyms={acronyms} "
+                f"added={len(aug_parts)} blocks_jsonl={blocks_path}",
+                flush=True,
+            )
+            return rewritten
+        return user_prompt
+
     raw_user_prompt = str(args.prompt)
     model_prompt = _format_model_prompt(raw_user_prompt)
+    retrieval_query_text = _rewrite_query_for_retrieval(raw_user_prompt)
 
     # Optional: build an allowlist of block_ids by language from blocks_jsonl.
     allowed_block_ids = None
@@ -183,7 +265,7 @@ def main() -> None:
         model=model,
         tokenizer=tok,
         prompt=model_prompt,
-        query_text=raw_user_prompt,
+        query_text=retrieval_query_text,
         device=device,
         max_new_tokens=args.max_new_tokens,
         query_embed_fn=query_embed_fn,
