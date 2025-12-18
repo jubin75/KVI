@@ -177,6 +177,11 @@ def main() -> None:
     nonprint_high = 0
     has_table = 0
     simhashes: List[str] = []
+    # table-only subset stats (non-empty blocks that look like tables)
+    table_token_counts: List[int] = []
+    table_q_scores: List[float] = []
+    table_nonprint_high = 0
+    table_simhashes: List[str] = []
 
     for r in recs:
         text = normalize_text(str(r.get("text") or ""))
@@ -189,11 +194,18 @@ def main() -> None:
         if _nonprintable_ratio(text) >= 0.02:
             nonprint_high += 1
         meta = r.get("metadata") or {}
-        if _has_table(text, meta):
+        is_table = _has_table(text, meta)
+        if is_table:
             has_table += 1
+            table_token_counts.append(tc)
+            table_q_scores.append(float(quality_score(text)))
+            if _nonprintable_ratio(text) >= 0.02:
+                table_nonprint_high += 1
+            table_simhashes.append(simhash64(text))
         simhashes.append(simhash64(text))
 
     uniq_simhash = len(set(simhashes))
+    uniq_table_simhash = len(set(table_simhashes))
 
     print(f"[inspect] blocks_jsonl={path}", flush=True)
     print(f"[inspect] total={total} empty_text={empty} ({_pct(empty/total)})", flush=True)
@@ -215,6 +227,36 @@ def main() -> None:
     if total - empty > 0:
         print(f"[inspect] nonprintable_ratio>=2%: {nonprint_high}/{total-empty} ({_pct(nonprint_high/max(1,total-empty))})", flush=True)
         print(f"[inspect] has_table: {has_table}/{total-empty} ({_pct(has_table/max(1,total-empty))})", flush=True)
+        if args.tables_only:
+            denom = max(1, total - empty)
+            t_total = len(table_token_counts)
+            print(
+                f"[inspect] tables_subset: {t_total}/{total-empty} ({_pct(t_total/denom)})",
+                flush=True,
+            )
+            if table_token_counts:
+                tq = _quantiles(table_token_counts)
+                print(
+                    f"[inspect] tables_subset token_count: min={tq['min']:.0f} avg={tq['avg']:.1f} p50={tq['p50']:.0f} p95={tq['p95']:.0f} max={tq['max']:.0f}",
+                    flush=True,
+                )
+            if table_q_scores:
+                qs = sorted(table_q_scores)
+                n = len(qs)
+                p10 = qs[int(0.10 * (n - 1))]
+                p50 = qs[int(0.50 * (n - 1))]
+                p90 = qs[int(0.90 * (n - 1))]
+                print(f"[inspect] tables_subset quality_score: p10={p10:.2f} p50={p50:.2f} p90={p90:.2f}", flush=True)
+            if table_simhashes:
+                print(
+                    f"[inspect] tables_subset simhash_unique={uniq_table_simhash}/{len(table_simhashes)} ({_pct(uniq_table_simhash/max(1,len(table_simhashes)))})",
+                    flush=True,
+                )
+            if t_total > 0:
+                print(
+                    f"[inspect] tables_subset nonprintable_ratio>=2%: {table_nonprint_high}/{t_total} ({_pct(table_nonprint_high/max(1,t_total))})",
+                    flush=True,
+                )
 
     # sampling
     random.seed(int(args.seed))

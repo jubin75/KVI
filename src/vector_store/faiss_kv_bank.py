@@ -244,9 +244,12 @@ class FaissKVBank:
             return ShardedFaissKVBank.load(p)  # type: ignore[return-value]
 
         index = faiss.read_index(str(p / manifest["files"]["index"]))
-        retrieval_keys = np.load(p / manifest["files"]["retrieval_keys"])
-        k_ext = np.load(p / manifest["files"]["k_ext"])
-        v_ext = np.load(p / manifest["files"]["v_ext"])
+        # IMPORTANT:
+        # Use mmap to avoid loading the full K/V tensors into RAM. They can be multi-GB per shard.
+        # Downstream we only slice a small number of blocks for injection, so mmap is ideal.
+        retrieval_keys = np.load(p / manifest["files"]["retrieval_keys"], mmap_mode="r")
+        k_ext = np.load(p / manifest["files"]["k_ext"], mmap_mode="r")
+        v_ext = np.load(p / manifest["files"]["v_ext"], mmap_mode="r")
 
         metas: List[Dict[str, Any]] = []
         with (p / manifest["files"]["metas"]).open("r", encoding="utf-8") as f:
