@@ -78,8 +78,9 @@ python -u scripts/build_topic_pdf_subset_deepseek.py \
 - `external_kv_injection/config/topics/SFTSV/config.json`
 - `external_kv_injection/config/topics/SARS2/config.json`
 
-重要提示（关于你提到的 `/home/jb/KVI/pdfs/pdfs` 重复 PDF）：
-- 很多时候这是因为你的数据目录结构是 `.../pdfs/pdfs/*.pdf`（外层 `pdfs` 里又嵌套了一层 `pdfs`），而脚本用 `rglob("*.pdf")` 递归扫描，所以会扫到所有子目录。
+重要提示（关于你提到的重复 PDF）：
+- **推荐按专题分目录**：例如 `/home/jb/KVI/pdfs/SFTSV`、`/home/jb/KVI/pdfs/SARS2`，把对应专题 PDF 放进去（或软链进去），减少“混合大库里筛选”的不确定性。
+- 如果你的历史目录结构确实是 `.../pdfs/pdfs/*.pdf`（外层 `pdfs` 里又嵌套了一层 `pdfs`），脚本用 `rglob("*.pdf")` 递归扫描时就会扫到所有子目录。
 - 我们在 doc-level 筛选脚本里增加了 `dedupe_by_basename`（默认从 config 开启），同名 PDF 会自动跳过重复项并在 results.jsonl 里标记 `DUPLICATE/SKIP`。
 
 ### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常

@@ -2,7 +2,7 @@
   "topic_name": "SARS2",
   "goal": "建立关于 SARS‑CoV‑2（COVID‑19，新冠）的专题知识库：传播途径（飞沫/气溶胶/接触）、防控措施、临床表现、诊断要点、治疗与疫苗、变异株与流行病学。",
 
-  "source_pdf_dir": "/home/jb/KVI/pdfs/pdfs",
+  "source_pdf_dir": "/home/jb/KVI/pdfs/SARS2",
   "out_pdf_dir": "/home/jb/KVI/topics/SARS2/pdfs",
   "results_jsonl": "/home/jb/KVI/topics/SARS2/doc_filter_results.jsonl",
 
