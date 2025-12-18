@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+import json
+import re
 
 import torch
 
@@ -40,6 +42,11 @@ def main() -> None:
     p.add_argument("--kv_dir_tables", default=None, help="Optional tables KVBank dir (built by --split_tables).")
     p.add_argument("--enable_table_routing", action="store_true", help="If set, route table-like queries to kv_dir_tables.")
     p.add_argument("--table_top_k", type=int, default=4, help="When routing hits, retrieve up to N table blocks.")
+    p.add_argument(
+        "--blocks_jsonl",
+        default=None,
+        help="Optional blocks.jsonl path (e.g. $WORK_DIR/blocks.v2.jsonl). If provided, print text snippets for selected blocks.",
+    )
     p.add_argument("--prompt", required=True)
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
@@ -106,6 +113,51 @@ def main() -> None:
         print(d)
     print("=== Answer ===")
     print(answer)
+
+    # Optional: print selected block snippets for debugging retrieval quality.
+    if args.blocks_jsonl:
+        wanted = set()
+        for d in dbg:
+            for bid in getattr(d, "selected_block_ids", []) or []:
+                wanted.add(str(bid))
+        if wanted:
+            blocks_path = Path(str(args.blocks_jsonl))
+            found = {}
+            try:
+                with blocks_path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        bid = rec.get("block_id")
+                        if bid in wanted and bid not in found:
+                            txt = str(rec.get("text") or "")
+                            snippet = re.sub(r"\s+", " ", txt).strip()[:700]
+                            found[bid] = {
+                                "doc_id": rec.get("doc_id"),
+                                "token_count": rec.get("token_count"),
+                                "snippet": snippet,
+                                "metadata": rec.get("metadata"),
+                            }
+                        if len(found) >= len(wanted):
+                            break
+            except Exception as e:
+                print(f"[debug] failed to read blocks_jsonl={blocks_path}: {e}", flush=True)
+                return
+
+            print("=== Selected Block Snippets ===")
+            for bid in sorted(wanted):
+                info = found.get(bid)
+                if info is None:
+                    print(f"[debug] block_id not found in blocks_jsonl: {bid}", flush=True)
+                    continue
+                print(f"\n--- block_id={bid} ---", flush=True)
+                print(f"doc_id={info.get('doc_id')} token_count={info.get('token_count')}", flush=True)
+                print(f"text_snippet={info.get('snippet')}", flush=True)
 
 
 if __name__ == "__main__":
