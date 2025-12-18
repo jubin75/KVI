@@ -63,8 +63,9 @@ def build_past_key_values_prefix(
     其中未注入层的 (K,V) 为 None。
     """
 
-    # 统一返回 tuple 结构（更通用）：为所有层提供 (K,V)
-    # 未注入层使用 seq_len=0 的空 KV（避免 None 触发 transformers 断言）
+    # We first build a "legacy" tuple-of-(K,V) per layer, then (if supported) convert it
+    # into HF's Cache object (e.g. DynamicCache). Newer models (e.g. Qwen2) expect a Cache
+    # and will call methods like `get_seq_length()`.
     num_layers = getattr(getattr(model, "config", None), "num_hidden_layers", None)
     if not isinstance(num_layers, int):
         raise ValueError("Cannot infer num_hidden_layers from model.config.num_hidden_layers")
@@ -85,7 +86,33 @@ def build_past_key_values_prefix(
     pkv: List[Tuple[torch.Tensor, torch.Tensor]] = [(empty_k, empty_v) for _ in range(num_layers)]
     for layer_idx, ext in ext_kv_by_layer.items():
         pkv[layer_idx] = (ext.K, ext.V)
-    return tuple(pkv)
+    legacy = tuple(pkv)
+
+    # Try to return a Cache object when available.
+    cache = _as_cache_obj()
+    if cache is None:
+        return legacy
+
+    # Best-effort conversion API (Transformers versions differ).
+    try:
+        # transformers>=4.39 (commonly) provides this helper.
+        if hasattr(cache, "from_legacy_cache"):
+            return cache.from_legacy_cache(legacy)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    # Fallback: try to populate a DynamicCache-like object by calling `update`.
+    # If this fails, return legacy tuple.
+    try:
+        if hasattr(cache, "update"):
+            for li, (k, v) in enumerate(legacy):
+                # Some implementations expect [batch, heads, seq, dim]
+                cache.update(k, v, li)  # type: ignore[call-arg, attr-defined]
+            return cache
+    except Exception:
+        return legacy
+
+    return legacy
 
 
 def stack_ext_kv_items(
@@ -111,8 +138,18 @@ def stack_ext_kv_items(
         K = it.K_ext
         V = it.V_ext
         if not isinstance(K, torch.Tensor):
+            # When K/V comes from np.memmap (mmap_mode='r'), it's often non-writable.
+            # Make a small copy here (only for selected top-k blocks) to avoid PyTorch warnings/UB.
+            try:
+                K = K.copy()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             K = torch.as_tensor(K)
         if not isinstance(V, torch.Tensor):
+            try:
+                V = V.copy()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             V = torch.as_tensor(V)
         if K.ndim == 3:
             K = K.unsqueeze(0)
@@ -164,8 +201,16 @@ def stack_ext_kv_items_by_layer(
             K, V = it.K_ext, it.V_ext
 
         if not isinstance(K, torch.Tensor):
+            try:
+                K = K.copy()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             K = torch.as_tensor(K)
         if not isinstance(V, torch.Tensor):
+            try:
+                V = V.copy()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             V = torch.as_tensor(V)
 
         # slice to valid length if provided

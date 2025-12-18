@@ -132,6 +132,14 @@ class MultiStepInjector:
 
         step_debugs: List[StepDebug] = []
 
+        # If we need attentions (entropy signal), force an attention implementation that supports it.
+        # Some HF backends (sdpa/flash-attn) don't support output_attentions.
+        if bool(self.cfg.use_attention_entropy) and hasattr(model, "set_attn_implementation"):
+            try:
+                model.set_attn_implementation("eager")  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
         # initial inputs
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         input_ids = inputs["input_ids"]
