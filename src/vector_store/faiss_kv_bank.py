@@ -269,6 +269,85 @@ class FaissKVBank:
             metric=str(manifest.get("metric", "ip")),
         )
 
+    def search(
+        self,
+        query: np.ndarray,
+        *,
+        top_k: int = 32,
+        filters: Optional[Dict[str, Any]] = None,
+        oversample: int = 5,
+    ) -> Tuple[List[KVItem], Dict[str, Any]]:
+        """
+        搜索 top-k（单 query demo）。
+
+        filters（demo 版）
+        - 仅做后过滤：要求 meta 中字段值相等或属于列表（如 lang in ["zh","en"]）
+        """
+
+        if top_k <= 0:
+            return [], {"top_k": top_k, "filtered": 0}
+
+        q = _as_float32(np.asarray(query))
+        if q.ndim == 1:
+            q = q[None, :]
+        if q.shape[1] != self.dim:
+            raise ValueError(f"query dim {q.shape[1]} != bank dim {self.dim}")
+        if q.shape[0] != 1:
+            raise ValueError("demo search only supports a single query (shape [d] or [1,d])")
+
+        if self.normalize:
+            q = _l2_normalize(q)
+
+        # oversample 以便后过滤仍能得到 top_k
+        k_search = min(self.size, max(top_k, top_k * oversample))
+        scores, idxs = self.index.search(q, k_search)
+        scores = scores[0]
+        idxs = idxs[0]
+
+        def _pass_filters(meta: Dict[str, Any]) -> bool:
+            if not filters:
+                return True
+            for k, v in filters.items():
+                mv = meta.get(k)
+                if isinstance(v, (list, tuple, set)):
+                    if mv not in v:
+                        return False
+                else:
+                    if mv != v:
+                        return False
+            return True
+
+        items: List[KVItem] = []
+        filtered_out = 0
+        for s, i in zip(scores, idxs):
+            if i < 0:
+                continue
+            meta = self.metas[int(i)]
+            if not _pass_filters(meta):
+                filtered_out += 1
+                continue
+            items.append(
+                KVItem(
+                    score=float(s),
+                    meta=meta,
+                    K_ext=self.k_ext[int(i)],
+                    V_ext=self.v_ext[int(i)],
+                )
+            )
+            if len(items) >= top_k:
+                break
+
+        debug = {
+            "top_k": int(top_k),
+            "k_searched": int(k_search),
+            "filtered_out": int(filtered_out),
+            "size": int(self.size),
+            "dim": int(self.dim),
+            "metric": str(self.metric),
+            "normalize": bool(self.normalize),
+        }
+        return items, debug
+
 
 class ShardedFaissKVBank:
     """
@@ -364,84 +443,5 @@ class ShardedFaissKVBank:
             "shard_debug": shard_debug[:5],  # keep small
         }
         return merged, debug
-
-    def search(
-        self,
-        query: np.ndarray,
-        *,
-        top_k: int = 32,
-        filters: Optional[Dict[str, Any]] = None,
-        oversample: int = 5,
-    ) -> Tuple[List[KVItem], Dict[str, Any]]:
-        """
-        搜索 top-k（单 query demo）。
-
-        filters（demo 版）
-        - 仅做后过滤：要求 meta 中字段值相等或属于列表（如 lang in ["zh","en"]）
-        """
-
-        if top_k <= 0:
-            return [], {"top_k": top_k, "filtered": 0}
-
-        q = _as_float32(np.asarray(query))
-        if q.ndim == 1:
-            q = q[None, :]
-        if q.shape[1] != self.dim:
-            raise ValueError(f"query dim {q.shape[1]} != bank dim {self.dim}")
-        if q.shape[0] != 1:
-            raise ValueError("demo search only supports a single query (shape [d] or [1,d])")
-
-        if self.normalize:
-            q = _l2_normalize(q)
-
-        # oversample 以便后过滤仍能得到 top_k
-        k_search = min(self.size, max(top_k, top_k * oversample))
-        scores, idxs = self.index.search(q, k_search)
-        scores = scores[0]
-        idxs = idxs[0]
-
-        def _pass_filters(meta: Dict[str, Any]) -> bool:
-            if not filters:
-                return True
-            for k, v in filters.items():
-                mv = meta.get(k)
-                if isinstance(v, (list, tuple, set)):
-                    if mv not in v:
-                        return False
-                else:
-                    if mv != v:
-                        return False
-            return True
-
-        items: List[KVItem] = []
-        filtered_out = 0
-        for s, i in zip(scores, idxs):
-            if i < 0:
-                continue
-            meta = self.metas[int(i)]
-            if not _pass_filters(meta):
-                filtered_out += 1
-                continue
-            items.append(
-                KVItem(
-                    score=float(s),
-                    meta=meta,
-                    K_ext=self.k_ext[int(i)],
-                    V_ext=self.v_ext[int(i)],
-                )
-            )
-            if len(items) >= top_k:
-                break
-
-        debug = {
-            "top_k": top_k,
-            "k_searched": int(k_search),
-            "filtered_out": int(filtered_out),
-            "size": self.size,
-            "dim": self.dim,
-            "metric": self.metric,
-            "normalize": self.normalize,
-        }
-        return items, debug
 
 
