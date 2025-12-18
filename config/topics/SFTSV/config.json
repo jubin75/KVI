@@ -1,0 +1,42 @@
+{
+  "topic_name": "SFTSV",
+  "goal": "建立关于 SFTSV（发热伴血小板减少综合征）的专题知识库：传播途径（蜱叮咬、血液/体液接触等）、宿主/媒介、流行病学、诊断要点、治疗与预防。",
+
+  "source_pdf_dir": "/home/jb/KVI/pdfs/pdfs",
+  "out_pdf_dir": "/home/jb/KVI/topics/SFTSV/pdfs",
+  "results_jsonl": "/home/jb/KVI/topics/SFTSV/doc_filter_results.jsonl",
+
+  "ocr": "auto",
+  "extract_tables": true,
+  "split_tables": true,
+
+  "deepseek_base_url": "https://api.deepseek.com",
+  "deepseek_model": "deepseek-chat",
+  "deepseek_api_key_env": "DEEPSEEK_API_KEY",
+  "strict_drop_uncertain": true,
+
+  "doc_filter": {
+    "max_pages_for_abstract": 2,
+    "max_abstract_chars": 12000,
+    "mode": "symlink",
+    "dedupe_by_basename": true
+  },
+
+  "build": {
+    "work_dir": "/home/jb/KVI/topics/SFTSV/work",
+    "base_llm": "Qwen/Qwen2.5-7B-Instruct",
+    "retrieval_encoder_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "layers": [0, 1, 2, 3],
+
+    "chunk_tokens": 4096,
+    "chunk_overlap": 256,
+    "block_tokens": 256,
+    "block_overlap_tokens": 64,
+    "keep_last_incomplete_block": true,
+
+    "knowledge_filter": true,
+    "shard_size": 1024
+  }
+}
+
+

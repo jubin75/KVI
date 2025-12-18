@@ -46,6 +46,42 @@ export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
 ```
 
+### 1.1.1（推荐）专题库模式：先筛出专题 PDF（SFTSV / SARS‑CoV‑2）
+
+> 目的：让 external KV injection 在**高相关语料**上工作，避免“错检→注入放大错误”。  
+> 输出：`pdfs_sftsv/`、`pdfs_sarscov2/`（默认是 symlink，不复制大文件）。
+
+```bash
+export PDF_DIR_SFTSV="/home/jb/KVI/pdfs_sftsv"
+export PDF_DIR_SARSCOV2="/home/jb/KVI/pdfs_sarscov2"
+
+python -u scripts/build_topic_pdf_subset_deepseek.py \
+  --pdf_dir "$PDF_DIR" \
+  --topic sftsv \
+  --out_pdf_dir "$PDF_DIR_SFTSV" \
+  --ocr auto
+
+python -u scripts/build_topic_pdf_subset_deepseek.py \
+  --pdf_dir "$PDF_DIR" \
+  --topic sarscov2 \
+  --out_pdf_dir "$PDF_DIR_SARSCOV2" \
+  --ocr auto
+```
+
+> 你可以先用 `--max_pdfs 200` 快速试跑，确认 DeepSeek 筛选逻辑与输出目录正常。
+
+### 1.1.2（推荐）配置驱动的专题库（你编辑 config.json，不需要前端）
+
+我们为每个专题库提供一个可编辑的 `config.json`（你可以改“建库目标 goal / 是否抽取表格 extract_tables”等），后续和前端联调时再定接口。
+
+模板位置（本仓库）：
+- `external_kv_injection/config/topics/SFTSV/config.json`
+- `external_kv_injection/config/topics/SARS2/config.json`
+
+重要提示（关于你提到的 `/home/jb/KVI/pdfs/pdfs` 重复 PDF）：
+- 很多时候这是因为你的数据目录结构是 `.../pdfs/pdfs/*.pdf`（外层 `pdfs` 里又嵌套了一层 `pdfs`），而脚本用 `rglob("*.pdf")` 递归扫描，所以会扫到所有子目录。
+- 我们在 doc-level 筛选脚本里增加了 `dedupe_by_basename`（默认从 config 开启），同名 PDF 会自动跳过重复项并在 results.jsonl 里标记 `DUPLICATE/SKIP`。
+
 ### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常
 
 如果这一步失败，说明是 PDF 抽取/OCR/依赖问题（不是 block 切分问题）。
@@ -81,6 +117,59 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --ocr auto \
   --knowledge_filter \
   --deepseek_model deepseek-chat
+```
+
+### 1.2.1（专题库）一键构建：SFTSV / SARS‑CoV‑2 两个专题 KVBank
+
+> 约定目录结构（推荐）：
+> - SFTSV：`$WORK_DIR/topics/sftsv/...`
+> - SARS‑CoV‑2：`$WORK_DIR/topics/sarscov2/...`
+
+```bash
+export WORK_DIR_TOPIC="$WORK_DIR/topics"
+
+python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
+  --pdf_dir "$PDF_DIR_SFTSV" \
+  --work_dir "$WORK_DIR_TOPIC/sftsv" \
+  --base_llm "$BASE_LLM" \
+  --retrieval_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --chunk_tokens 4096 --chunk_overlap 256 \
+  --block_tokens 256 --block_overlap_tokens 64 --keep_last_incomplete_block \
+  --ocr auto \
+  --knowledge_filter --deepseek_model deepseek-chat \
+  --split_tables \
+  --shard_size 1024
+
+python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
+  --pdf_dir "$PDF_DIR_SARSCOV2" \
+  --work_dir "$WORK_DIR_TOPIC/sarscov2" \
+  --base_llm "$BASE_LLM" \
+  --retrieval_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --chunk_tokens 4096 --chunk_overlap 256 \
+  --block_tokens 256 --block_overlap_tokens 64 --keep_last_incomplete_block \
+  --ocr auto \
+  --knowledge_filter --deepseek_model deepseek-chat \
+  --split_tables \
+  --shard_size 1024
+```
+
+### 1.2.2（推荐）一条命令重建专题库：doc-level DS(abstract) → pipeline → KVBank
+
+> 你只需要改 config.json 里的：
+> - `goal`：建立专题库的目标（用户输入）
+> - `extract_tables`：是否抽取表格
+> - 路径：`source_pdf_dir / out_pdf_dir / build.work_dir`
+
+```bash
+# SFTSV 专题库（输出目录示例：/home/jb/KVI/topics/SFTSV）
+python -u scripts/rebuild_topic_kvbank_from_config.py \
+  --config external_kv_injection/config/topics/SFTSV/config.json
+
+# SARS2 专题库（输出目录示例：/home/jb/KVI/topics/SARS2）
+python -u scripts/rebuild_topic_kvbank_from_config.py \
+  --config external_kv_injection/config/topics/SARS2/config.json
 ```
 
 ### 1.3 质量检查：如何确认 blocks 文本“抽取质量好”

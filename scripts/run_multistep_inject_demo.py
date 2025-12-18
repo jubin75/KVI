@@ -39,7 +39,13 @@ except ModuleNotFoundError:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
-    p.add_argument("--kv_dir", required=True)
+    p.add_argument("--kv_dir", default=None, help="Path to KVBank. If omitted, use --topic + --topic_work_dir.")
+    p.add_argument("--topic", choices=["sftsv", "sarscov2"], default=None, help="Optional topic name for 专题库 mode.")
+    p.add_argument(
+        "--topic_work_dir",
+        default=None,
+        help="If set with --topic, resolve paths like: <topic_work_dir>/<topic>/{blocks.jsonl,kvbank_blocks,kvbank_tables}.",
+    )
     p.add_argument("--kv_dir_tables", default=None, help="Optional tables KVBank dir (built by --split_tables).")
     p.add_argument("--enable_table_routing", action="store_true", help="If set, route table-like queries to kv_dir_tables.")
     p.add_argument("--table_top_k", type=int, default=4, help="When routing hits, retrieve up to N table blocks.")
@@ -88,6 +94,22 @@ def main() -> None:
     p.add_argument("--use_attention_entropy", action="store_true", help="Enable external KV attention entropy stopping signal")
     p.add_argument("--entropy_threshold", type=float, default=0.35, help="Normalized entropy threshold in [0,1]")
     args = p.parse_args()
+
+    # 专题库 mode: resolve paths from topic_work_dir/topic
+    if args.kv_dir is None:
+        if not args.topic or not args.topic_work_dir:
+            raise SystemExit("Missing --kv_dir. Either pass --kv_dir or use --topic + --topic_work_dir.")
+        base = Path(str(args.topic_work_dir)) / str(args.topic)
+        args.kv_dir = str(base / "kvbank_blocks")
+        if args.kv_dir_tables is None:
+            args.kv_dir_tables = str(base / "kvbank_tables")
+        if args.blocks_jsonl is None:
+            args.blocks_jsonl = str(base / "blocks.jsonl")
+        print(
+            f"[topic_mode] topic={args.topic} topic_work_dir={args.topic_work_dir} "
+            f"kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}",
+            flush=True,
+        )
 
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
