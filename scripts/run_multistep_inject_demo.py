@@ -47,6 +47,7 @@ def main() -> None:
     p.add_argument("--max_step_tokens", type=int, default=1024)
     p.add_argument("--max_total_tokens", type=int, default=2048)
     p.add_argument("--top_k_blocks", type=int, default=8)
+    p.add_argument("--max_blocks_per_step", type=int, default=8, help="Cap selected blocks per step. For RoPE models, try 1 first.")
     p.add_argument("--max_new_tokens", type=int, default=128)
     p.add_argument("--print_baseline", action="store_true", help="Print baseline answer without KV injection for A/B compare.")
     p.add_argument("--use_attention_entropy", action="store_true", help="Enable external KV attention entropy stopping signal")
@@ -93,6 +94,7 @@ def main() -> None:
         max_total_tokens=args.max_total_tokens,
         max_steps=args.max_steps,
         top_k_blocks=args.top_k_blocks,
+        max_blocks_per_step=int(args.max_blocks_per_step),
         use_attention_entropy=bool(args.use_attention_entropy),
         entropy_threshold=float(args.entropy_threshold),
     )

@@ -33,6 +33,7 @@ class MultiStepConfig:
     max_total_tokens: int = 2048
     max_steps: int = 8
     top_k_blocks: int = 8  # retrieve candidates
+    max_blocks_per_step: int = 8  # cap selected blocks per step (RoPE safety: set to 1 if needed)
 
     # stopping thresholds
     min_logit_delta: float = 1e-3
@@ -109,6 +110,8 @@ class MultiStepInjector:
             injected += kv_len
             self.used_block_ids.add(str(bid))
 
+            if len(selected) >= int(self.cfg.max_blocks_per_step):
+                break
             if injected >= self.cfg.max_step_tokens:
                 break
 
