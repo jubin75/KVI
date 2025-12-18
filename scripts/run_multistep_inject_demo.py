@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 import json
 import re
+import unicodedata
 
 import torch
 
@@ -67,6 +68,14 @@ def main() -> None:
         help="Rewrite ONLY the retrieval query (not the model prompt). "
         "This improves acronym disambiguation without requiring users to type expansions.",
     )
+    p.add_argument(
+        "--quality_filter_from_blocks",
+        action="store_true",
+        help="If set, build a quality allowlist from blocks_jsonl and only allow injection of 'good' blocks "
+        "(filters out control-char garbage / low-content fragments). Recommended.",
+    )
+    p.add_argument("--max_nonprintable_ratio", type=float, default=0.02)
+    p.add_argument("--min_quality_score", type=float, default=0.6)
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
     p.add_argument("--max_steps", type=int, default=8)
@@ -194,10 +203,31 @@ def main() -> None:
         try:
             # Prefer local imports (works for both monorepo and flat layouts)
             try:
-                from external_kv_injection.src.cleaning_and_dedupe import detect_lang  # type: ignore
+                from external_kv_injection.src.cleaning_and_dedupe import detect_lang, quality_score  # type: ignore
             except ModuleNotFoundError:
-                from src.cleaning_and_dedupe import detect_lang  # type: ignore
+                from src.cleaning_and_dedupe import detect_lang, quality_score  # type: ignore
+
+            def _nonprintable_ratio(s: str) -> float:
+                if not s:
+                    return 1.0
+                bad = 0
+                tot = 0
+                for ch in s:
+                    if ch in ("\n", "\t", "\r"):
+                        continue
+                    tot += 1
+                    cat = unicodedata.category(ch)
+                    # C*: control/surrogate/unassigned/private-use; also treat replacement char as bad
+                    if cat and cat[0] == "C":
+                        bad += 1
+                    elif ch == "\ufffd":
+                        bad += 1
+                return float(bad / max(tot, 1))
+
             allowed_block_ids = set()
+            dropped_lang = 0
+            dropped_nonprintable = 0
+            dropped_quality = 0
             blocks_path = Path(str(args.blocks_jsonl))
             with blocks_path.open("r", encoding="utf-8") as f:
                 for line in f:
@@ -213,13 +243,33 @@ def main() -> None:
                         continue
                     txt = str(rec.get("text") or "")
                     lang = detect_lang(txt)
-                    if lang in allowed_langs:
-                        allowed_block_ids.add(str(bid))
+                    if lang not in allowed_langs:
+                        dropped_lang += 1
+                        continue
+
+                    if bool(args.quality_filter_from_blocks):
+                        npr = _nonprintable_ratio(txt)
+                        if npr > float(args.max_nonprintable_ratio):
+                            dropped_nonprintable += 1
+                            continue
+                        qs = float(quality_score(txt))
+                        if qs < float(args.min_quality_score):
+                            dropped_quality += 1
+                            continue
+
+                    allowed_block_ids.add(str(bid))
             print(
                 f"[lang_filter] enabled via blocks_jsonl allow_langs={sorted(allowed_langs)} "
                 f"allowed_blocks={len(allowed_block_ids)} file={blocks_path}",
                 flush=True,
             )
+            if bool(args.quality_filter_from_blocks):
+                print(
+                    f"[quality_filter] enabled max_nonprintable_ratio={float(args.max_nonprintable_ratio)} "
+                    f"min_quality_score={float(args.min_quality_score)} "
+                    f"dropped_lang={dropped_lang} dropped_nonprintable={dropped_nonprintable} dropped_quality={dropped_quality}",
+                    flush=True,
+                )
         except Exception as e:
             allowed_block_ids = None
             print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
