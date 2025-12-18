@@ -218,8 +218,20 @@ def stack_ext_kv_items_by_layer(
         if hasattr(it, "meta") and isinstance(getattr(it, "meta"), dict):
             kv_len = it.meta.get(kv_len_key)
         if isinstance(kv_len, int) and kv_len >= 0:
-            K = K[:, :kv_len, :]
-            V = V[:, :kv_len, :]
+            # Expect K/V to be [kv_heads, ext_len, head_dim] here (no batch).
+            # Be defensive in case a batch dim sneaks in.
+            if K.ndim == 3:
+                K = K[:, :kv_len, :]
+            elif K.ndim == 4 and K.shape[0] == 1:
+                K = K[0, :, :kv_len, :]
+            V_shape = getattr(V, "shape", None)
+            if V.ndim == 3:
+                V = V[:, :kv_len, :]
+            elif V.ndim == 4 and V.shape[0] == 1:
+                V = V[0, :, :kv_len, :]
+            # Ensure both are 3D afterwards.
+            if K.ndim != 3 or V.ndim != 3:
+                raise ValueError(f"Unexpected K/V shapes after kv_len slice: K={tuple(K.shape)} V={V_shape}")
 
         # add batch dim
         K = K.unsqueeze(0)

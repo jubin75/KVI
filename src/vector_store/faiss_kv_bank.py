@@ -59,9 +59,11 @@ class KVItem:
 
     - score：ANN 相似度分数（内积/余弦）
     - meta：必须至少包含 chunk_id 与 citation（用于可解释性）
-    - K_ext/V_ext：支持两种形态
-      - 4D: [kv_heads, ext_len, head_dim]（单层 KV）
-      - 5D: [L, kv_heads, ext_len, head_dim]（多层 KV；L 对应 layer_ids）
+    - K_ext/V_ext：支持两种形态（注意：npy 里通常不带 batch 维）
+      - 3D: [kv_heads, ext_len, head_dim]（单层 KV，无 batch）
+      - 4D: [L, kv_heads, ext_len, head_dim]（多层 KV，无 batch；L 对应 meta["layer_ids"]）
+      - 4D: [batch, kv_heads, ext_len, head_dim]（单层 KV，带 batch=1）
+      - 5D: [L, batch, kv_heads, ext_len, head_dim] 或 [batch, L, kv_heads, ext_len, head_dim]（多层 KV，带 batch=1）
     """
 
     score: float
@@ -71,12 +73,13 @@ class KVItem:
 
     def get_kv_for_layer(self, layer_id: int) -> Tuple[np.ndarray, np.ndarray]:
         """
-        返回指定 layer_id 的 (K,V)：shape [kv_heads, ext_len, head_dim]。
-        要求 meta["layer_ids"] 存在且与 5D 的第一维对应。
-        """
+        返回指定 layer_id 的 (K,V)：shape [kv_heads, ext_len, head_dim]（不含 batch 维）。
 
-        if self.K_ext.ndim == 4 and self.V_ext.ndim == 4:
-            return self.K_ext, self.V_ext
+        说明：KVBank 构建阶段（见 pipelines/blocks_to_kvbank.py）保存的是：
+        - k_ext.npy: [N, L, kv_heads, block_tokens, head_dim]
+        - v_ext.npy: [N, L, kv_heads, block_tokens, head_dim]
+        因此单条 item 的 K_ext/V_ext 通常是 4D（以 L 开头），需要按 layer_id 切片。
+        """
 
         layer_ids = self.meta.get("layer_ids")
         if not isinstance(layer_ids, list):
@@ -86,9 +89,34 @@ class KVItem:
         except ValueError as e:
             raise KeyError(f"layer_id {layer_id} not present in layer_ids={layer_ids}") from e
 
-        if self.K_ext.ndim != 5 or self.V_ext.ndim != 5:
-            raise ValueError("Unexpected KV tensor rank for multi-layer KV")
-        return self.K_ext[li], self.V_ext[li]
+        K = self.K_ext
+        V = self.V_ext
+
+        # Common case: no batch dim, multi-layer: [L, kv_heads, ext_len, head_dim]
+        if K.ndim == 4 and V.ndim == 4 and K.shape[0] == len(layer_ids) and V.shape[0] == len(layer_ids):
+            return K[li], V[li]
+
+        # Single-layer with batch dim: [1, kv_heads, ext_len, head_dim]
+        if K.ndim == 4 and V.ndim == 4 and K.shape[0] == 1 and V.shape[0] == 1:
+            return K[0], V[0]
+
+        # Multi-layer with batch dim: [L, 1, kv_heads, ext_len, head_dim] or [1, L, kv_heads, ext_len, head_dim]
+        if K.ndim == 5 and V.ndim == 5:
+            if K.shape[0] == len(layer_ids) and K.shape[1] == 1 and V.shape[0] == len(layer_ids) and V.shape[1] == 1:
+                return K[li, 0], V[li, 0]
+            if K.shape[0] == 1 and K.shape[1] == len(layer_ids) and V.shape[0] == 1 and V.shape[1] == len(layer_ids):
+                return K[0, li], V[0, li]
+
+        # Single-layer without batch: [kv_heads, ext_len, head_dim]
+        if K.ndim == 3 and V.ndim == 3:
+            return K, V
+
+        raise ValueError(
+            "Unexpected KV tensor rank/shape for KVItem.get_kv_for_layer. "
+            f"K.ndim={K.ndim} V.ndim={V.ndim} "
+            f"K.shape={getattr(K, 'shape', None)} V.shape={getattr(V, 'shape', None)} "
+            f"layer_ids_len={len(layer_ids)}"
+        )
 
 
 class FaissKVBank:
