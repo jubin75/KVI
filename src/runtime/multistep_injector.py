@@ -34,6 +34,8 @@ class MultiStepConfig:
     max_steps: int = 8
     top_k_blocks: int = 8  # retrieve candidates
     max_blocks_per_step: int = 8  # cap selected blocks per step (RoPE safety: set to 1 if needed)
+    min_kv_len_to_inject: int = 128
+    allow_table_injection: bool = False
 
     # stopping thresholds
     min_logit_delta: float = 1e-3
@@ -72,10 +74,9 @@ class MultiStepInjector:
         self.cfg = cfg
         self.allowed_block_ids = allowed_block_ids
         self.used_block_ids: Set[str] = set()
-        self.used_keys: List[np.ndarray] = []
         self.total_injected_tokens = 0
 
-    def _select_blocks(self, items: Sequence[Any], query_vec: np.ndarray) -> Tuple[List[Any], int, int]:
+    def _select_blocks(self, items: Sequence[Any], *, query_text: Optional[str]) -> Tuple[List[Any], int, int]:
         """
         从 retriever 候选中挑选不重复 blocks，满足 max_step_tokens 与 max_total_tokens。
         返回：selected_items, injected_tokens, redundancy_hits
@@ -84,6 +85,18 @@ class MultiStepInjector:
         selected: List[Any] = []
         injected = 0
         redundancy_hits = 0
+
+        # For normal prose queries, do NOT inject table-like blocks; they often contain mostly numbers
+        # and can derail generation. Table knowledge should go to a separate KVBank and be routed.
+        allow_tables = bool(self.cfg.allow_table_injection)
+        if (not allow_tables) and query_text:
+            try:
+                # reuse the same query classifier as RoutedRetriever
+                from ..retriever import RoutedRetrieverConfig, _should_query_tables  # type: ignore
+
+                allow_tables = bool(_should_query_tables(query_text, RoutedRetrieverConfig()))
+            except Exception:
+                allow_tables = False
 
         for it in items:
             bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
@@ -94,18 +107,16 @@ class MultiStepInjector:
             if bid in self.used_block_ids:
                 continue
 
-            # redundancy: compare query_vec to previously used query_vecs (proxy)
-            # 生产级可改为 block embedding 相似度；demo 用 query history 的相似度近似
-            redundant = False
-            for k in self.used_keys[-16:]:
-                if _cosine_sim(query_vec, k) >= self.cfg.redundancy_sim_threshold:
-                    redundant = True
-                    break
-            if redundant:
+            # Filter table-like blocks for non-table queries
+            if (not allow_tables) and bool(it.meta.get("is_table", False)):
                 redundancy_hits += 1
                 continue
 
             kv_len = int(it.meta.get("kv_len", self.cfg.block_tokens))
+            if kv_len < int(self.cfg.min_kv_len_to_inject):
+                # Avoid injecting short tail fragments (often table tails / headers / low-context).
+                redundancy_hits += 1
+                continue
             if injected + kv_len > self.cfg.max_step_tokens:
                 continue
             if self.total_injected_tokens + injected + kv_len > self.cfg.max_total_tokens:
@@ -183,7 +194,7 @@ class MultiStepInjector:
 
             # ---- retrieve & select blocks ----
             result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None, query_text=query_text)
-            selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_vec)
+            selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_text=query_text)
 
             if not selected:
                 # no new info -> stop (but still emit a debug record for observability)
@@ -206,7 +217,6 @@ class MultiStepInjector:
                 )
                 break
 
-            self.used_keys.append(query_vec)
             self.total_injected_tokens += injected_tokens
 
             # ---- build per-layer ext kv prefix ----
