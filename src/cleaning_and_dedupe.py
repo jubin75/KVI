@@ -41,7 +41,17 @@ def normalize_text(text: str) -> str:
 
 
 def detect_lang(text: str) -> str:
-    # demo 级：中/英二分类
+    """
+    Very lightweight language heuristic for pipeline filtering/debug.
+
+    Notes
+    - We primarily care about avoiding obvious Japanese chunks in mixed-language PDF corpora.
+    - This is NOT a general-purpose language detector.
+    """
+    # Japanese kana (hiragana/katakana + halfwidth katakana)
+    if re.search(r"[\u3040-\u30ff\uff65-\uff9f]", text):
+        return "ja"
+    # CJK unified ideographs (treat as Chinese for our downstream "zh/en" routing)
     if re.search(r"[\u4e00-\u9fff]", text):
         return "zh"
     return "en"

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from ..cleaning_and_dedupe import normalize_text
+from ..cleaning_and_dedupe import detect_lang, normalize_text
 from ..pdf_ingestion import ingest_pdf
 from ..llm_filter.knowledge_filter import DeepSeekKnowledgeFilter, KnowledgeFilterConfig
 
@@ -336,12 +336,14 @@ def build_raw_context_chunks_from_pdf_dir(
                 )
                 for i, (start, end, cids) in enumerate(chunks):
                     text = tok.decode(cids, skip_special_tokens=True)
+                    lang = detect_lang(text)
                     # chunk-level table metadata：通过 table marker 识别本 chunk 引用了哪些 table_id
                     table_ids = [int(x) for x in _TABLE_MARKER_RE.findall(text)]
                     # map to structured meta (page/rows/cols/header_hash)
                     table_meta = [t for t in doc_tables if int(t.get("table_id", -1)) in set(table_ids)]
                     rec = {
                         "doc_id": doc_id,
+                        "lang": lang,
                         "chunk_id": f"{doc_id}_chunk{i}_t{start}-{end}",
                         "source_uri": str(pdf),
                         "ocr_used": bool(doc.ocr_used),

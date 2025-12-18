@@ -157,15 +157,22 @@ python external_kv_injection/scripts/run_multistep_inject_demo.py \
   --table_top_k 4 \
   --domain_encoder_model "$DOMAIN_ENCODER" \
   --prompt "请结合知识库逐步推理回答：SFTSV 的主要传播途径是什么？并给出依据。" \
+  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --allowed_langs "zh,en" \
   --layers 0,1,2,3 \
   --max_steps 8 \
   --max_step_tokens 1024 \
   --max_total_tokens 2048 \
   --top_k_blocks 8 \
+  --max_blocks_per_step 1 \
   --use_attention_entropy \
   --entropy_threshold 0.35 \
   --max_new_tokens 128
 ```
+
+说明：
+- `--blocks_jsonl + --allowed_langs`：在混语料（尤其包含日文）PDF 上强烈建议开启，避免检索命中非目标语言 block 后“注入导致语义退化/乱码/重复输出 prompt”。
+- `--max_blocks_per_step 1`：对 RoPE 模型（如 Qwen2）建议先从 1 开始，稳定后再逐步增大到 2/4。
 
 ## 3) （可选）训练 Projector（对齐到 past_key_values 空间，max_kv_tokens=256）
 

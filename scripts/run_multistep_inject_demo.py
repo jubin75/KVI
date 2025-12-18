@@ -47,6 +47,12 @@ def main() -> None:
         default=None,
         help="Optional blocks.jsonl path (e.g. $WORK_DIR/blocks.v2.jsonl). If provided, print text snippets for selected blocks.",
     )
+    p.add_argument(
+        "--allowed_langs",
+        default="zh,en",
+        help="Comma-separated allowlist of langs for block selection when --blocks_jsonl is provided (e.g. 'zh,en'). "
+        "Uses a lightweight heuristic (kana->ja, han->zh, else en).",
+    )
     p.add_argument("--prompt", required=True)
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
@@ -71,12 +77,51 @@ def main() -> None:
     model.to(device)
     model.eval()
 
+    # Optional: build an allowlist of block_ids by language from blocks_jsonl.
+    allowed_block_ids = None
+    allowed_langs = {s.strip() for s in str(args.allowed_langs).split(",") if s.strip()}
+    if args.blocks_jsonl and allowed_langs:
+        try:
+            # Prefer local imports (works for both monorepo and flat layouts)
+            try:
+                from external_kv_injection.src.cleaning_and_dedupe import detect_lang  # type: ignore
+            except ModuleNotFoundError:
+                from src.cleaning_and_dedupe import detect_lang  # type: ignore
+            allowed_block_ids = set()
+            blocks_path = Path(str(args.blocks_jsonl))
+            with blocks_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    bid = rec.get("block_id")
+                    if not bid:
+                        continue
+                    txt = str(rec.get("text") or "")
+                    lang = detect_lang(txt)
+                    if lang in allowed_langs:
+                        allowed_block_ids.add(str(bid))
+            print(
+                f"[lang_filter] enabled via blocks_jsonl allow_langs={sorted(allowed_langs)} "
+                f"allowed_blocks={len(allowed_block_ids)} file={blocks_path}",
+                flush=True,
+            )
+        except Exception as e:
+            allowed_block_ids = None
+            print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
+
     if bool(args.print_baseline):
         inputs0 = tok(args.prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
         print("=== Baseline (no injection) ===")
-        print(tok.decode(out0[0], skip_special_tokens=True))
+        # Print only newly generated tokens (exclude prompt) for easier A/B compare.
+        in_len = int(inputs0["input_ids"].shape[1])
+        print(tok.decode(out0[0][in_len:], skip_special_tokens=True))
 
     bank = FaissKVBank.load(Path(args.kv_dir))
     if bool(args.enable_table_routing) and args.kv_dir_tables:
@@ -105,7 +150,7 @@ def main() -> None:
         use_attention_entropy=bool(args.use_attention_entropy),
         entropy_threshold=float(args.entropy_threshold),
     )
-    injector = MultiStepInjector(retriever=retriever, cfg=cfg)
+    injector = MultiStepInjector(retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids)
     answer, dbg = injector.run(model=model, tokenizer=tok, prompt=args.prompt, device=device, max_new_tokens=args.max_new_tokens, query_embed_fn=query_embed_fn)
 
     print("=== Step Debug ===")

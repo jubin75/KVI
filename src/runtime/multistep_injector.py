@@ -65,9 +65,10 @@ def _cosine_sim(a: np.ndarray, b: np.ndarray, eps: float = 1e-12) -> float:
 
 
 class MultiStepInjector:
-    def __init__(self, *, retriever: Retriever, cfg: MultiStepConfig) -> None:
+    def __init__(self, *, retriever: Retriever, cfg: MultiStepConfig, allowed_block_ids: Optional[Set[str]] = None) -> None:
         self.retriever = retriever
         self.cfg = cfg
+        self.allowed_block_ids = allowed_block_ids
         self.used_block_ids: Set[str] = set()
         self.used_keys: List[np.ndarray] = []
         self.total_injected_tokens = 0
@@ -85,6 +86,8 @@ class MultiStepInjector:
         for it in items:
             bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
             if bid is None:
+                continue
+            if self.allowed_block_ids is not None and str(bid) not in self.allowed_block_ids:
                 continue
             if bid in self.used_block_ids:
                 continue
@@ -410,6 +413,9 @@ class MultiStepInjector:
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
         full = torch.cat([input_ids] + generated, dim=1)
-        return tokenizer.decode(full[0], skip_special_tokens=True)
+        # Return only the newly generated tokens (exclude the prompt) to avoid echoing the prompt
+        # in the printed "Answer" output.
+        gen_only = torch.cat(generated, dim=1) if generated else full[:, 0:0]
+        return tokenizer.decode(gen_only[0], skip_special_tokens=True)
 
 
