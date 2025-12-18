@@ -48,6 +48,7 @@ def main() -> None:
     p.add_argument("--max_total_tokens", type=int, default=2048)
     p.add_argument("--top_k_blocks", type=int, default=8)
     p.add_argument("--max_new_tokens", type=int, default=128)
+    p.add_argument("--print_baseline", action="store_true", help="Print baseline answer without KV injection for A/B compare.")
     p.add_argument("--use_attention_entropy", action="store_true", help="Enable external KV attention entropy stopping signal")
     p.add_argument("--entropy_threshold", type=float, default=0.35, help="Normalized entropy threshold in [0,1]")
     args = p.parse_args()
@@ -56,9 +57,18 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16 if device.type == "cuda" else None)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, torch_dtype=torch.bfloat16 if device.type == "cuda" else None, trust_remote_code=True
+    )
     model.to(device)
     model.eval()
+
+    if bool(args.print_baseline):
+        inputs0 = tok(args.prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
+        print("=== Baseline (no injection) ===")
+        print(tok.decode(out0[0], skip_special_tokens=True))
 
     bank = FaissKVBank.load(Path(args.kv_dir))
     if bool(args.enable_table_routing) and args.kv_dir_tables:

@@ -131,6 +131,7 @@ class MultiStepInjector:
         """
 
         step_debugs: List[StepDebug] = []
+        last_past_key_values: Any = None
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -192,6 +193,7 @@ class MultiStepInjector:
                 for li in self.cfg.inject_layers
             }
             past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
+            last_past_key_values = past_key_values
 
             # ---- one forward step to update logits/hidden ----
             with torch.no_grad():
@@ -283,6 +285,7 @@ class MultiStepInjector:
         with torch.no_grad():
             out_ids = model.generate(
                 **inputs,
+                past_key_values=last_past_key_values,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
                 use_cache=True,
