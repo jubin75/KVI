@@ -264,7 +264,27 @@ class FaissKVBank:
         p = Path(dir_path)
         manifest_path = p / "manifest.json"
         if not manifest_path.exists():
-            raise FileNotFoundError(f"manifest.json not found in: {p}")
+            # Common user pitfall: older runs may have written to a versioned out dir
+            # like `kvbank_blocks_v2/` while the demo command points at `kvbank_blocks/`.
+            # Provide a helpful hint rather than a bare FileNotFoundError.
+            candidates: List[Path] = []
+            # sibling with "_v2" suffix
+            candidates.append(p.parent / f"{p.name}_v2")
+            # common rename between kvbank_blocks and kvbank_blocks_v2
+            if p.name == "kvbank_blocks":
+                candidates.append(p.parent / "kvbank_blocks_v2")
+            if p.name == "kvbank_tables":
+                candidates.append(p.parent / "kvbank_tables_v2")
+            # if user passed *_v2 by mistake, suggest the non-v2 dir too
+            if p.name.endswith("_v2"):
+                candidates.append(p.parent / p.name[: -len("_v2")])
+
+            existing = [c for c in candidates if (c / "manifest.json").exists()]
+            if existing:
+                hint = " ; did you mean one of: " + ", ".join(str(x) for x in existing)
+            else:
+                hint = ""
+            raise FileNotFoundError(f"manifest.json not found in: {p}{hint}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
         # Sharded KVBank: return a bank-like object that implements the same `search()` API.

@@ -56,6 +56,8 @@ class StepDebug:
     hidden_delta: float
     redundancy_hits: int
     ext_attn_entropy: Optional[float]
+    retrieved_candidates: int = 0
+    note: Optional[str] = None
 
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray, eps: float = 1e-12) -> float:
@@ -126,6 +128,7 @@ class MultiStepInjector:
         model: torch.nn.Module,
         tokenizer: Any,
         prompt: str,
+        query_text: Optional[str] = None,
         device: torch.device,
         max_new_tokens: int = 128,
         query_embed_fn: Optional[Any] = None,
@@ -156,10 +159,13 @@ class MultiStepInjector:
         prev_hidden = None
         entropy_hist: List[float] = []
 
+        if query_text is None:
+            query_text = prompt
+
         for step in range(self.cfg.max_steps):
             # ---- build query embedding from current state ----
             if query_embed_fn is not None:
-                query_vec = query_embed_fn(prompt)
+                query_vec = query_embed_fn(query_text)
             else:
                 # fallback: use last_hidden mean pool from current prompt (cheap demo)
                 with torch.no_grad():
@@ -176,11 +182,28 @@ class MultiStepInjector:
                 query_vec = pooled[0].to(torch.float32).cpu().numpy()
 
             # ---- retrieve & select blocks ----
-            result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None, query_text=prompt)
+            result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None, query_text=query_text)
             selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_vec)
 
             if not selected:
-                # no new info -> stop
+                # no new info -> stop (but still emit a debug record for observability)
+                step_debugs.append(
+                    StepDebug(
+                        step=step,
+                        selected_block_ids=[],
+                        injected_tokens=0,
+                        total_injected_tokens=self.total_injected_tokens,
+                        logit_delta=0.0,
+                        hidden_delta=0.0,
+                        redundancy_hits=redundancy_hits,
+                        ext_attn_entropy=None,
+                        retrieved_candidates=int(len(result.items)),
+                        note=(
+                            "no_selected_blocks (common causes: kv_dir/DOMAIN_ENCODER mismatch, "
+                            "allowed_langs+blocks_jsonl allowlist mismatch, top_k too small, or max_step_tokens too small)"
+                        ),
+                    )
+                )
                 break
 
             self.used_keys.append(query_vec)
@@ -263,6 +286,7 @@ class MultiStepInjector:
                     hidden_delta=hidden_delta,
                     redundancy_hits=redundancy_hits,
                     ext_attn_entropy=ext_entropy,
+                    retrieved_candidates=int(len(result.items)),
                 )
             )
 

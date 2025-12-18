@@ -54,6 +54,12 @@ def main() -> None:
         "Uses a lightweight heuristic (kana->ja, han->zh, else en).",
     )
     p.add_argument("--prompt", required=True)
+    p.add_argument(
+        "--use_chat_template",
+        action="store_true",
+        help="If tokenizer supports it, format the model prompt using tokenizer.apply_chat_template. "
+        "This often reduces chat transcript artifacts like 'Human:' in outputs.",
+    )
     p.add_argument("--domain_encoder_model", required=True, help="DomainEncoder for query embedding (must match KVBank keys)")
     p.add_argument("--layers", default="0,1,2,3")
     p.add_argument("--max_steps", type=int, default=8)
@@ -76,6 +82,28 @@ def main() -> None:
     )
     model.to(device)
     model.eval()
+
+    def _format_model_prompt(user_prompt: str) -> str:
+        if not bool(args.use_chat_template):
+            return user_prompt
+        if hasattr(tok, "apply_chat_template"):
+            try:
+                msgs = [{"role": "user", "content": user_prompt}]
+                return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)  # type: ignore[attr-defined]
+            except Exception:
+                return user_prompt
+        return user_prompt
+
+    def _strip_chat_artifacts(text: str) -> str:
+        # Truncate if the model starts a new turn (common in chatty base models).
+        # Keep it conservative: only cut on newline + Human/User markers.
+        m = re.search(r"\n\s*(Human|User)\s*:\s*", text)
+        if m:
+            text = text[: m.start()]
+        return text.strip()
+
+    raw_user_prompt = str(args.prompt)
+    model_prompt = _format_model_prompt(raw_user_prompt)
 
     # Optional: build an allowlist of block_ids by language from blocks_jsonl.
     allowed_block_ids = None
@@ -115,13 +143,13 @@ def main() -> None:
             print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
 
     if bool(args.print_baseline):
-        inputs0 = tok(args.prompt, return_tensors="pt").to(device)
+        inputs0 = tok(model_prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
         print("=== Baseline (no injection) ===")
         # Print only newly generated tokens (exclude prompt) for easier A/B compare.
         in_len = int(inputs0["input_ids"].shape[1])
-        print(tok.decode(out0[0][in_len:], skip_special_tokens=True))
+        print(_strip_chat_artifacts(tok.decode(out0[0][in_len:], skip_special_tokens=True)))
 
     bank = FaissKVBank.load(Path(args.kv_dir))
     if bool(args.enable_table_routing) and args.kv_dir_tables:
@@ -151,13 +179,24 @@ def main() -> None:
         entropy_threshold=float(args.entropy_threshold),
     )
     injector = MultiStepInjector(retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids)
-    answer, dbg = injector.run(model=model, tokenizer=tok, prompt=args.prompt, device=device, max_new_tokens=args.max_new_tokens, query_embed_fn=query_embed_fn)
+    answer, dbg = injector.run(
+        model=model,
+        tokenizer=tok,
+        prompt=model_prompt,
+        query_text=raw_user_prompt,
+        device=device,
+        max_new_tokens=args.max_new_tokens,
+        query_embed_fn=query_embed_fn,
+    )
 
     print("=== Step Debug ===")
-    for d in dbg:
-        print(d)
+    if not dbg:
+        print("[debug] no steps executed (no blocks injected).", flush=True)
+    else:
+        for d in dbg:
+            print(d)
     print("=== Answer ===")
-    print(answer)
+    print(_strip_chat_artifacts(answer))
 
     # Optional: print selected block snippets for debugging retrieval quality.
     if args.blocks_jsonl:
