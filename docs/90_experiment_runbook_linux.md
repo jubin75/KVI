@@ -46,42 +46,44 @@ export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
 ```
 
-### 1.1.1（推荐）专题库模式：先筛出专题 PDF（SFTSV / SARS‑CoV‑2）
+### 1.1.1（强烈推荐）专题库模式：以后统一“分库做数据集”
 
-> 目的：让 external KV injection 在**高相关语料**上工作，避免“错检→注入放大错误”。  
-> 输出：`pdfs_sftsv/`、`pdfs_sarscov2/`（默认是 symlink，不复制大文件）。
+> 结论：External KV injection 是高增益、低容错；**语料不相关/命中乱码块**会被注入放大。  
+> 所以我们推荐把“医学大库”拆成多个“专题库”（SFTSV、SARS‑CoV‑2 等），并且每次只加载/构建一个专题库。
 
-```bash
-export PDF_DIR_SFTSV="/home/jb/KVI/pdfs_sftsv"
-export PDF_DIR_SARSCOV2="/home/jb/KVI/pdfs_sarscov2"
+这里有两条等价链路：
 
-python -u scripts/build_topic_pdf_subset_deepseek.py \
-  --pdf_dir "$PDF_DIR" \
-  --topic sftsv \
-  --out_pdf_dir "$PDF_DIR_SFTSV" \
-  --ocr auto
+- **推荐主线（更省心）**：`rebuild_topic_kvbank_from_config.py`  
+  一条命令完成：doc-level DeepSeek（摘要）筛选 → raw_chunks → blocks → KVBank（可选 split_tables）
+- **调试主线（可拆解）**：`build_topic_pdf_subset_deepseek.py` → `build_raw_context_from_pdfs.py` → `build_kvbank_from_pdf_dir_multistep.py`  
+  适合你逐段确认“筛选/抽取/切块/建库”哪一步出了问题
 
-python -u scripts/build_topic_pdf_subset_deepseek.py \
-  --pdf_dir "$PDF_DIR" \
-  --topic sarscov2 \
-  --out_pdf_dir "$PDF_DIR_SARSCOV2" \
-  --ocr auto
-```
+两条链路的关系：
+- `rebuild_topic_kvbank_from_config.py` 本质上是把“调试主线”的步骤**串起来**（内部会调用 doc-filter，并直接调用 pipeline 函数生成 raw_chunks/blocks/KVBank）。
+- 所以：**结果等价**，只是 `rebuild` 更一键；三段式更容易定位问题。
 
-> 你可以先用 `--max_pdfs 200` 快速试跑，确认 DeepSeek 筛选逻辑与输出目录正常。
+### 1.1.2（你只需要改 config.json）专题库的配置文件位置与目录约定
 
-### 1.1.2（推荐）配置驱动的专题库（你编辑 config.json，不需要前端）
+> 约定：本 runbook 针对你的远程目录（flat layout）`/home/jb/KVI`。  
+> 如果你在另一个环境是 monorepo（repo root 下还有 `external_kv_injection/` 子目录），把下面的相对路径整体加上前缀即可。
 
-我们为每个专题库提供一个可编辑的 `config.json`（你可以改“建库目标 goal / 是否抽取表格 extract_tables”等），后续和前端联调时再定接口。
+模板位置（远程 `/home/jb/KVI`）：
+- `config/topics/SFTSV/config.json`
+- `config/topics/SARS2/config.json`
 
-模板位置（本仓库）：
-- `external_kv_injection/config/topics/SFTSV/config.json`
-- `external_kv_injection/config/topics/SARS2/config.json`
+推荐目录结构（你已经在采用）：
+- **专题源 PDF**（你人工整理/或放软链）：  
+  - SFTSV：`/home/jb/KVI/pdfs/sftsvpdf`（或 `/home/jb/KVI/pdfs/SFTSV`）  
+  - SARS2：`/home/jb/KVI/pdfs/sarspdf`（或 `/home/jb/KVI/pdfs/SARS2`）
+- **专题产物目录**：  
+  - SFTSV：`/home/jb/KVI/topics/SFTSV/`  
+  - SARS2：`/home/jb/KVI/topics/SARS2/`
 
-重要提示（关于你提到的重复 PDF）：
-- **推荐按专题分目录**：例如 `/home/jb/KVI/pdfs/SFTSV`、`/home/jb/KVI/pdfs/SARS2`，把对应专题 PDF 放进去（或软链进去），减少“混合大库里筛选”的不确定性。
-- 如果你的历史目录结构确实是 `.../pdfs/pdfs/*.pdf`（外层 `pdfs` 里又嵌套了一层 `pdfs`），脚本用 `rglob("*.pdf")` 递归扫描时就会扫到所有子目录。
-- 我们在 doc-level 筛选脚本里增加了 `dedupe_by_basename`（默认从 config 开启），同名 PDF 会自动跳过重复项并在 results.jsonl 里标记 `DUPLICATE/SKIP`。
+重要提示（重复 PDF / 软链接 / results 写入方式）：
+- doc-level 筛选阶段默认 `mode=symlink`：`out_pdf_dir` 下会看到 **KEEP 的 PDF 软链接**，指向 `source_pdf_dir`（省磁盘、速度快）。
+- 如果目录里有同名 PDF：`dedupe_by_basename=true` 会跳过重复项，并在 results.jsonl 标记 `DUPLICATE/SKIP`。
+- **results_jsonl 默认是追加写**：方便保留历史记录。若你想每次重跑都得到“干净的一份结果”，在 config 的 `doc_filter` 里加：
+  - `"overwrite_results": true`
 
 ### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常
 
@@ -156,7 +158,7 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
   --shard_size 1024
 ```
 
-### 1.2.2（推荐）一条命令重建专题库：doc-level DS(abstract) → pipeline → KVBank
+### 1.2.2（推荐主线）一条命令重建专题库：doc-level DS(abstract) → pipeline → KVBank
 
 > 你只需要改 config.json 里的：
 > - `goal`：建立专题库的目标（用户输入）
@@ -164,13 +166,62 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
 > - 路径：`source_pdf_dir / out_pdf_dir / build.work_dir`
 
 ```bash
-# SFTSV 专题库（输出目录示例：/home/jb/KVI/topics/SFTSV）
+# SFTSV 专题库（输出目录：/home/jb/KVI/topics/SFTSV）
 python -u scripts/rebuild_topic_kvbank_from_config.py \
-  --config external_kv_injection/config/topics/SFTSV/config.json
+  --config config/topics/SFTSV/config.json
 
-# SARS2 专题库（输出目录示例：/home/jb/KVI/topics/SARS2）
+# SARS2 专题库（输出目录：/home/jb/KVI/topics/SARS2）
 python -u scripts/rebuild_topic_kvbank_from_config.py \
-  --config external_kv_injection/config/topics/SARS2/config.json
+  --config config/topics/SARS2/config.json
+```
+
+完成后，如何判断成功（四个硬产物）：
+- `topics/<TOPIC>/doc_filter_results.jsonl`：doc-level 筛选记录（KEEP/DROP/UNCERTAIN）
+- `topics/<TOPIC>/pdfs/`：KEEP 的 PDF（默认软链）
+- `topics/<TOPIC>/work/raw_chunks.jsonl`、`topics/<TOPIC>/work/blocks.jsonl`
+- `topics/<TOPIC>/work/kvbank_blocks/manifest.json`（以及 `kvbank_tables/manifest.json` 若 `split_tables=true`）
+
+### 1.2.3（调试主线）把链路拆成三段，逐段排错
+
+当你需要定位“到底是筛选不准、抽取不行、还是建库出错”时，用这三段式：
+
+1) **doc-level 筛选（摘要）**：源 PDF → `topics/<TOPIC>/pdfs/` + `doc_filter_results.jsonl`
+
+```bash
+python -u scripts/build_topic_pdf_subset_deepseek.py \
+  --config config/topics/SFTSV/config.json \
+  --max_pdfs 200
+```
+
+2) **抽取 raw_chunks（不建库）**：KEEP PDFs → raw_chunks
+
+```bash
+python -u scripts/build_raw_context_from_pdfs.py \
+  --pdf_dir "/home/jb/KVI/topics/SFTSV/pdfs" \
+  --out "/home/jb/KVI/topics/SFTSV/work/raw_chunks.jsonl" \
+  --tokenizer "$BASE_LLM" \
+  --chunk_tokens 4096 \
+  --chunk_overlap 256 \
+  --ocr auto \
+  --knowledge_filter \
+  --deepseek_model deepseek-chat
+```
+
+3) **一键 blocks+KVBank**：KEEP PDFs → work_dir（raw_chunks/blocks/kvbank）
+
+```bash
+python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
+  --pdf_dir "/home/jb/KVI/topics/SFTSV/pdfs" \
+  --work_dir "/home/jb/KVI/topics/SFTSV/work" \
+  --base_llm "$BASE_LLM" \
+  --retrieval_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --chunk_tokens 4096 --chunk_overlap 256 \
+  --block_tokens 256 --block_overlap_tokens 64 --keep_last_incomplete_block \
+  --ocr auto \
+  --knowledge_filter --deepseek_model deepseek-chat \
+  --split_tables \
+  --shard_size 1024
 ```
 
 ### 1.3 质量检查：如何确认 blocks 文本“抽取质量好”
