@@ -68,7 +68,35 @@ def _link_or_copy(src: Path, dst: Path, *, mode: str) -> None:
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
-    obj = json.loads(path.read_text(encoding="utf-8"))
+    # Be tolerant to repo layout differences:
+    # - monorepo layout: <repo>/external_kv_injection/config/...
+    # - flat layout (KVI root): <repo>/config/...
+    #
+    # Users often copy-paste commands between environments; if the provided path
+    # doesn't exist, try to resolve it against repo root and/or strip the
+    # "external_kv_injection/" prefix.
+    p = path
+    if not p.is_absolute():
+        # first try relative to cwd, then to repo root
+        p1 = (Path.cwd() / p).resolve()
+        if p1.exists():
+            p = p1
+        else:
+            p2 = (_REPO_ROOT / p).resolve()
+            if p2.exists():
+                p = p2
+    if not p.exists():
+        parts = list(p.parts)
+        if "external_kv_injection" in parts:
+            i = parts.index("external_kv_injection")
+            alt_rel = Path(*parts[i + 1 :])  # strip prefix
+            alt = (_REPO_ROOT / alt_rel).resolve()
+            if alt.exists():
+                p = alt
+    if not p.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    obj = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(obj, dict):
         raise ValueError("config must be a JSON object")
     return obj

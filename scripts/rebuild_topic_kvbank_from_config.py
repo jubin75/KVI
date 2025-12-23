@@ -35,7 +35,28 @@ except ModuleNotFoundError:
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
-    obj = json.loads(path.read_text(encoding="utf-8"))
+    # Tolerate repo layout differences (monorepo vs flat KVI root).
+    p = path
+    if not p.is_absolute():
+        p1 = (Path.cwd() / p).resolve()
+        if p1.exists():
+            p = p1
+        else:
+            p2 = (_REPO_ROOT / p).resolve()
+            if p2.exists():
+                p = p2
+    if not p.exists():
+        parts = list(p.parts)
+        if "external_kv_injection" in parts:
+            i = parts.index("external_kv_injection")
+            alt_rel = Path(*parts[i + 1 :])
+            alt = (_REPO_ROOT / alt_rel).resolve()
+            if alt.exists():
+                p = alt
+    if not p.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    obj = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(obj, dict):
         raise ValueError("config must be a JSON object")
     return obj
