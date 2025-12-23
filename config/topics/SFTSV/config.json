@@ -19,7 +19,8 @@
     "max_pages_for_abstract": 2,
     "max_abstract_chars": 12000,
     "mode": "symlink",
-    "dedupe_by_basename": true
+    "dedupe_by_basename": true,
+    "overwrite_results": true
   },
 
   "build": {
