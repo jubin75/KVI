@@ -137,6 +137,7 @@ def main() -> None:
     p.add_argument("--out_pdf_dir", default=None, help="Output dir for kept PDFs. If --config provided, defaults to config.out_pdf_dir.")
     p.add_argument("--results_jsonl", default=None, help="Decision log path (jsonl). If --config provided, defaults to config.results_jsonl.")
     p.add_argument("--mode", choices=["symlink", "copy"], default="symlink")
+    p.add_argument("--overwrite_results", action="store_true", help="If set, overwrite results_jsonl instead of appending.")
     p.add_argument("--ocr", default="off", choices=["off", "auto", "on"])
     p.add_argument("--max_pages", type=int, default=2, help="Scan first N pages to find the full abstract.")
     p.add_argument("--max_abstract_chars", type=int, default=12000, help="Max abstract chars sent to DeepSeek.")
@@ -166,6 +167,8 @@ def main() -> None:
         args.max_pages = int(df_cfg.get("max_pages_for_abstract", args.max_pages))
         args.max_abstract_chars = int(df_cfg.get("max_abstract_chars", args.max_abstract_chars))
         args.dedupe_by_basename = bool(df_cfg.get("dedupe_by_basename", bool(args.dedupe_by_basename)))
+        if bool(df_cfg.get("overwrite_results", False)):
+            args.overwrite_results = True
 
     goal = str(args.goal or cfg.get("goal") or "").strip()
     if not goal:
@@ -195,7 +198,8 @@ def main() -> None:
     print(
         f"[doc_filter] pdfs={len(pdfs)} mode={args.mode} ocr={args.ocr} max_pages={int(args.max_pages)} "
         f"max_abstract_chars={int(args.max_abstract_chars)} strict_drop_uncertain={bool(args.strict_drop_uncertain)} "
-        f"dedupe_by_basename={bool(args.dedupe_by_basename)} out_pdf_dir={out_dir} results={results_path}",
+        f"dedupe_by_basename={bool(args.dedupe_by_basename)} overwrite_results={bool(args.overwrite_results)} "
+        f"out_pdf_dir={out_dir} results={results_path}",
         flush=True,
     )
 
@@ -206,7 +210,8 @@ def main() -> None:
     dup_skipped = 0
     seen_names: set[str] = set()
 
-    with results_path.open("a", encoding="utf-8") as fout:
+    write_mode = "w" if bool(args.overwrite_results) else "a"
+    with results_path.open(write_mode, encoding="utf-8") as fout:
         for i, pdf in enumerate(pdfs, start=1):
             try:
                 if bool(args.dedupe_by_basename):
