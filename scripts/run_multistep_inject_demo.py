@@ -75,10 +75,14 @@ def main() -> None:
     )
     p.add_argument(
         "--rewrite_query_for_retrieval",
-        choices=["off", "acronym_lexicon_from_blocks"],
-        default="acronym_lexicon_from_blocks",
+        choices=["off", "acronym_lexicon_from_blocks", "zh_en_intent", "auto"],
+        default="auto",
         help="Rewrite ONLY the retrieval query (not the model prompt). "
-        "This improves acronym disambiguation without requiring users to type expansions.",
+        "This can improve cross-lingual alignment and acronym disambiguation without requiring users to type expansions. "
+        "Modes: "
+        "acronym_lexicon_from_blocks=append expansions inferred from blocks.jsonl; "
+        "zh_en_intent=append an English gloss for common ZH intent keywords (传播/途径/媒介/证据句); "
+        "auto=best-effort combo (safe default).",
     )
     p.add_argument(
         "--quality_filter_from_blocks",
@@ -243,6 +247,8 @@ def main() -> None:
         r"\b([A-Z][A-Z0-9]{2,11})\b\s*[（(]\s*([^）)\n\r]{3,120}?)\s*[）)]"
     )
     _ACRONYM_IN_QUERY_RE = re.compile(r"\b([A-Z][A-Z0-9]{2,11})\b")
+    _HAS_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+    _ZH_TRANSMISSION_INTENT_RE = re.compile(r"(怎么传播|传播途径|传播方式|传播路径|主要传播|媒介|叮咬|蜱|人传人|体液|接触|证据句)")
 
     def _format_model_prompt(user_prompt: str) -> str:
         if not bool(args.use_chat_template):
@@ -302,35 +308,57 @@ def main() -> None:
         return out
 
     def _rewrite_query_for_retrieval(user_prompt: str) -> str:
-        if str(args.rewrite_query_for_retrieval) == "off":
+        mode = str(args.rewrite_query_for_retrieval)
+        if mode == "off":
             return user_prompt
-        if str(args.rewrite_query_for_retrieval) == "acronym_lexicon_from_blocks":
+        rewritten = user_prompt
+        notes: list[str] = []
+
+        def _apply_acronym_lexicon(text: str) -> str:
             if not args.blocks_jsonl:
-                return user_prompt
+                return text
             blocks_path = Path(str(args.blocks_jsonl))
             try:
                 lex = _build_acronym_lexicon_from_blocks(blocks_path)
             except Exception as e:
-                print(f"[query_rewrite] disabled (failed to build lexicon): {type(e).__name__}: {e}", flush=True)
-                return user_prompt
-            acronyms = sorted(set(_ACRONYM_IN_QUERY_RE.findall(user_prompt)))
+                print(f"[query_rewrite] acronym_lexicon disabled: {type(e).__name__}: {e}", flush=True)
+                return text
+            acronyms = sorted(set(_ACRONYM_IN_QUERY_RE.findall(text)))
             if not acronyms:
-                return user_prompt
+                return text
             aug_parts = []
             for ac in acronyms:
                 exp = lex.get(ac)
                 if exp:
                     aug_parts.append(f"{ac}（{exp}）")
             if not aug_parts:
-                return user_prompt
-            rewritten = user_prompt + "\n\n" + "缩写解释：" + "；".join(aug_parts)
-            print(
-                f"[query_rewrite] mode=acronym_lexicon_from_blocks acronyms={acronyms} "
-                f"added={len(aug_parts)} blocks_jsonl={blocks_path}",
-                flush=True,
+                return text
+            notes.append(f"acronym_lexicon+{len(aug_parts)}")
+            return text + "\n\n" + "缩写解释：" + "；".join(aug_parts)
+
+        def _apply_zh_en_intent(text: str) -> str:
+            # Only trigger for Chinese queries with transmission-like intent.
+            if not _HAS_CJK_RE.search(text or ""):
+                return text
+            if not _ZH_TRANSMISSION_INTENT_RE.search(text or ""):
+                return text
+            # Add an English gloss that aligns well with many sentence encoders trained predominantly on EN.
+            gloss = (
+                "English gloss for retrieval: route of transmission; mode of transmission; transmission route; "
+                "tick bite; tick-borne; vector; arthropod vector; Haemaphysalis longicornis; "
+                "person-to-person transmission; close contact; blood/body fluids; evidence sentence."
             )
-            return rewritten
-        return user_prompt
+            notes.append("zh_en_intent")
+            return text + "\n\n" + gloss
+
+        if mode in {"acronym_lexicon_from_blocks", "auto"}:
+            rewritten = _apply_acronym_lexicon(rewritten)
+        if mode in {"zh_en_intent", "auto"}:
+            rewritten = _apply_zh_en_intent(rewritten)
+
+        if notes and rewritten != user_prompt:
+            print(f"[query_rewrite] mode={mode} applied={','.join(notes)}", flush=True)
+        return rewritten
 
     raw_user_prompt = str(args.prompt)
     # In retrieval-only mode, we do not need the model prompt at all.
