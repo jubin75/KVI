@@ -102,13 +102,19 @@ def main() -> None:
     p.add_argument(
         "--debug_single_block",
         action="store_true",
-        help="Debug preset: force top_k_blocks=1, max_blocks_per_step=1, max_steps=1, disable table routing.",
+        help="Debug preset: force max_blocks_per_step=1, max_steps=1, disable table routing. "
+        "NOTE: it does NOT override top_k_blocks, so you can still inspect top-N candidates via --debug_print_candidates.",
     )
     p.add_argument(
         "--debug_print_candidates",
         type=int,
         default=0,
         help="If >0, print top-N retrieved candidate ids + scores for each step.",
+    )
+    p.add_argument(
+        "--print_retrieval_query",
+        action="store_true",
+        help="If set, print the exact retrieval query text (after optional rewrite).",
     )
     p.add_argument(
         "--no_repeat_ngram_size",
@@ -265,6 +271,8 @@ def main() -> None:
     raw_user_prompt = str(args.prompt)
     model_prompt = _format_model_prompt(raw_user_prompt)
     retrieval_query_text = _rewrite_query_for_retrieval(raw_user_prompt)
+    if bool(args.print_retrieval_query):
+        print(f"[retrieval_query] {retrieval_query_text}", flush=True)
 
     # Light guardrail: warn if prompt topic keywords and selected library path look mismatched.
     p_low = raw_user_prompt.lower()
@@ -372,13 +380,13 @@ def main() -> None:
 
     # Debug preset: make it hard to accidentally introduce noise.
     if bool(args.debug_single_block):
-        args.top_k_blocks = 1
         args.max_blocks_per_step = 1
         args.max_steps = 1
         args.enable_table_routing = False
         args.table_top_k = 0
         print(
-            "[debug_single_block] applied: top_k_blocks=1 max_blocks_per_step=1 max_steps=1 enable_table_routing=false",
+            "[debug_single_block] applied: max_blocks_per_step=1 max_steps=1 enable_table_routing=false "
+            f"(top_k_blocks={int(args.top_k_blocks)})",
             flush=True,
         )
 

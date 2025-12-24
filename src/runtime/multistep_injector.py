@@ -206,7 +206,8 @@ class MultiStepInjector:
                     bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
                     src = (it.meta or {}).get("retrieval_source")
                     cands.append(f"{bid}@{float(getattr(it, 'score', 0.0)):.4f}" + (f"({src})" if src else ""))
-                print(f"[retrieval] step={step} top{topn}=" + " | ".join(cands), flush=True)
+                shown = min(int(topn), len(result.items or []))
+                print(f"[retrieval] step={step} top{shown}=" + " | ".join(cands), flush=True)
             selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_text=query_text)
 
             if not selected:
