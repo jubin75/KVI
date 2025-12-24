@@ -47,6 +47,9 @@ class MultiStepConfig:
     entropy_window: int = 2  # require consecutive decrease over this many steps
     entropy_threshold: float = 0.35  # normalized entropy in [0,1], lower means more concentrated
 
+    # debug
+    debug_print_candidates_top_n: int = 0  # if >0, print top-N retrieved candidates each step (block_id + score)
+
 
 @dataclass
 class StepDebug:
@@ -143,6 +146,7 @@ class MultiStepInjector:
         device: torch.device,
         max_new_tokens: int = 128,
         query_embed_fn: Optional[Any] = None,
+        no_repeat_ngram_size: int = 0,
     ) -> Tuple[str, List[StepDebug]]:
         """
         执行多步注入推理：
@@ -195,6 +199,14 @@ class MultiStepInjector:
 
             # ---- retrieve & select blocks ----
             result = self.retriever.search(query_vec, top_k=self.cfg.top_k_blocks, filters=None, query_text=query_text)
+            if int(self.cfg.debug_print_candidates_top_n) > 0:
+                topn = int(self.cfg.debug_print_candidates_top_n)
+                cands = []
+                for it in (result.items or [])[:topn]:
+                    bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                    src = (it.meta or {}).get("retrieval_source")
+                    cands.append(f"{bid}@{float(getattr(it, 'score', 0.0)):.4f}" + (f"({src})" if src else ""))
+                print(f"[retrieval] step={step} top{topn}=" + " | ".join(cands), flush=True)
             selected, injected_tokens, redundancy_hits = self._select_blocks(result.items, query_text=query_text)
 
             if not selected:
@@ -354,6 +366,7 @@ class MultiStepInjector:
             device=device,
             past_key_values=last_past_key_values,
             max_new_tokens=max_new_tokens,
+            no_repeat_ngram_size=int(no_repeat_ngram_size),
         )
         return txt, step_debugs
 
@@ -366,6 +379,7 @@ class MultiStepInjector:
         device: torch.device,
         past_key_values: Any,
         max_new_tokens: int,
+        no_repeat_ngram_size: int = 0,
     ) -> str:
         """
         Greedy decode that supports an *external prefix* cache.
@@ -405,6 +419,41 @@ class MultiStepInjector:
 
         eos_id = getattr(tokenizer, "eos_token_id", None)
 
+        def _ban_repeated_ngrams(logits: torch.Tensor, seq: torch.Tensor, n: int) -> torch.Tensor:
+            """
+            Apply a no-repeat-ngram constraint by setting banned token logits to -inf.
+            seq: [1, T] token ids (prompt + generated so far)
+            logits: [1, V] next-token logits
+            """
+            if n <= 0:
+                return logits
+            n = int(n)
+            if n < 2:
+                return logits
+            if seq.numel() < n - 1:
+                return logits
+
+            # Build a mapping: (n-1)-gram prefix -> set(next_token)
+            tokens = seq[0].tolist()
+            prefix_to_next: dict[tuple[int, ...], set[int]] = {}
+            for i in range(len(tokens) - n + 1):
+                pref = tuple(tokens[i : i + n - 1])
+                nxt = int(tokens[i + n - 1])
+                s = prefix_to_next.get(pref)
+                if s is None:
+                    s = set()
+                    prefix_to_next[pref] = s
+                s.add(nxt)
+
+            cur_pref = tuple(tokens[-(n - 1) :])
+            banned = prefix_to_next.get(cur_pref)
+            if not banned:
+                return logits
+            # set to -inf in-place on a copy
+            out = logits.clone()
+            out[0, list(banned)] = float("-inf")
+            return out
+
         # First step: consume full prompt with the injected prefix cache.
         # Provide explicit positions starting at prefix_len for RoPE/cache bookkeeping.
         pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long).unsqueeze(0)
@@ -431,7 +480,10 @@ class MultiStepInjector:
                     return_dict=True,
                 )
         past = out.past_key_values
-        next_token = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)  # [1,1]
+        seq0 = input_ids
+        logits0 = out.logits[:, -1, :]
+        logits0 = _ban_repeated_ngrams(logits0, seq0, int(no_repeat_ngram_size))
+        next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
         attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
@@ -464,7 +516,10 @@ class MultiStepInjector:
                         return_dict=True,
                     )
             past = out.past_key_values
-            next_token = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+            seq = torch.cat([input_ids] + generated, dim=1)
+            logits = out.logits[:, -1, :]
+            logits = _ban_repeated_ngrams(logits, seq, int(no_repeat_ngram_size))
+            next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 

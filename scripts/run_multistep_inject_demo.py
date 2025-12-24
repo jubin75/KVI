@@ -90,9 +90,32 @@ def main() -> None:
     p.add_argument("--top_k_blocks", type=int, default=8)
     p.add_argument("--max_blocks_per_step", type=int, default=8, help="Cap selected blocks per step. For RoPE models, try 1 first.")
     p.add_argument("--max_new_tokens", type=int, default=128)
-    p.add_argument("--print_baseline", action="store_true", help="Print baseline answer without KV injection for A/B compare.")
+    # Baseline is extremely useful for A/B debug; default to printing it.
+    p.add_argument("--skip_baseline", action="store_true", help="If set, do NOT print baseline answer (no injection).")
+    p.add_argument(
+        "--print_baseline",
+        action="store_true",
+        help="(legacy) Kept for backward compatibility; baseline is printed by default unless --skip_baseline.",
+    )
     p.add_argument("--use_attention_entropy", action="store_true", help="Enable external KV attention entropy stopping signal")
     p.add_argument("--entropy_threshold", type=float, default=0.35, help="Normalized entropy threshold in [0,1]")
+    p.add_argument(
+        "--debug_single_block",
+        action="store_true",
+        help="Debug preset: force top_k_blocks=1, max_blocks_per_step=1, max_steps=1, disable table routing.",
+    )
+    p.add_argument(
+        "--debug_print_candidates",
+        type=int,
+        default=0,
+        help="If >0, print top-N retrieved candidate ids + scores for each step.",
+    )
+    p.add_argument(
+        "--no_repeat_ngram_size",
+        type=int,
+        default=6,
+        help="No-repeat ngram constraint during final decode to reduce repetitive filler (0 disables).",
+    )
     args = p.parse_args()
 
     # 专题库 mode: resolve paths from topic_work_dir/topic
@@ -315,7 +338,7 @@ def main() -> None:
             allowed_block_ids = None
             print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
 
-    if bool(args.print_baseline):
+    if (not bool(args.skip_baseline)) or bool(args.print_baseline):
         inputs0 = tok(model_prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
@@ -324,8 +347,20 @@ def main() -> None:
         in_len = int(inputs0["input_ids"].shape[1])
         print(_strip_chat_artifacts(tok.decode(out0[0][in_len:], skip_special_tokens=True)))
 
+    # Debug preset: make it hard to accidentally introduce noise.
+    if bool(args.debug_single_block):
+        args.top_k_blocks = 1
+        args.max_blocks_per_step = 1
+        args.max_steps = 1
+        args.enable_table_routing = False
+        args.table_top_k = 0
+        print(
+            "[debug_single_block] applied: top_k_blocks=1 max_blocks_per_step=1 max_steps=1 enable_table_routing=false",
+            flush=True,
+        )
+
     bank = FaissKVBank.load(Path(args.kv_dir))
-    if bool(args.enable_table_routing) and args.kv_dir_tables:
+    if bool(args.enable_table_routing) and args.kv_dir_tables and int(args.table_top_k) > 0:
         table_bank = FaissKVBank.load(Path(args.kv_dir_tables))
         retriever = RoutedRetriever(
             kv_bank=bank,
@@ -350,6 +385,7 @@ def main() -> None:
         max_blocks_per_step=int(args.max_blocks_per_step),
         use_attention_entropy=bool(args.use_attention_entropy),
         entropy_threshold=float(args.entropy_threshold),
+        debug_print_candidates_top_n=int(args.debug_print_candidates),
     )
     injector = MultiStepInjector(retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids)
     answer, dbg = injector.run(
@@ -360,6 +396,7 @@ def main() -> None:
         device=device,
         max_new_tokens=args.max_new_tokens,
         query_embed_fn=query_embed_fn,
+        no_repeat_ngram_size=int(args.no_repeat_ngram_size),
     )
 
     print("=== Step Debug ===")
