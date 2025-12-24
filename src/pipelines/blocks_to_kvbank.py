@@ -231,6 +231,8 @@ def build_kvbank_from_blocks_jsonl(
                 "source_id": rec.get("source_id"),
                 "doc_id": rec.get("doc_id"),
                 "lang": rec.get("lang"),
+                "source_uri": rec.get("source_uri"),
+                "ocr_used": rec.get("ocr_used"),
                 "layer_ids": layer_ids,
                 "kv_len": kv_len,
                 "max_kv_tokens": block_tokens,

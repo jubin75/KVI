@@ -60,6 +60,8 @@ def build_blocks_from_raw_chunks(
             text = rec.get("text") or ""
             meta = rec.get("metadata") or {}
             lang = rec.get("lang")
+            source_uri = rec.get("source_uri")
+            ocr_used = rec.get("ocr_used")
 
             ids = tok(text, return_tensors=None, add_special_tokens=False)["input_ids"]
             for i in range(0, len(ids), stride):
@@ -95,6 +97,8 @@ def build_blocks_from_raw_chunks(
                     "parent_chunk_id": chunk_id,
                     "doc_id": doc_id,
                     "lang": lang,
+                    "source_uri": source_uri,
+                    "ocr_used": ocr_used,
                     "token_count": int(len(block_ids)),
                     "block_tokens": int(block_tokens),
                     "text": block_text,

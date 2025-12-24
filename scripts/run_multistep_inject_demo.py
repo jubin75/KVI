@@ -434,6 +434,7 @@ def main() -> None:
                             found[bid] = {
                                 "doc_id": rec.get("doc_id"),
                                 "token_count": rec.get("token_count"),
+                                "source_uri": rec.get("source_uri"),
                                 "snippet": snippet,
                                 "metadata": rec.get("metadata"),
                             }
@@ -451,6 +452,16 @@ def main() -> None:
                     continue
                 print(f"\n--- block_id={bid} ---", flush=True)
                 print(f"doc_id={info.get('doc_id')} token_count={info.get('token_count')}", flush=True)
+                md = info.get("metadata") or {}
+                if isinstance(md, dict):
+                    # Common, high-signal provenance fields
+                    # (source_uri is added by our pipeline; may be missing for older blocks.jsonl)
+                    src = md.get("source_uri") or md.get("source_path") or md.get("pdf_path")
+                    if src:
+                        print(f"source_uri={src}", flush=True)
+                # Also show top-level provenance when present
+                if isinstance(info.get("source_uri"), str):
+                    print(f"source_uri={info.get('source_uri')}", flush=True)
                 print(f"text_snippet={info.get('snippet')}", flush=True)
 
 
