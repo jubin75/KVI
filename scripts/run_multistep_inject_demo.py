@@ -62,6 +62,12 @@ def main() -> None:
     )
     p.add_argument("--prompt", required=True)
     p.add_argument(
+        "--retrieval_only",
+        action="store_true",
+        help="If set, run ONLY retrieval (no KV injection, no LLM forward/generation). "
+        "Recommended to debug whether top-k candidates contain evidence sentences (tick/vector/transmission/蜱/媒介).",
+    )
+    p.add_argument(
         "--use_chat_template",
         action="store_true",
         help="If tokenizer supports it, format the model prompt using tokenizer.apply_chat_template. "
@@ -145,6 +151,19 @@ def main() -> None:
         default=0,
         help="When printing token ids, optionally truncate to first N ids (0 = no truncation).",
     )
+    p.add_argument(
+        "--print_top_candidates_text",
+        type=int,
+        default=0,
+        help="If >0, print FULL text for top-N retrieved candidates (requires --blocks_jsonl). "
+        "Tip: combine with --retrieval_only to avoid loading the base LLM.",
+    )
+    p.add_argument(
+        "--top_candidates_max_chars",
+        type=int,
+        default=2000,
+        help="When printing top candidates full text, truncate each candidate to first N chars (0 = no truncation).",
+    )
     args = p.parse_args()
 
     # 专题库 mode: resolve paths from topic_work_dir/topic
@@ -216,15 +235,9 @@ def main() -> None:
     else:
         print(f"[config] kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}", flush=True)
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.bfloat16 if device.type == "cuda" else None, trust_remote_code=True
-    )
-    model.to(device)
-    model.eval()
+    tok = None
+    model = None
 
     _ACRONYM_PAREN_RE = re.compile(
         r"\b([A-Z][A-Z0-9]{2,11})\b\s*[（(]\s*([^）)\n\r]{3,120}?)\s*[）)]"
@@ -234,7 +247,7 @@ def main() -> None:
     def _format_model_prompt(user_prompt: str) -> str:
         if not bool(args.use_chat_template):
             return user_prompt
-        if hasattr(tok, "apply_chat_template"):
+        if tok is not None and hasattr(tok, "apply_chat_template"):
             try:
                 msgs = [{"role": "user", "content": user_prompt}]
                 return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)  # type: ignore[attr-defined]
@@ -320,7 +333,8 @@ def main() -> None:
         return user_prompt
 
     raw_user_prompt = str(args.prompt)
-    model_prompt = _format_model_prompt(raw_user_prompt)
+    # In retrieval-only mode, we do not need the model prompt at all.
+    model_prompt = raw_user_prompt
     retrieval_query_text = _rewrite_query_for_retrieval(raw_user_prompt)
     if bool(args.print_retrieval_query):
         print(f"[retrieval_query] {retrieval_query_text}", flush=True)
@@ -420,15 +434,6 @@ def main() -> None:
             allowed_block_ids = None
             print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
 
-    if (not bool(args.skip_baseline)) or bool(args.print_baseline):
-        inputs0 = tok(model_prompt, return_tensors="pt").to(device)
-        with torch.no_grad():
-            out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
-        print("=== Baseline (no injection) ===")
-        # Print only newly generated tokens (exclude prompt) for easier A/B compare.
-        in_len = int(inputs0["input_ids"].shape[1])
-        print(_strip_chat_artifacts(tok.decode(out0[0][in_len:], skip_special_tokens=True)))
-
     # Debug preset: make it hard to accidentally introduce noise.
     if bool(args.debug_single_block):
         args.max_blocks_per_step = 1
@@ -452,10 +457,86 @@ def main() -> None:
     else:
         retriever = Retriever(bank)
 
-    enc = HFSentenceEncoder(HFSentenceEncoderConfig(model_name_or_path=args.domain_encoder_model, max_length=256, normalize=True))
+    enc = HFSentenceEncoder(
+        HFSentenceEncoderConfig(model_name_or_path=args.domain_encoder_model, max_length=256, normalize=True)
+    )
 
     def query_embed_fn(text: str):
         return enc.encode(text)[0]
+
+    # Retrieval-only mode: do one search and optionally print top-N candidate full texts.
+    if bool(args.retrieval_only):
+        qv = query_embed_fn(retrieval_query_text)
+        res = retriever.search(qv, top_k=int(args.top_k_blocks), filters=None, query_text=retrieval_query_text)
+        print("=== Retrieval Only ===")
+        print(f"kv_dir={args.kv_dir}", flush=True)
+        print(f"top_k_blocks={int(args.top_k_blocks)} retrieved_candidates={len(res.items)}", flush=True)
+        for i, it in enumerate(res.items, start=1):
+            bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+            did = it.meta.get("doc_id")
+            src = it.meta.get("source_uri")
+            print(
+                f"[cand {i:02d}] block_id={bid} score={float(getattr(it, 'score', 0.0)):.4f} doc_id={did} source_uri={src}",
+                flush=True,
+            )
+
+        if int(args.print_top_candidates_text) > 0:
+            if not args.blocks_jsonl:
+                raise SystemExit("--print_top_candidates_text requires --blocks_jsonl")
+            n = int(args.print_top_candidates_text)
+            wanted = [
+                str((it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id"))) for it in res.items[:n]
+            ]
+            wanted_set = set(wanted)
+            blocks_path = Path(str(args.blocks_jsonl))
+            found: dict[str, dict] = {}
+            with blocks_path.open("r", encoding="utf-8") as f:
+                for line_no, line in enumerate(f, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    bid = rec.get("block_id")
+                    if bid in wanted_set and str(bid) not in found:
+                        found[str(bid)] = {"line_no": int(line_no), **rec}
+                    if len(found) >= len(wanted_set):
+                        break
+            print("=== Top Candidate Texts (from blocks_jsonl) ===")
+            print(f"blocks_jsonl={blocks_path}", flush=True)
+            for bid in wanted:
+                rec = found.get(bid)
+                if not rec:
+                    print(f"\n--- block_id={bid} (NOT FOUND in blocks_jsonl) ---", flush=True)
+                    continue
+                txt = str(rec.get("text") or "")
+                if int(args.top_candidates_max_chars) > 0:
+                    txt = txt[: int(args.top_candidates_max_chars)]
+                print(f"\n--- block_id={bid} line_no={rec.get('line_no')} doc_id={rec.get('doc_id')} ---", flush=True)
+                print(txt, flush=True)
+        return
+
+    # Injection mode: load the base model + tokenizer.
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+
+    tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
+    model_prompt = _format_model_prompt(raw_user_prompt)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, torch_dtype=torch.bfloat16 if device.type == "cuda" else None, trust_remote_code=True
+    )
+    model.to(device)
+    model.eval()
+
+    if (not bool(args.skip_baseline)) or bool(args.print_baseline):
+        inputs0 = tok(model_prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
+        print("=== Baseline (no injection) ===")
+        # Print only newly generated tokens (exclude prompt) for easier A/B compare.
+        in_len = int(inputs0["input_ids"].shape[1])
+        print(_strip_chat_artifacts(tok.decode(out0[0][in_len:], skip_special_tokens=True)))
 
     cfg = MultiStepConfig(
         inject_layers=[int(x.strip()) for x in args.layers.split(",") if x.strip() != ""],
