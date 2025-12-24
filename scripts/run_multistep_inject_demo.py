@@ -151,14 +151,65 @@ def main() -> None:
     if args.kv_dir is None:
         if not args.topic or not args.topic_work_dir:
             raise SystemExit("Missing --kv_dir. Either pass --kv_dir or use --topic + --topic_work_dir.")
-        base = Path(str(args.topic_work_dir)) / str(args.topic)
-        args.kv_dir = str(base / "kvbank_blocks")
+        twd = Path(str(args.topic_work_dir))
+        topic = str(args.topic)
+
+        # Support multiple common layouts:
+        # 1) <topic_work_dir>/<topic>/{kvbank_blocks,kvbank_tables,blocks.jsonl}
+        # 2) <topic_work_dir>/<topic>/work/{kvbank_blocks,kvbank_tables,blocks.jsonl}
+        # 3) Same as above but with topic folder uppercased (e.g. SFTSV, SARS2)
+        candidates = [
+            twd / topic,
+            twd / topic / "work",
+            twd / topic.upper(),
+            twd / topic.upper() / "work",
+        ]
+
+        def _pick_kv_dir(base_dir: Path) -> Path:
+            # Prefer kvbank_blocks (or kvbank_blocks_v2) that actually contains a manifest.
+            opts = [base_dir / "kvbank_blocks", base_dir / "kvbank_blocks_v2"]
+            for p in opts:
+                if (p / "manifest.json").exists():
+                    return p
+            # fall back to the non-existing default to preserve older behavior (FaissKVBank.load will hint)
+            return base_dir / "kvbank_blocks"
+
+        def _pick_blocks_jsonl(base_dir: Path) -> Path:
+            opts = [base_dir / "blocks.jsonl", base_dir / "blocks.v2.jsonl"]
+            for p in opts:
+                if p.exists():
+                    return p
+            return base_dir / "blocks.jsonl"
+
+        chosen_base = None
+        chosen_kv = None
+        for b in candidates:
+            kvp = _pick_kv_dir(b)
+            if (kvp / "manifest.json").exists():
+                chosen_base = b
+                chosen_kv = kvp
+                break
+        if chosen_base is None:
+            # none of the candidates has a manifest; pick the first candidate and keep hints
+            chosen_base = candidates[0]
+            chosen_kv = _pick_kv_dir(chosen_base)
+
+        args.kv_dir = str(chosen_kv)
         if args.kv_dir_tables is None:
-            args.kv_dir_tables = str(base / "kvbank_tables")
+            # tables are optional; only set default if exists
+            tbl = Path(str(chosen_base)) / "kvbank_tables"
+            tbl_v2 = Path(str(chosen_base)) / "kvbank_tables_v2"
+            if (tbl / "manifest.json").exists():
+                args.kv_dir_tables = str(tbl)
+            elif (tbl_v2 / "manifest.json").exists():
+                args.kv_dir_tables = str(tbl_v2)
+            else:
+                args.kv_dir_tables = str(tbl)  # default path (may not exist)
         if args.blocks_jsonl is None:
-            args.blocks_jsonl = str(base / "blocks.jsonl")
+            args.blocks_jsonl = str(_pick_blocks_jsonl(Path(str(chosen_base))))
+
         print(
-            f"[topic_mode] topic={args.topic} topic_work_dir={args.topic_work_dir} "
+            f"[topic_mode] topic={args.topic} topic_work_dir={args.topic_work_dir} chosen_base={chosen_base} "
             f"kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}",
             flush=True,
         )
