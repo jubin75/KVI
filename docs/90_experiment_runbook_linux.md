@@ -228,6 +228,10 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
 
 在跑 `blocks.jsonl` 生成后，建议做两步：
 
+> 注意：如果你采用“分库（专题库）模式”，那么你应该检查**专题库自己的** blocks：  
+> 例如 `topics/SARS2/work/blocks.jsonl` 或 `topics/SFTSV/work/blocks.jsonl`，而不是旧的全库 `WORK_DIR=/home/jb/KVI/_exp_prod/blocks.jsonl`。  
+> 简单原则：**你最终推理/注入用哪个 KVBank，就检查哪个 KVBank 对应的 blocks.jsonl。**
+
 1) **整体统计**（空块率、token 分布、重复率、疑似乱码比例、表格覆盖率）
 
 ```bash

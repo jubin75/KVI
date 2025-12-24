@@ -165,6 +165,7 @@ class MultiStepInjector:
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         input_ids = inputs["input_ids"]
         attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
+        prompt_len = int(input_ids.shape[1])
 
         prev_logits = None
         prev_hidden = None
@@ -235,16 +236,37 @@ class MultiStepInjector:
             last_past_key_values = past_key_values
 
             # ---- one forward step to update logits/hidden ----
+            # IMPORTANT: when using an *external prefix cache*, many HF models expect the
+            # attention_mask/position_ids/cache_position to account for the prefix length.
+            prefix_len = int(injected_tokens)
+            prefix_mask = torch.ones((attention_mask.shape[0], prefix_len), dtype=attention_mask.dtype, device=device)
+            attn = torch.cat([prefix_mask, attention_mask], dim=1)
+            pos0 = torch.arange(prefix_len, prefix_len + prompt_len, device=device, dtype=torch.long).unsqueeze(0)
+            cache_pos0 = torch.arange(prefix_len, prefix_len + prompt_len, device=device, dtype=torch.long)
             with torch.no_grad():
-                out = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    use_cache=True,
-                    past_key_values=past_key_values,
-                    output_hidden_states=True,
-                    output_attentions=bool(self.cfg.use_attention_entropy),
-                    return_dict=True,
-                )
+                try:
+                    out = model(
+                        input_ids=input_ids,
+                        attention_mask=attn,
+                        position_ids=pos0,
+                        cache_position=cache_pos0,
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                        output_hidden_states=True,
+                        output_attentions=bool(self.cfg.use_attention_entropy),
+                        return_dict=True,
+                    )
+                except TypeError:
+                    out = model(
+                        input_ids=input_ids,
+                        attention_mask=attn,
+                        position_ids=pos0,
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                        output_hidden_states=True,
+                        output_attentions=bool(self.cfg.use_attention_entropy),
+                        return_dict=True,
+                    )
             logits = out.logits[:, -1, :]  # [1,V]
             hidden = out.hidden_states[-1][:, -1, :]  # [1,H]
 

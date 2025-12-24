@@ -110,6 +110,8 @@ def main() -> None:
             f"kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}",
             flush=True,
         )
+    else:
+        print(f"[config] kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}", flush=True)
 
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
@@ -217,6 +219,23 @@ def main() -> None:
     raw_user_prompt = str(args.prompt)
     model_prompt = _format_model_prompt(raw_user_prompt)
     retrieval_query_text = _rewrite_query_for_retrieval(raw_user_prompt)
+
+    # Light guardrail: warn if prompt topic keywords and selected library path look mismatched.
+    p_low = raw_user_prompt.lower()
+    kv_low = str(args.kv_dir).lower() if args.kv_dir else ""
+    blocks_low = str(args.blocks_jsonl).lower() if args.blocks_jsonl else ""
+    if ("sftsv" in p_low) and (("sars2" in kv_low) or ("sars" in kv_low) or ("sars2" in blocks_low) or ("sars" in blocks_low)):
+        print(
+            "[warn] prompt mentions 'SFTSV' but kv_dir/blocks_jsonl path looks like SARS2/SARS-CoV-2. "
+            "You may be querying the wrong topic library.",
+            flush=True,
+        )
+    if (("sars" in p_low) or ("cov" in p_low)) and (("sftsv" in kv_low) or ("sftsv" in blocks_low)):
+        print(
+            "[warn] prompt looks SARS-CoV-2 related but kv_dir/blocks_jsonl path looks like SFTSV. "
+            "You may be querying the wrong topic library.",
+            flush=True,
+        )
 
     # Optional: build an allowlist of block_ids by language from blocks_jsonl.
     allowed_block_ids = None

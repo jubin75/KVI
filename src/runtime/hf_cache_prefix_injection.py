@@ -70,22 +70,16 @@ def build_past_key_values_prefix(
     if not isinstance(num_layers, int):
         raise ValueError("Cannot infer num_hidden_layers from model.config.num_hidden_layers")
 
-    # 从任意一个 ext KV 推导 dtype/device/kv_heads/head_dim
+    # From any ext KV infer dtype/device/kv_heads/head_dim
     sample = next(iter(ext_kv_by_layer.values()), None)
     if sample is None:
         raise ValueError("ext_kv_by_layer is empty")
-    device = sample.K.device
-    dtype = sample.K.dtype
-    batch = sample.K.shape[0]
-    kv_heads = sample.K.shape[1]
-    head_dim = sample.K.shape[-1]
-
-    empty_k = torch.empty((batch, kv_heads, 0, head_dim), device=device, dtype=dtype)
-    empty_v = torch.empty((batch, kv_heads, 0, head_dim), device=device, dtype=dtype)
-
-    pkv: List[Tuple[torch.Tensor, torch.Tensor]] = [(empty_k, empty_v) for _ in range(num_layers)]
+    # Prefer representing "no cache for this layer" as None (NOT zero-length tensors).
+    # Some HF cache implementations / model forwards behave poorly when given empty tensors
+    # for non-injected layers (can lead to inconsistent past-length bookkeeping).
+    pkv: List[Optional[Tuple[torch.Tensor, torch.Tensor]]] = [None for _ in range(num_layers)]
     for layer_idx, ext in ext_kv_by_layer.items():
-        pkv[layer_idx] = (ext.K, ext.V)
+        pkv[int(layer_idx)] = (ext.K, ext.V)
     legacy = tuple(pkv)
 
     # Try to return a Cache object when available.
@@ -101,12 +95,14 @@ def build_past_key_values_prefix(
     except Exception:
         pass
 
-    # Fallback: try to populate a DynamicCache-like object by calling `update`.
+    # Fallback: try to populate a DynamicCache-like object by calling `update` ONLY for injected layers.
     # If this fails, return legacy tuple.
     try:
         if hasattr(cache, "update"):
-            for li, (k, v) in enumerate(legacy):
-                # Some implementations expect [batch, heads, seq, dim]
+            for li, pair in enumerate(legacy):
+                if pair is None:
+                    continue
+                k, v = pair
                 cache.update(k, v, li)  # type: ignore[call-arg, attr-defined]
             return cache
     except Exception:
