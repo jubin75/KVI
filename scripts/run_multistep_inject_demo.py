@@ -128,6 +128,17 @@ def main() -> None:
         default=0,
         help="When printing full block text, optionally truncate to first N chars (0 = no truncation).",
     )
+    p.add_argument(
+        "--print_selected_block_token_ids",
+        action="store_true",
+        help="If set, print token ids (from the current tokenizer) for selected blocks. Useful for low-level debug.",
+    )
+    p.add_argument(
+        "--selected_block_max_token_ids",
+        type=int,
+        default=0,
+        help="When printing token ids, optionally truncate to first N ids (0 = no truncation).",
+    )
     args = p.parse_args()
 
     # 专题库 mode: resolve paths from topic_work_dir/topic
@@ -431,7 +442,7 @@ def main() -> None:
             found = {}
             try:
                 with blocks_path.open("r", encoding="utf-8") as f:
-                    for line in f:
+                    for line_no, line in enumerate(f, start=1):
                         line = line.strip()
                         if not line:
                             continue
@@ -444,6 +455,8 @@ def main() -> None:
                             txt = str(rec.get("text") or "")
                             snippet = re.sub(r"\s+", " ", txt).strip()[:700]
                             found[bid] = {
+                                "blocks_jsonl": str(blocks_path),
+                                "line_no": int(line_no),
                                 "doc_id": rec.get("doc_id"),
                                 "token_count": rec.get("token_count"),
                                 "source_uri": rec.get("source_uri"),
@@ -457,6 +470,20 @@ def main() -> None:
                 print(f"[debug] failed to read blocks_jsonl={blocks_path}: {e}", flush=True)
                 return
 
+            # Make it explicit whether selected block_ids were found in this blocks.jsonl file.
+            print("=== Selected Block Lookup (blocks_jsonl path + line_no) ===")
+            print(f"blocks_jsonl={blocks_path}", flush=True)
+            for bid in sorted(wanted):
+                info = found.get(bid)
+                if info is None:
+                    print(f"- block_id={bid} found=false", flush=True)
+                    continue
+                print(
+                    f"- block_id={bid} found=true line_no={info.get('line_no')} "
+                    f"doc_id={info.get('doc_id')} source_uri={info.get('source_uri')}",
+                    flush=True,
+                )
+
             print("=== Selected Block Snippets ===")
             for bid in sorted(wanted):
                 info = found.get(bid)
@@ -464,7 +491,11 @@ def main() -> None:
                     print(f"[debug] block_id not found in blocks_jsonl: {bid}", flush=True)
                     continue
                 print(f"\n--- block_id={bid} ---", flush=True)
-                print(f"doc_id={info.get('doc_id')} token_count={info.get('token_count')}", flush=True)
+                print(
+                    f"doc_id={info.get('doc_id')} token_count={info.get('token_count')} "
+                    f"blocks_jsonl={info.get('blocks_jsonl')} line_no={info.get('line_no')}",
+                    flush=True,
+                )
                 md = info.get("metadata") or {}
                 if isinstance(md, dict):
                     # Common, high-signal provenance fields
@@ -483,6 +514,13 @@ def main() -> None:
                     print("----- block_text_begin -----", flush=True)
                     print(full, flush=True)
                     print("----- block_text_end -----", flush=True)
+                if bool(args.print_selected_block_token_ids):
+                    ids = tok(str(info.get("text_full") or ""), add_special_tokens=False)["input_ids"]
+                    if isinstance(args.selected_block_max_token_ids, int) and int(args.selected_block_max_token_ids) > 0:
+                        ids = ids[: int(args.selected_block_max_token_ids)]
+                    print("----- block_token_ids_begin -----", flush=True)
+                    print(ids, flush=True)
+                    print("----- block_token_ids_end -----", flush=True)
 
 
 if __name__ == "__main__":
