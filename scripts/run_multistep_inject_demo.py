@@ -116,6 +116,18 @@ def main() -> None:
         default=6,
         help="No-repeat ngram constraint during final decode to reduce repetitive filler (0 disables).",
     )
+    p.add_argument(
+        "--print_selected_block_text",
+        action="store_true",
+        help="If set, print the FULL original block text (from blocks_jsonl) for selected blocks. "
+        "This is useful to manually judge retrieval correctness.",
+    )
+    p.add_argument(
+        "--selected_block_max_chars",
+        type=int,
+        default=0,
+        help="When printing full block text, optionally truncate to first N chars (0 = no truncation).",
+    )
     args = p.parse_args()
 
     # 专题库 mode: resolve paths from topic_work_dir/topic
@@ -436,6 +448,7 @@ def main() -> None:
                                 "token_count": rec.get("token_count"),
                                 "source_uri": rec.get("source_uri"),
                                 "snippet": snippet,
+                                "text_full": txt,
                                 "metadata": rec.get("metadata"),
                             }
                         if len(found) >= len(wanted):
@@ -463,6 +476,13 @@ def main() -> None:
                 if isinstance(info.get("source_uri"), str):
                     print(f"source_uri={info.get('source_uri')}", flush=True)
                 print(f"text_snippet={info.get('snippet')}", flush=True)
+                if bool(args.print_selected_block_text):
+                    full = str(info.get("text_full") or "")
+                    if isinstance(args.selected_block_max_chars, int) and int(args.selected_block_max_chars) > 0:
+                        full = full[: int(args.selected_block_max_chars)]
+                    print("----- block_text_begin -----", flush=True)
+                    print(full, flush=True)
+                    print("----- block_text_end -----", flush=True)
 
 
 if __name__ == "__main__":
