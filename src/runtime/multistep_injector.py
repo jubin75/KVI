@@ -16,7 +16,7 @@ Multi-step Injection Runtime
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
@@ -72,10 +72,18 @@ def _cosine_sim(a: np.ndarray, b: np.ndarray, eps: float = 1e-12) -> float:
 
 
 class MultiStepInjector:
-    def __init__(self, *, retriever: Retriever, cfg: MultiStepConfig, allowed_block_ids: Optional[Set[str]] = None) -> None:
+    def __init__(
+        self,
+        *,
+        retriever: Retriever,
+        cfg: MultiStepConfig,
+        allowed_block_ids: Optional[Set[str]] = None,
+        block_text_lookup: Optional[Callable[[str], Optional[str]]] = None,
+    ) -> None:
         self.retriever = retriever
         self.cfg = cfg
         self.allowed_block_ids = allowed_block_ids
+        self.block_text_lookup = block_text_lookup
         self.used_block_ids: Set[str] = set()
         self.total_injected_tokens = 0
 
@@ -147,6 +155,7 @@ class MultiStepInjector:
         max_new_tokens: int = 128,
         query_embed_fn: Optional[Any] = None,
         no_repeat_ngram_size: int = 0,
+        ground_with_selected_text: bool = False,
     ) -> Tuple[str, List[StepDebug]]:
         """
         执行多步注入推理：
@@ -156,6 +165,7 @@ class MultiStepInjector:
 
         step_debugs: List[StepDebug] = []
         last_past_key_values: Any = None
+        last_selected_block_texts: List[str] = []
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -232,6 +242,15 @@ class MultiStepInjector:
                 break
 
             self.total_injected_tokens += injected_tokens
+            if bool(ground_with_selected_text) and self.block_text_lookup is not None:
+                last_selected_block_texts = []
+                for it in selected:
+                    bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                    if not bid:
+                        continue
+                    t = self.block_text_lookup(str(bid))
+                    if isinstance(t, str) and t.strip():
+                        last_selected_block_texts.append(t.strip())
 
             # ---- build per-layer ext kv prefix ----
             ext_by_layer = {
@@ -356,6 +375,79 @@ class MultiStepInjector:
             if signals >= 2:
                 break
 
+        def _extract_evidence(texts: List[str], *, q: str) -> str:
+            """
+            Build a short, high-signal evidence appendix to reduce hallucinations.
+            We keep it heuristic and conservative: pick a few sentences that match query intent keywords.
+            """
+            if not texts:
+                return ""
+            ql = (q or "").lower()
+            # Transmission intent keywords (EN+ZH)
+            kws = [
+                "tick",
+                "ticks",
+                "tick-borne",
+                "vector",
+                "bite",
+                "bites",
+                "transmit",
+                "transmission",
+                "route of transmission",
+                "mode of transmission",
+                "human-to-human",
+                "person-to-person",
+                "body fluids",
+                "blood",
+                "蜱",
+                "叮咬",
+                "媒介",
+                "传播",
+                "体液",
+                "血液",
+                "人传人",
+            ]
+            # If query doesn't look like transmission, still allow generic evidence.
+            use_kws = any(k in ql for k in ["传播", "途径", "transmission", "route", "vector", "tick", "蜱", "叮咬"])
+            picked: List[str] = []
+            import re
+
+            for t in texts:
+                # Split into rough sentences.
+                sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t) if s.strip()]
+                for s in sents:
+                    sl = s.lower()
+                    if use_kws and not any(k in sl for k in kws):
+                        continue
+                    # Prefer explicit "main route" type sentences.
+                    if "main route" in sl or "most likely route" in sl or "primary" in sl or "主要" in s:
+                        picked.append(s)
+                    else:
+                        picked.append(s)
+                    if len(picked) >= 3:
+                        break
+                if len(picked) >= 3:
+                    break
+            if not picked:
+                # fallback: first 1–2 sentences
+                t0 = texts[0]
+                sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t0) if s.strip()]
+                picked = sents[:2] if sents else [t0[:400]]
+            picked = [p.replace("\n", " ").strip() for p in picked if p.strip()]
+            out = "\n".join([f"- {p}" for p in picked[:3]])
+            return out
+
+        prompt_for_final = prompt
+        if bool(ground_with_selected_text) and last_selected_block_texts:
+            evidence = _extract_evidence(last_selected_block_texts, q=str(query_text or ""))
+            if evidence:
+                prompt_for_final = (
+                    prompt
+                    + "\n\n【已检索到的证据句（必须以此为准）】\n"
+                    + evidence
+                    + "\n\n要求：回答必须与上述证据一致；如果证据说 tick bites/蜱叮咬，就不要回答蚊子传播。"
+                )
+
         # final generation using last injected state: simplest approach is do generate without further injection
         # NOTE: do NOT use `model.generate(past_key_values=...)` here; HF generation will treat
         # `past_length` as already-consumed prompt tokens and may slice input_ids to empty when
@@ -363,7 +455,7 @@ class MultiStepInjector:
         txt = self._greedy_generate_with_past_prefix(
             model=model,
             tokenizer=tokenizer,
-            prompt=prompt,
+            prompt=prompt_for_final,
             device=device,
             past_key_values=last_past_key_values,
             max_new_tokens=max_new_tokens,

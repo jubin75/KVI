@@ -127,6 +127,13 @@ def main() -> None:
         help="If set, print the exact retrieval query text (after optional rewrite).",
     )
     p.add_argument(
+        "--ground_with_selected_text",
+        action="store_true",
+        help="If set, append a few evidence sentences extracted from the selected blocks to the prompt during final decode. "
+        "This greatly reduces hallucinations like 'mosquito transmission' when selected blocks clearly say 'tick bites'. "
+        "Requires --blocks_jsonl.",
+    )
+    p.add_argument(
         "--no_repeat_ngram_size",
         type=int,
         default=6,
@@ -386,6 +393,7 @@ def main() -> None:
 
     # Optional: build an allowlist of block_ids by language from blocks_jsonl.
     allowed_block_ids = None
+    block_text_by_id = None
     allowed_langs = {s.strip() for s in str(args.allowed_langs).split(",") if s.strip()}
     if args.blocks_jsonl and allowed_langs:
         try:
@@ -413,6 +421,8 @@ def main() -> None:
                 return float(bad / max(tot, 1))
 
             allowed_block_ids = set()
+            if bool(args.ground_with_selected_text):
+                block_text_by_id = {}
             dropped_lang = 0
             dropped_nonprintable = 0
             dropped_quality = 0
@@ -446,6 +456,8 @@ def main() -> None:
                             continue
 
                     allowed_block_ids.add(str(bid))
+                    if block_text_by_id is not None:
+                        block_text_by_id[str(bid)] = txt
             print(
                 f"[lang_filter] enabled via blocks_jsonl allow_langs={sorted(allowed_langs)} "
                 f"allowed_blocks={len(allowed_block_ids)} file={blocks_path}",
@@ -460,6 +472,7 @@ def main() -> None:
                 )
         except Exception as e:
             allowed_block_ids = None
+            block_text_by_id = None
             print(f"[lang_filter] disabled (failed to build allowlist): {type(e).__name__}: {e}", flush=True)
 
     # Debug preset: make it hard to accidentally introduce noise.
@@ -578,7 +591,20 @@ def main() -> None:
         entropy_threshold=float(args.entropy_threshold),
         debug_print_candidates_top_n=int(args.debug_print_candidates),
     )
-    injector = MultiStepInjector(retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids)
+    lookup = None
+    if bool(args.ground_with_selected_text):
+        if not args.blocks_jsonl:
+            raise SystemExit("--ground_with_selected_text requires --blocks_jsonl")
+        if not isinstance(block_text_by_id, dict):
+            raise SystemExit(
+                "--ground_with_selected_text requires building block text lookup; "
+                "please ensure --blocks_jsonl is provided and --allowed_langs is non-empty."
+            )
+        lookup = lambda bid: block_text_by_id.get(str(bid))  # type: ignore[assignment]
+
+    injector = MultiStepInjector(
+        retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids, block_text_lookup=lookup
+    )
     answer, dbg = injector.run(
         model=model,
         tokenizer=tok,
@@ -588,6 +614,7 @@ def main() -> None:
         max_new_tokens=args.max_new_tokens,
         query_embed_fn=query_embed_fn,
         no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+        ground_with_selected_text=bool(args.ground_with_selected_text),
     )
 
     print("=== Step Debug ===")
