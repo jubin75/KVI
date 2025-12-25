@@ -276,6 +276,52 @@ def main() -> None:
             text = text[: m.start()]
         return text.strip()
 
+    def _postprocess_answer(text: str, user_prompt: str) -> str:
+        """
+        Reduce common degenerate artifacts:
+        - prompt/instruction echo ("请用中文回答", "要求：", "Evidence:")
+        - duplicated leading question lines
+        Keep it conservative: only drop short lines containing obvious instruction markers.
+        """
+        text = _strip_chat_artifacts(text or "")
+        if not text:
+            return text
+        bad_markers = [
+            "请用中文回答",
+            "逐字引用",
+            "不要输出",
+            "末尾不要",
+            "要求：",
+            "Evidence:",
+            "根据以下句子",
+            "请结合知识库",
+        ]
+        lines = [ln.strip() for ln in text.splitlines()]
+        out_lines: list[str] = []
+        for ln in lines:
+            if not ln:
+                if out_lines and out_lines[-1] != "":
+                    out_lines.append("")
+                continue
+            if any(m in ln for m in bad_markers) and len(ln) <= 160:
+                # drop instruction echo lines
+                continue
+            out_lines.append(ln)
+        # drop repeated leading question-like line (common echo)
+        if out_lines:
+            first = out_lines[0]
+            if ("SFTSV" in first) and (("传播" in first) or ("transmission" in first.lower())) and len(first) <= 140:
+                # if it looks like the question rather than an answer, drop it
+                if ("？" in first) or ("?" in first):
+                    out_lines = out_lines[1:]
+        # collapse excessive blank lines
+        cleaned = "\n".join(out_lines).strip()
+        # very conservative: if it literally starts with the exact prompt, remove it
+        up = (user_prompt or "").strip()
+        if up and cleaned.startswith(up):
+            cleaned = cleaned[len(up) :].lstrip()
+        return cleaned.strip()
+
     def _build_acronym_lexicon_from_blocks(blocks_jsonl: Path, max_lines: int = 200_000) -> dict[str, str]:
         """
         Build a lightweight acronym->expansion mapping by scanning blocks text for patterns like:
@@ -573,11 +619,17 @@ def main() -> None:
     if (not bool(args.skip_baseline)) or bool(args.print_baseline):
         inputs0 = tok(model_prompt, return_tensors="pt").to(device)
         with torch.no_grad():
-            out0 = model.generate(**inputs0, max_new_tokens=int(args.max_new_tokens), do_sample=False, use_cache=True)
+            out0 = model.generate(
+                **inputs0,
+                max_new_tokens=int(args.max_new_tokens),
+                do_sample=False,
+                use_cache=True,
+                no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+            )
         print("=== Baseline (no injection) ===")
         # Print only newly generated tokens (exclude prompt) for easier A/B compare.
         in_len = int(inputs0["input_ids"].shape[1])
-        print(_strip_chat_artifacts(tok.decode(out0[0][in_len:], skip_special_tokens=True)))
+        print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
 
     cfg = MultiStepConfig(
         inject_layers=[int(x.strip()) for x in args.layers.split(",") if x.strip() != ""],
@@ -624,7 +676,7 @@ def main() -> None:
         for d in dbg:
             print(d)
     print("=== Answer ===")
-    print(_strip_chat_artifacts(answer))
+    print(_postprocess_answer(answer, raw_user_prompt))
 
     # Optional: print selected block snippets for debugging retrieval quality.
     if args.blocks_jsonl:

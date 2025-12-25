@@ -443,9 +443,13 @@ class MultiStepInjector:
             if evidence:
                 prompt_for_final = (
                     prompt
-                    + "\n\n【已检索到的证据句（必须以此为准）】\n"
+                    + "\n\n【证据句（用于对齐，不要复述问题）】\n"
                     + evidence
-                    + "\n\n要求：回答必须与上述证据一致；如果证据说 tick bites/蜱叮咬，就不要回答蚊子传播。"
+                    + "\n\n请直接按以下格式输出（不要复述问题/不要复述提示，不要出现“要求：”“Evidence:”等字样）：\n"
+                    + "主要传播途径：<一句话>\n"
+                    + "其他已报道途径（若证据提到）：<一句话，没提到就写“证据未提及”>\n"
+                    + "证据原文：\"<逐字引用1句证据原文（英文也可以）>\""
+                    + "\n\n硬约束：回答必须与【证据句】一致；如果证据说 tick bites/蜱叮咬，就不要回答蚊子传播。"
                 )
 
         # final generation using last injected state: simplest approach is do generate without further injection
