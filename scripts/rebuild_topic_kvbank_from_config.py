@@ -123,6 +123,100 @@ def build_evidence_blocks_from_blocks_jsonl(
     return {"in_blocks": total_in, "kept_blocks": total_keep, "out_evidence_blocks": total_out, "out_jsonl": str(out_jsonl)}
 
 
+def build_evidence_blocks_from_raw_chunks_jsonl(
+    *,
+    raw_chunks_jsonl: Path,
+    out_jsonl: Path,
+    topic_goal: str,
+    deepseek_base_url: str,
+    deepseek_model: str,
+    deepseek_api_key_env: str,
+    max_sentences_per_paragraph: int = 2,
+    max_paragraphs: int = 0,
+) -> Dict[str, Any]:
+    """
+    Preferred evidence build: extract from raw_chunks (paragraph structure) to avoid 256-token block fragmentation.
+    """
+    import re
+
+    def _split_paragraphs(text: str) -> List[str]:
+        parts = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+        return [p for p in parts if len(p) >= 30]
+
+    out_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    extractor = DeepSeekExtractiveEvidence(
+        ExtractiveEvidenceConfig(
+            deepseek_base_url=deepseek_base_url,
+            deepseek_model=deepseek_model,
+            api_key_env=deepseek_api_key_env,
+            max_sentences=int(max_sentences_per_paragraph),
+        )
+    )
+
+    chunks = 0
+    paras = 0
+    kept_paras = 0
+    out_blocks = 0
+
+    with raw_chunks_jsonl.open("r", encoding="utf-8") as fin, out_jsonl.open("w", encoding="utf-8") as fout:
+        for line in fin:
+            line = line.strip()
+            if not line:
+                continue
+            rec = _safe_json_loads(line)
+            if not rec:
+                continue
+            chunks += 1
+            doc_id = str(rec.get("doc_id") or "")
+            chunk_id = str(rec.get("chunk_id") or "")
+            source_uri = rec.get("source_uri", None)
+            lang = rec.get("lang", None)
+            meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+            txt = str(rec.get("text") or "")
+            for p_idx, para in enumerate(_split_paragraphs(txt)):
+                paras += 1
+                if int(max_paragraphs) > 0 and paras > int(max_paragraphs):
+                    break
+                res = extractor.extract(topic_goal=str(topic_goal), raw_block_text=para)
+                sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
+                if not sents:
+                    continue
+                kept_paras += 1
+                for s_idx, it in enumerate(sents, start=1):
+                    quote = str(it.get("quote") or "").strip()
+                    if not quote:
+                        continue
+                    span = it.get("span") if isinstance(it.get("span"), dict) else {}
+                    ev_block_id = f"{chunk_id}_p{p_idx}::ev{s_idx}"
+                    out_rec = {
+                        "block_id": ev_block_id,
+                        "doc_id": doc_id,
+                        "source_uri": source_uri,
+                        "lang": lang,
+                        "text": quote,
+                        "meta": {
+                            "from_raw_chunk_id": chunk_id,
+                            "paragraph_index": int(p_idx),
+                            "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},
+                            "relevance": it.get("relevance"),
+                            "claim": it.get("claim"),
+                            "raw_chunk_metadata": meta,
+                        },
+                    }
+                    fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+                    out_blocks += 1
+            if int(max_paragraphs) > 0 and paras >= int(max_paragraphs):
+                break
+
+    return {
+        "in_chunks": chunks,
+        "in_paragraphs": paras,
+        "kept_paragraphs": kept_paras,
+        "out_evidence_blocks": out_blocks,
+        "out_jsonl": str(out_jsonl),
+    }
+
+
 def _load_config(path: Path) -> Dict[str, Any]:
     # Tolerate repo layout differences (monorepo vs flat KVI root).
     p = path
@@ -283,23 +377,42 @@ def main() -> None:
     if not isinstance(evidence_cfg, dict):
         evidence_cfg = {}
     enable_evidence = bool(evidence_cfg.get("enabled", True))
+    # preferred: raw_chunks -> paragraphs -> evidence sentences
+    source_level = str(evidence_cfg.get("source_level", "raw_chunks")).strip().lower()
+    max_sentences_per_paragraph = int(evidence_cfg.get("max_sentences_per_paragraph", evidence_cfg.get("max_sentences_per_block", 2)))
+    max_paragraphs = int(evidence_cfg.get("max_paragraphs", 0))
+    # legacy: blocks -> evidence sentences
     max_sentences_per_block = int(evidence_cfg.get("max_sentences_per_block", 2))
     max_blocks_evidence = int(evidence_cfg.get("max_blocks", 0))
     if enable_evidence:
         print(
-            f"[rebuild_topic] build_evidence enabled max_sentences_per_block={max_sentences_per_block} max_blocks={max_blocks_evidence}",
+            f"[rebuild_topic] build_evidence enabled source_level={source_level} "
+            f"max_sentences_per_paragraph={max_sentences_per_paragraph} max_paragraphs={max_paragraphs} "
+            f"(legacy max_sentences_per_block={max_sentences_per_block} max_blocks={max_blocks_evidence})",
             flush=True,
         )
-        ev_stats = build_evidence_blocks_from_blocks_jsonl(
-            blocks_jsonl=blocks,
-            out_jsonl=blocks_evidence,
-            topic_goal=goal,
-            deepseek_base_url=deepseek_base_url,
-            deepseek_model=deepseek_model,
-            deepseek_api_key_env=deepseek_api_key_env,
-            max_sentences_per_block=max_sentences_per_block,
-            max_blocks=max_blocks_evidence,
-        )
+        if source_level in {"raw_chunks", "raw", "chunks"}:
+            ev_stats = build_evidence_blocks_from_raw_chunks_jsonl(
+                raw_chunks_jsonl=raw_chunks,
+                out_jsonl=blocks_evidence,
+                topic_goal=goal,
+                deepseek_base_url=deepseek_base_url,
+                deepseek_model=deepseek_model,
+                deepseek_api_key_env=deepseek_api_key_env,
+                max_sentences_per_paragraph=max_sentences_per_paragraph,
+                max_paragraphs=max_paragraphs,
+            )
+        else:
+            ev_stats = build_evidence_blocks_from_blocks_jsonl(
+                blocks_jsonl=blocks,
+                out_jsonl=blocks_evidence,
+                topic_goal=goal,
+                deepseek_base_url=deepseek_base_url,
+                deepseek_model=deepseek_model,
+                deepseek_api_key_env=deepseek_api_key_env,
+                max_sentences_per_block=max_sentences_per_block,
+                max_blocks=max_blocks_evidence,
+            )
         print(f"[rebuild_topic] wrote_evidence_blocks stats={ev_stats}", flush=True)
 
     stats = build_kvbank_from_blocks_jsonl(

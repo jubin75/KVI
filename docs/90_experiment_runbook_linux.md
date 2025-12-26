@@ -175,11 +175,13 @@ python -u scripts/rebuild_topic_kvbank_from_config.py \
   --config config/topics/SARS2/config.json
 ```
 
-完成后，如何判断成功（四个硬产物）：
+完成后，如何判断成功（从头构建 + 双库，一共 6 个硬产物）：
 - `topics/<TOPIC>/doc_filter_results.jsonl`：doc-level 筛选记录（KEEP/DROP/UNCERTAIN）
 - `topics/<TOPIC>/pdfs/`：KEEP 的 PDF（默认软链）
 - `topics/<TOPIC>/work/raw_chunks.jsonl`、`topics/<TOPIC>/work/blocks.jsonl`
 - `topics/<TOPIC>/work/kvbank_blocks/manifest.json`（以及 `kvbank_tables/manifest.json` 若 `split_tables=true`）
+- `topics/<TOPIC>/work/blocks.evidence.jsonl`（DeepSeek 抽取式证据句，推荐从 raw_chunks 段落抽取）
+- `topics/<TOPIC>/work/kvbank_evidence/manifest.json`（evidence KVBank）
 
 #### 1.2.2.1（新增，推荐）Evidence 版本：blocks.evidence + kvbank_evidence
 
@@ -188,22 +190,22 @@ python -u scripts/rebuild_topic_kvbank_from_config.py \
 - **evidence 库**：DeepSeek **抽取式**证据句（extractive-only）→ `blocks.evidence.jsonl` → `kvbank_evidence/`
 - **raw 库**：保留 `blocks.jsonl` + `kvbank_blocks/` 用于回溯与补上下文
 
-现在 `rebuild_topic_kvbank_from_config.py` 在生成 `blocks.jsonl` 后，会默认继续生成：
+现在 `rebuild_topic_kvbank_from_config.py` 会在 **PDF→raw_chunks→blocks** 之后，默认继续生成 evidence（从头构建）：
 
 - `topics/<TOPIC>/work/blocks.evidence.jsonl`
 - `topics/<TOPIC>/work/kvbank_evidence/manifest.json`
 
-如果你只想在已有 `blocks.jsonl` 的基础上**单独补建 evidence**（不重跑 PDF→blocks），可以用：
+如果你只想在已有产物基础上**单独补建 evidence**（不重跑 PDF→raw_chunks→blocks），可以用（但不推荐作为“最干净”的主线）：
 
 ```bash
 export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
 
-# 1) raw blocks -> evidence blocks（DeepSeek 抽取式证据句）
-python -u scripts/build_evidence_blocks_from_blocks_jsonl_deepseek.py \
-  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+# 1) raw_chunks -> evidence blocks（DeepSeek 抽取式证据句；更干净，推荐）
+python -u scripts/build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py \
+  --raw_chunks_jsonl "$WORK_DIR/raw_chunks.jsonl" \
   --out_jsonl "$WORK_DIR/blocks.evidence.jsonl" \
   --topic_goal "$(jq -r .goal config/topics/SFTSV/config.json)" \
-  --max_sentences_per_block 2
+  --max_sentences_per_paragraph 2
 
 # 2) evidence blocks -> kvbank_evidence
 python -u scripts/build_kvbank_from_blocks_jsonl.py \
