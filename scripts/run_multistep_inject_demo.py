@@ -26,12 +26,18 @@ if _REPO_ROOT_STR not in sys.path:
 
 try:
     from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
-    from external_kv_injection.src.retriever import Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
+    from external_kv_injection.src.retriever import (  # type: ignore
+        EvidenceFirstRetriever,
+        EvidenceFirstRetrieverConfig,
+        Retriever,
+        RoutedRetriever,
+        RoutedRetrieverConfig,
+    )
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
-    from src.retriever import Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
+    from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
 
@@ -40,6 +46,12 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
     p.add_argument("--kv_dir", default=None, help="Path to KVBank. If omitted, use --topic + --topic_work_dir.")
+    p.add_argument(
+        "--kv_dir_evidence",
+        default=None,
+        help="Optional evidence KVBank dir (e.g. $WORK_DIR/kvbank_evidence). "
+        "If set (or auto-detected in --topic mode), retriever will search evidence first and fall back to raw.",
+    )
     p.add_argument("--topic", choices=["sftsv", "sarscov2"], default=None, help="Optional topic name for 专题库 mode.")
     p.add_argument(
         "--topic_work_dir",
@@ -53,6 +65,12 @@ def main() -> None:
         "--blocks_jsonl",
         default=None,
         help="Optional blocks.jsonl path (e.g. $WORK_DIR/blocks.v2.jsonl). If provided, print text snippets for selected blocks.",
+    )
+    p.add_argument(
+        "--blocks_jsonl_evidence",
+        default=None,
+        help="Optional evidence blocks jsonl path (e.g. $WORK_DIR/blocks.evidence.jsonl). "
+        "Used for debug text lookups / lang filtering when evidence KVBank is enabled.",
     )
     p.add_argument(
         "--allowed_langs",
@@ -219,6 +237,20 @@ def main() -> None:
                     return p
             return base_dir / "blocks.jsonl"
 
+        def _pick_evidence_kv_dir(base_dir: Path) -> Optional[Path]:
+            opts = [base_dir / "kvbank_evidence", base_dir / "kvbank_evidence_v2"]
+            for p in opts:
+                if (p / "manifest.json").exists():
+                    return p
+            return None
+
+        def _pick_evidence_blocks_jsonl(base_dir: Path) -> Optional[Path]:
+            opts = [base_dir / "blocks.evidence.jsonl", base_dir / "blocks.evidence.v2.jsonl"]
+            for p in opts:
+                if p.exists():
+                    return p
+            return None
+
         chosen_base = None
         chosen_kv = None
         for b in candidates:
@@ -246,13 +278,28 @@ def main() -> None:
         if args.blocks_jsonl is None:
             args.blocks_jsonl = str(_pick_blocks_jsonl(Path(str(chosen_base))))
 
+        # Optional: evidence library auto-detect
+        if args.kv_dir_evidence is None:
+            ev = _pick_evidence_kv_dir(Path(str(chosen_base)))
+            if ev is not None:
+                args.kv_dir_evidence = str(ev)
+        if args.blocks_jsonl_evidence is None:
+            bev = _pick_evidence_blocks_jsonl(Path(str(chosen_base)))
+            if bev is not None:
+                args.blocks_jsonl_evidence = str(bev)
+
         print(
             f"[topic_mode] topic={args.topic} topic_work_dir={args.topic_work_dir} chosen_base={chosen_base} "
-            f"kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}",
+            f"kv_dir={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence} "
+            f"kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
             flush=True,
         )
     else:
-        print(f"[config] kv_dir={args.kv_dir} kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl}", flush=True)
+        print(
+            f"[config] kv_dir={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence} kv_dir_tables={args.kv_dir_tables} "
+            f"blocks_jsonl={args.blocks_jsonl} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
+            flush=True,
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tok = None
@@ -502,11 +549,17 @@ def main() -> None:
             flush=True,
         )
 
-    # Optional: build an allowlist of block_ids by language from blocks_jsonl.
+    # Optional: build an allowlist of block_ids by language from blocks_jsonl (raw + evidence if provided).
     allowed_block_ids = None
     block_text_by_id = None
     allowed_langs = {s.strip() for s in str(args.allowed_langs).split(",") if s.strip()}
-    if args.blocks_jsonl and allowed_langs:
+    blocks_jsonls = []
+    if args.blocks_jsonl:
+        blocks_jsonls.append(str(args.blocks_jsonl))
+    if args.blocks_jsonl_evidence:
+        blocks_jsonls.append(str(args.blocks_jsonl_evidence))
+
+    if blocks_jsonls and allowed_langs:
         try:
             # Prefer local imports (works for both monorepo and flat layouts)
             try:
@@ -537,41 +590,42 @@ def main() -> None:
             dropped_lang = 0
             dropped_nonprintable = 0
             dropped_quality = 0
-            blocks_path = Path(str(args.blocks_jsonl))
-            with blocks_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
-                        continue
-                    bid = rec.get("block_id")
-                    if not bid:
-                        continue
-                    txt = str(rec.get("text") or "")
-                    lang = detect_lang(txt)
-                    if lang not in allowed_langs:
-                        dropped_lang += 1
-                        continue
-
-                    if bool(args.quality_filter_from_blocks):
-                        npr = _nonprintable_ratio(txt)
-                        if npr > float(args.max_nonprintable_ratio):
-                            dropped_nonprintable += 1
+            for bp in blocks_jsonls:
+                blocks_path = Path(str(bp))
+                with blocks_path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
                             continue
-                        qs = float(quality_score(txt))
-                        if qs < float(args.min_quality_score):
-                            dropped_quality += 1
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        bid = rec.get("block_id")
+                        if not bid:
+                            continue
+                        txt = str(rec.get("text") or "")
+                        lang = detect_lang(txt)
+                        if lang not in allowed_langs:
+                            dropped_lang += 1
                             continue
 
-                    allowed_block_ids.add(str(bid))
-                    if block_text_by_id is not None:
-                        block_text_by_id[str(bid)] = txt
+                        if bool(args.quality_filter_from_blocks):
+                            npr = _nonprintable_ratio(txt)
+                            if npr > float(args.max_nonprintable_ratio):
+                                dropped_nonprintable += 1
+                                continue
+                            qs = float(quality_score(txt))
+                            if qs < float(args.min_quality_score):
+                                dropped_quality += 1
+                                continue
+
+                        allowed_block_ids.add(str(bid))
+                        if block_text_by_id is not None and str(bid) not in block_text_by_id:
+                            block_text_by_id[str(bid)] = txt
             print(
                 f"[lang_filter] enabled via blocks_jsonl allow_langs={sorted(allowed_langs)} "
-                f"allowed_blocks={len(allowed_block_ids)} file={blocks_path}",
+                f"allowed_blocks={len(allowed_block_ids)} files={blocks_jsonls}",
                 flush=True,
             )
             if bool(args.quality_filter_from_blocks):
@@ -599,7 +653,22 @@ def main() -> None:
         )
 
     bank = FaissKVBank.load(Path(args.kv_dir))
-    if bool(args.enable_table_routing) and args.kv_dir_tables and int(args.table_top_k) > 0:
+    evidence_bank = FaissKVBank.load(Path(str(args.kv_dir_evidence))) if args.kv_dir_evidence else None
+
+    # Build the main retriever (evidence-first if available).
+    if evidence_bank is not None:
+        retriever_main = EvidenceFirstRetriever(
+            evidence_kv_bank=evidence_bank, raw_kv_bank=bank, cfg=EvidenceFirstRetrieverConfig()
+        )
+    else:
+        retriever_main = Retriever(bank)
+
+    # Table routing is only supported on the raw bank in this demo. If evidence is enabled, we keep
+    # retrieval simple and deterministic (evidence-first already reduces noise significantly).
+    if evidence_bank is not None and bool(args.enable_table_routing):
+        print("[warn] evidence-first enabled; table routing is ignored in this mode.", flush=True)
+        retriever = retriever_main
+    elif bool(args.enable_table_routing) and args.kv_dir_tables and int(args.table_top_k) > 0:
         table_bank = FaissKVBank.load(Path(args.kv_dir_tables))
         retriever = RoutedRetriever(
             kv_bank=bank,
@@ -607,7 +676,7 @@ def main() -> None:
             cfg=RoutedRetrieverConfig(enable_table_routing=True, table_top_k=int(args.table_top_k)),
         )
     else:
-        retriever = Retriever(bank)
+        retriever = retriever_main
 
     enc = HFSentenceEncoder(
         HFSentenceEncoderConfig(model_name_or_path=args.domain_encoder_model, max_length=256, normalize=True)
@@ -710,12 +779,12 @@ def main() -> None:
     )
     lookup = None
     if bool(args.ground_with_selected_text):
-        if not args.blocks_jsonl:
-            raise SystemExit("--ground_with_selected_text requires --blocks_jsonl")
+        if not args.blocks_jsonl and not args.blocks_jsonl_evidence:
+            raise SystemExit("--ground_with_selected_text requires --blocks_jsonl or --blocks_jsonl_evidence")
         if not isinstance(block_text_by_id, dict):
             raise SystemExit(
                 "--ground_with_selected_text requires building block text lookup; "
-                "please ensure --blocks_jsonl is provided and --allowed_langs is non-empty."
+                "please ensure blocks_jsonl is provided and --allowed_langs is non-empty."
             )
         lookup = lambda bid: block_text_by_id.get(str(bid))  # type: ignore[assignment]
 
@@ -745,47 +814,57 @@ def main() -> None:
     print(_postprocess_answer(answer, raw_user_prompt))
 
     # Optional: print selected block snippets for debugging retrieval quality.
-    if args.blocks_jsonl:
+    if args.blocks_jsonl or args.blocks_jsonl_evidence:
         wanted = set()
         for d in dbg:
             for bid in getattr(d, "selected_block_ids", []) or []:
                 wanted.add(str(bid))
         if wanted:
-            blocks_path = Path(str(args.blocks_jsonl))
             found = {}
             try:
-                with blocks_path.open("r", encoding="utf-8") as f:
-                    for line_no, line in enumerate(f, start=1):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except Exception:
-                            continue
-                        bid = rec.get("block_id")
-                        if bid in wanted and bid not in found:
-                            txt = str(rec.get("text") or "")
-                            snippet = re.sub(r"\s+", " ", txt).strip()[:700]
-                            found[bid] = {
-                                "blocks_jsonl": str(blocks_path),
-                                "line_no": int(line_no),
-                                "doc_id": rec.get("doc_id"),
-                                "token_count": rec.get("token_count"),
-                                "source_uri": rec.get("source_uri"),
-                                "snippet": snippet,
-                                "text_full": txt,
-                                "metadata": rec.get("metadata"),
-                            }
-                        if len(found) >= len(wanted):
-                            break
+                scan_paths = []
+                if args.blocks_jsonl:
+                    scan_paths.append(Path(str(args.blocks_jsonl)))
+                if args.blocks_jsonl_evidence:
+                    scan_paths.append(Path(str(args.blocks_jsonl_evidence)))
+                for blocks_path in scan_paths:
+                    if len(found) >= len(wanted):
+                        break
+                    with blocks_path.open("r", encoding="utf-8") as f:
+                        for line_no, line in enumerate(f, start=1):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except Exception:
+                                continue
+                            bid = rec.get("block_id")
+                            if bid in wanted and bid not in found:
+                                txt = str(rec.get("text") or "")
+                                snippet = re.sub(r"\s+", " ", txt).strip()[:700]
+                                found[bid] = {
+                                    "blocks_jsonl": str(blocks_path),
+                                    "line_no": int(line_no),
+                                    "doc_id": rec.get("doc_id"),
+                                    "token_count": rec.get("token_count"),
+                                    "source_uri": rec.get("source_uri"),
+                                    "snippet": snippet,
+                                    "text_full": txt,
+                                    "metadata": rec.get("metadata"),
+                                }
+                            if len(found) >= len(wanted):
+                                break
             except Exception as e:
-                print(f"[debug] failed to read blocks_jsonl={blocks_path}: {e}", flush=True)
+                print(f"[debug] failed to read blocks_jsonl: {e}", flush=True)
                 return
 
             # Make it explicit whether selected block_ids were found in this blocks.jsonl file.
             print("=== Selected Block Lookup (blocks_jsonl path + line_no) ===")
-            print(f"blocks_jsonl={blocks_path}", flush=True)
+            print(
+                f"blocks_jsonl={args.blocks_jsonl} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
+                flush=True,
+            )
             for bid in sorted(wanted):
                 info = found.get(bid)
                 if info is None:

@@ -204,4 +204,79 @@ class RoutedRetriever:
         return RetrieverResult(items=merged, debug=debug)
 
 
+@dataclass(frozen=True)
+class EvidenceFirstRetrieverConfig:
+    """
+    Evidence-first dual library strategy.
+
+    - Search evidence KVBank first (short, single-intent evidence sentences).
+    - If evidence is insufficient, fall back to raw KVBank to provide more context candidates.
+    """
+
+    # If evidence yields fewer than this many items, fill from raw.
+    min_evidence_items: int = 8
+    # Always allow raw to "top up" results until top_k.
+    fill_from_raw: bool = True
+    # Optional score scaling for raw (so evidence dominates ranking).
+    raw_score_scale: float = 0.98
+
+
+class EvidenceFirstRetriever:
+    def __init__(self, *, evidence_kv_bank: KVBank, raw_kv_bank: KVBank, cfg: EvidenceFirstRetrieverConfig) -> None:
+        self.evidence_kv_bank = evidence_kv_bank
+        self.raw_kv_bank = raw_kv_bank
+        self.cfg = cfg
+
+    def search(
+        self,
+        query_vec: np.ndarray,
+        *,
+        top_k: int = 32,
+        filters: Optional[Dict[str, Any]] = None,
+        query_text: Optional[str] = None,
+    ) -> RetrieverResult:
+        ev_items, ev_dbg = self.evidence_kv_bank.search(query_vec, top_k=int(top_k), filters=filters)
+
+        merged: List[KVItem] = []
+        seen: set[str] = set()
+
+        def _push(it: KVItem, *, source: str, scale: float = 1.0) -> None:
+            meta = dict(it.meta or {})
+            bid = str(meta.get("block_id") or meta.get("chunk_id") or "")
+            if bid and bid in seen:
+                return
+            if bid:
+                seen.add(bid)
+            meta["retrieval_source"] = source
+            merged.append(KVItem(score=float(it.score) * float(scale), meta=meta, K_ext=it.K_ext, V_ext=it.V_ext))
+
+        for it in ev_items:
+            _push(it, source="evidence", scale=1.0)
+
+        need_raw = bool(self.cfg.fill_from_raw) and (len(merged) < int(top_k) or len(ev_items) < int(self.cfg.min_evidence_items))
+        raw_items: List[KVItem] = []
+        raw_dbg: Dict[str, Any] = {}
+        if need_raw:
+            # Ask for enough to fill, but cap to avoid too much overhead.
+            raw_top = max(int(top_k), int(self.cfg.min_evidence_items))
+            raw_items, raw_dbg = self.raw_kv_bank.search(query_vec, top_k=int(raw_top), filters=filters)
+            for it in raw_items:
+                _push(it, source="raw", scale=float(self.cfg.raw_score_scale))
+
+        merged.sort(key=lambda x: float(x.score), reverse=True)
+        merged = merged[: min(int(top_k), len(merged))]
+
+        debug = {
+            "top_k": int(top_k),
+            "evidence_items": int(len(ev_items)),
+            "raw_items": int(len(raw_items)) if need_raw else 0,
+            "min_evidence_items": int(self.cfg.min_evidence_items),
+            "fill_from_raw": bool(self.cfg.fill_from_raw),
+            "raw_score_scale": float(self.cfg.raw_score_scale),
+            "evidence": ev_dbg,
+            "raw": raw_dbg if need_raw else None,
+        }
+        return RetrieverResult(items=merged, debug=debug)
+
+
 

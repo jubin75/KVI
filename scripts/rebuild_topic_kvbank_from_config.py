@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT_STR = str(_REPO_ROOT)
@@ -27,11 +27,100 @@ try:
     from external_kv_injection.src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks  # type: ignore
     from external_kv_injection.src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
     from external_kv_injection.scripts.build_topic_pdf_subset_deepseek import main as _doc_filter_main  # type: ignore
+    from external_kv_injection.src.llm_filter.extractive_evidence import (  # type: ignore
+        DeepSeekExtractiveEvidence,
+        ExtractiveEvidenceConfig,
+    )
 except ModuleNotFoundError:
     from src.pipelines.pdf_to_raw_context_chunks import RawChunkConfig, build_raw_context_chunks_from_pdf_dir  # type: ignore
     from src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks  # type: ignore
     from src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
     from scripts.build_topic_pdf_subset_deepseek import main as _doc_filter_main  # type: ignore
+    from src.llm_filter.extractive_evidence import DeepSeekExtractiveEvidence, ExtractiveEvidenceConfig  # type: ignore
+
+
+def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
+    try:
+        obj = json.loads(line)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def build_evidence_blocks_from_blocks_jsonl(
+    *,
+    blocks_jsonl: Path,
+    out_jsonl: Path,
+    topic_goal: str,
+    deepseek_base_url: str,
+    deepseek_model: str,
+    deepseek_api_key_env: str,
+    max_sentences_per_block: int = 2,
+    max_blocks: int = 0,
+) -> Dict[str, Any]:
+    """
+    Build blocks.evidence.jsonl from raw blocks.jsonl using DeepSeek extractive evidence.
+    """
+    out_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    extractor = DeepSeekExtractiveEvidence(
+        ExtractiveEvidenceConfig(
+            deepseek_base_url=deepseek_base_url,
+            deepseek_model=deepseek_model,
+            api_key_env=deepseek_api_key_env,
+            max_sentences=int(max_sentences_per_block),
+        )
+    )
+
+    total_in = 0
+    total_keep = 0
+    total_out = 0
+    with blocks_jsonl.open("r", encoding="utf-8") as fin, out_jsonl.open("w", encoding="utf-8") as fout:
+        for line in fin:
+            line = line.strip()
+            if not line:
+                continue
+            rec = _safe_json_loads(line)
+            if not rec:
+                continue
+            total_in += 1
+            if int(max_blocks) > 0 and total_in > int(max_blocks):
+                break
+            raw_text = str(rec.get("text") or "")
+            if not raw_text.strip():
+                continue
+
+            raw_block_id = str(rec.get("block_id") or "")
+            doc_id = str(rec.get("doc_id") or "")
+            source_uri = rec.get("source_uri", None)
+            lang = rec.get("lang", None)
+
+            res = extractor.extract(topic_goal=str(topic_goal), raw_block_text=raw_text)
+            sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
+            if sents:
+                total_keep += 1
+            for idx, it in enumerate(sents, start=1):
+                quote = str(it.get("quote") or "").strip()
+                if not quote:
+                    continue
+                span = it.get("span") if isinstance(it.get("span"), dict) else {}
+                ev_block_id = f"{raw_block_id}::ev{idx}"
+                out_rec = {
+                    "block_id": ev_block_id,
+                    "doc_id": doc_id,
+                    "source_uri": source_uri,
+                    "lang": lang,
+                    "text": quote,
+                    "meta": {
+                        "from_raw_block_id": raw_block_id,
+                        "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},
+                        "relevance": it.get("relevance"),
+                        "claim": it.get("claim"),
+                    },
+                }
+                fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+                total_out += 1
+
+    return {"in_blocks": total_in, "kept_blocks": total_keep, "out_evidence_blocks": total_out, "out_jsonl": str(out_jsonl)}
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -150,8 +239,10 @@ def main() -> None:
 
     raw_chunks = work_dir / "raw_chunks.jsonl"
     blocks = work_dir / "blocks.jsonl"
+    blocks_evidence = work_dir / "blocks.evidence.jsonl"
     kv_dir = work_dir / "kvbank_blocks"
     kv_dir_tables = work_dir / "kvbank_tables"
+    kv_dir_evidence = work_dir / "kvbank_evidence"
 
     print(
         f"[rebuild_topic] topic={topic_name} work_dir={work_dir} pdfs_dir={out_pdf_dir} "
@@ -187,6 +278,30 @@ def main() -> None:
     )
     print(f"[rebuild_topic] wrote_blocks={n_blocks} path={blocks}", flush=True)
 
+    # 2.5) Optional: build extractive evidence blocks and an evidence KVBank.
+    evidence_cfg = build_cfg.get("evidence_build") if isinstance(build_cfg.get("evidence_build"), dict) else {}
+    if not isinstance(evidence_cfg, dict):
+        evidence_cfg = {}
+    enable_evidence = bool(evidence_cfg.get("enabled", True))
+    max_sentences_per_block = int(evidence_cfg.get("max_sentences_per_block", 2))
+    max_blocks_evidence = int(evidence_cfg.get("max_blocks", 0))
+    if enable_evidence:
+        print(
+            f"[rebuild_topic] build_evidence enabled max_sentences_per_block={max_sentences_per_block} max_blocks={max_blocks_evidence}",
+            flush=True,
+        )
+        ev_stats = build_evidence_blocks_from_blocks_jsonl(
+            blocks_jsonl=blocks,
+            out_jsonl=blocks_evidence,
+            topic_goal=goal,
+            deepseek_base_url=deepseek_base_url,
+            deepseek_model=deepseek_model,
+            deepseek_api_key_env=deepseek_api_key_env,
+            max_sentences_per_block=max_sentences_per_block,
+            max_blocks=max_blocks_evidence,
+        )
+        print(f"[rebuild_topic] wrote_evidence_blocks stats={ev_stats}", flush=True)
+
     stats = build_kvbank_from_blocks_jsonl(
         blocks_jsonl=blocks,
         out_dir=kv_dir,
@@ -202,6 +317,21 @@ def main() -> None:
     print(f"[rebuild_topic] kv_dir={kv_dir}", flush=True)
     if bool(split_tables):
         print(f"[rebuild_topic] kv_dir_tables={kv_dir_tables}", flush=True)
+
+    if enable_evidence and blocks_evidence.exists():
+        ev_kv_stats = build_kvbank_from_blocks_jsonl(
+            blocks_jsonl=blocks_evidence,
+            out_dir=kv_dir_evidence,
+            split_tables=False,
+            out_dir_tables=None,
+            base_llm_name_or_path=base_llm,
+            retrieval_encoder_model=retrieval_encoder_model,
+            layers=layers,
+            block_tokens=block_tokens,
+            shard_size=(shard_size if shard_size > 0 else None),
+        )
+        print(f"[rebuild_topic] kvbank_evidence_done stats={ev_kv_stats}", flush=True)
+        print(f"[rebuild_topic] kv_dir_evidence={kv_dir_evidence}", flush=True)
 
 
 if __name__ == "__main__":

@@ -181,6 +181,41 @@ python -u scripts/rebuild_topic_kvbank_from_config.py \
 - `topics/<TOPIC>/work/raw_chunks.jsonl`、`topics/<TOPIC>/work/blocks.jsonl`
 - `topics/<TOPIC>/work/kvbank_blocks/manifest.json`（以及 `kvbank_tables/manifest.json` 若 `split_tables=true`）
 
+#### 1.2.2.1（新增，推荐）Evidence 版本：blocks.evidence + kvbank_evidence
+
+为了解决“raw block 噪声太大、知识碎片化导致注入退化”的问题，我们引入 **evidence-first 双库策略**：
+
+- **evidence 库**：DeepSeek **抽取式**证据句（extractive-only）→ `blocks.evidence.jsonl` → `kvbank_evidence/`
+- **raw 库**：保留 `blocks.jsonl` + `kvbank_blocks/` 用于回溯与补上下文
+
+现在 `rebuild_topic_kvbank_from_config.py` 在生成 `blocks.jsonl` 后，会默认继续生成：
+
+- `topics/<TOPIC>/work/blocks.evidence.jsonl`
+- `topics/<TOPIC>/work/kvbank_evidence/manifest.json`
+
+如果你只想在已有 `blocks.jsonl` 的基础上**单独补建 evidence**（不重跑 PDF→blocks），可以用：
+
+```bash
+export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+
+# 1) raw blocks -> evidence blocks（DeepSeek 抽取式证据句）
+python -u scripts/build_evidence_blocks_from_blocks_jsonl_deepseek.py \
+  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --out_jsonl "$WORK_DIR/blocks.evidence.jsonl" \
+  --topic_goal "$(jq -r .goal config/topics/SFTSV/config.json)" \
+  --max_sentences_per_block 2
+
+# 2) evidence blocks -> kvbank_evidence
+python -u scripts/build_kvbank_from_blocks_jsonl.py \
+  --blocks_jsonl "$WORK_DIR/blocks.evidence.jsonl" \
+  --out_dir "$WORK_DIR/kvbank_evidence" \
+  --base_llm "$BASE_LLM" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --block_tokens 256 \
+  --shard_size 1024
+```
+
 ### 1.2.3（调试主线）把链路拆成三段，逐段排错
 
 当你需要定位“到底是筛选不准、抽取不行、还是建库出错”时，用这三段式：
@@ -318,6 +353,63 @@ python external_kv_injection/scripts/run_multistep_inject_demo.py \
 说明：
 - `--blocks_jsonl + --allowed_langs`：在混语料（尤其包含日文）PDF 上强烈建议开启，避免检索命中非目标语言 block 后“注入导致语义退化/乱码/重复输出 prompt”。
 - `--max_blocks_per_step 1`：对 RoPE 模型（如 Qwen2）建议先从 1 开始，稳定后再逐步增大到 2/4。
+
+### 2.1（新增）用 evidence-first 双库跑 demo（默认优先 evidence，必要时回退 raw）
+
+如果你的专题库 work_dir 下存在：
+
+- `kvbank_evidence/manifest.json`
+- `blocks.evidence.jsonl`
+
+那么可以直接启用 evidence-first（推荐用 topic mode，脚本会自动探测）：
+
+```bash
+python -u scripts/run_multistep_inject_demo.py \
+  --model "$BASE_LLM" \
+  --topic sftsv --topic_work_dir "/home/jb/KVI/topics" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --max_steps 1 \
+  --max_blocks_per_step 1 \
+  --top_k_blocks 16 \
+  --blocks_jsonl "/home/jb/KVI/topics/SFTSV/work/blocks.jsonl" \
+  --blocks_jsonl_evidence "/home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl" \
+  --allowed_langs "zh,en" \
+  --ground_with_selected_text \
+  --max_new_tokens 256
+```
+
+验证要点：
+- `=== Step Debug ===` 的 `selected_block_ids` 更倾向 evidence block（更短、更单意图）。
+- 答案应更少出现“unknown routes / mink bite”等 raw 噪声带来的退化。
+
+### 2.2（新增）评测集 A/B：强制 JSON 协议输出 + faithfulness/overclaim 指标
+
+准备评测集 `prompts.jsonl`（每行至少包含 `prompt`）：
+
+```json
+{"id":"sftsv_tx_001","prompt":"SFTSV 的主要传播途径是什么？"}
+{"id":"sftsv_tx_002","prompt":"SFTSV 是否存在人传人？如果有，主要通过什么接触？"}
+```
+
+运行 A/B（baseline vs injection），并自动计算覆盖率/overclaim：
+
+```bash
+python -u scripts/run_ab_eval_protocol.py \
+  --model "$BASE_LLM" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --kv_dir "/home/jb/KVI/topics/SFTSV/work/kvbank_blocks" \
+  --kv_dir_evidence "/home/jb/KVI/topics/SFTSV/work/kvbank_evidence" \
+  --blocks_jsonl "/home/jb/KVI/topics/SFTSV/work/blocks.jsonl" \
+  --blocks_jsonl_evidence "/home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl" \
+  --prompts_jsonl "/home/jb/KVI/topics/SFTSV/eval/prompts.jsonl" \
+  --out_jsonl "/home/jb/KVI/topics/SFTSV/eval/ab_results.jsonl" \
+  --max_examples 0
+```
+
+结果与验证：
+- `ab_results.jsonl` 每条包含 baseline/injected 的原始输出、解析后的 JSON、以及 `covered/overclaim` 指标。
+- 终端末尾会打印 summary：`baseline_valid/inj_valid`、`baseline_covered/inj_covered`、`baseline_over/inj_over`。
 
 ## 3) （可选）训练 Projector（对齐到 past_key_values 空间，max_kv_tokens=256）
 
