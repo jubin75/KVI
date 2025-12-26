@@ -156,6 +156,7 @@ class MultiStepInjector:
         query_embed_fn: Optional[Any] = None,
         no_repeat_ngram_size: int = 0,
         ground_with_selected_text: bool = False,
+        grounding_instructions: Optional[str] = None,
     ) -> Tuple[str, List[StepDebug]]:
         """
         执行多步注入推理：
@@ -441,15 +442,19 @@ class MultiStepInjector:
         if bool(ground_with_selected_text) and last_selected_block_texts:
             evidence = _extract_evidence(last_selected_block_texts, q=str(query_text or ""))
             if evidence:
+                instr = (grounding_instructions or "").strip()
+                if not instr:
+                    # Default is intentionally minimal and generic (not task-specific).
+                    instr = (
+                        "请基于【证据句】回答，不要复述问题/提示，不要编造证据；"
+                        "若证据未覆盖某点，请明确写“证据未提及”。"
+                    )
                 prompt_for_final = (
                     prompt
                     + "\n\n【证据句（用于对齐，不要复述问题）】\n"
                     + evidence
-                    + "\n\n请直接按以下格式输出（不要复述问题/不要复述提示，不要出现“要求：”“Evidence:”等字样）：\n"
-                    + "主要传播途径：<一句话>\n"
-                    + "其他已报道途径（若证据提到）：<一句话，没提到就写“证据未提及”>\n"
-                    + "证据原文：\"<逐字引用1句证据原文（英文也可以）>\""
-                    + "\n\n硬约束：回答必须与【证据句】一致；如果证据说 tick bites/蜱叮咬，就不要回答蚊子传播。"
+                    + "\n\n【回答要求】\n"
+                    + instr
                 )
 
         # final generation using last injected state: simplest approach is do generate without further injection

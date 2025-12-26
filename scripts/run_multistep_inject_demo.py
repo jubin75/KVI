@@ -134,6 +134,14 @@ def main() -> None:
         "Requires --blocks_jsonl.",
     )
     p.add_argument(
+        "--grounding_instructions",
+        type=str,
+        default="",
+        help="Optional extra instructions appended after the evidence sentences when --ground_with_selected_text is set. "
+        "Use this to control answer format without changing code. Example: "
+        "'请用中文输出：主要传播途径：...\\n其他途径：...\\n证据原文：\"...\"'",
+    )
+    p.add_argument(
         "--no_repeat_ngram_size",
         type=int,
         default=6,
@@ -286,6 +294,62 @@ def main() -> None:
         text = _strip_chat_artifacts(text or "")
         if not text:
             return text
+
+        def _extract_structured_triplet(s: str) -> str:
+            """
+            If the model outputs multiple messy attempts, keep ONLY the first complete 3-line structure:
+              主要传播途径：...
+              其他...：...
+              证据原文：...
+            This prevents late-turn degeneration/prompt-echo from polluting the printed answer.
+            """
+            s0 = s.replace("\r", "\n")
+            # Remove fenced code blocks entirely (they often contain prompt-echo).
+            s0 = re.sub(r"```[\s\S]*?```", "", s0)
+            lines0 = [ln.strip() for ln in s0.splitlines() if ln.strip()]
+            if not lines0:
+                return ""
+
+            main_i = None
+            for i, ln in enumerate(lines0):
+                if ln.startswith("主要传播途径") and ("：" in ln or ":" in ln):
+                    main_i = i
+                    break
+            if main_i is None:
+                return ""
+
+            def _norm(ln: str) -> str:
+                ln = re.sub(r"\s+", " ", ln).strip()
+                # Drop trailing instruction leftovers.
+                ln = re.sub(r"(证据未提及|未提及则写.*)$", "", ln).strip()
+                return ln
+
+            main = _norm(lines0[main_i])
+            other = ""
+            ev = ""
+            for j in range(main_i + 1, min(len(lines0), main_i + 14)):
+                ln = lines0[j]
+                if not other and (ln.startswith("其他") and ("：" in ln or ":" in ln)):
+                    other = _norm(ln)
+                    continue
+                if not ev and (ln.startswith("证据原文") and ("：" in ln or ":" in ln)):
+                    buf = [ln]
+                    for k in range(j + 1, min(len(lines0), j + 8)):
+                        ln2 = lines0[k]
+                        if ln2.startswith("主要传播途径") or ln2.startswith("其他") or ln2.startswith("请"):
+                            break
+                        if ("请直接按以下格式" in ln2) or ("要求" in ln2) or ("Evidence:" in ln2):
+                            break
+                        buf.append(ln2)
+                    ev = _norm(" ".join(buf))
+                    break
+
+            if not other:
+                other = "其他已报道途径：证据未提及"
+            if not ev:
+                ev = "证据原文：\"\""
+            return "\n".join([main, other, ev]).strip()
+
         bad_markers = [
             "请用中文回答",
             "逐字引用",
@@ -320,7 +384,8 @@ def main() -> None:
         up = (user_prompt or "").strip()
         if up and cleaned.startswith(up):
             cleaned = cleaned[len(up) :].lstrip()
-        return cleaned.strip()
+        trip = _extract_structured_triplet(cleaned)
+        return (trip or cleaned).strip()
 
     def _build_acronym_lexicon_from_blocks(blocks_jsonl: Path, max_lines: int = 200_000) -> dict[str, str]:
         """
@@ -667,6 +732,7 @@ def main() -> None:
         query_embed_fn=query_embed_fn,
         no_repeat_ngram_size=int(args.no_repeat_ngram_size),
         ground_with_selected_text=bool(args.ground_with_selected_text),
+        grounding_instructions=str(args.grounding_instructions or ""),
     )
 
     print("=== Step Debug ===")
