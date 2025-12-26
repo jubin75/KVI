@@ -261,27 +261,44 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
   --shard_size 1024
 ```
 
-### 1.3 质量检查：如何确认 blocks 文本“抽取质量好”
+### 1.3 质量检查（evidence-first）：如何确认 blocks 文本“抽取质量好”
 
-在跑 `blocks.jsonl` 生成后，建议做两步：
+> 结论：在“双库策略”下，你**优先验证 evidence**（决定检索相关性与注入噪声），raw 只在需要表格/补上下文时再看。  
+> 简单原则：**你最终推理/注入优先用哪个库，就先检查哪个库对应的 blocks 文件。**
 
-> 注意：如果你采用“分库（专题库）模式”，那么你应该检查**专题库自己的** blocks：  
-> 例如 `topics/SARS2/work/blocks.jsonl` 或 `topics/SFTSV/work/blocks.jsonl`，而不是旧的全库 `WORK_DIR=/home/jb/KVI/_exp_prod/blocks.jsonl`。  
-> 简单原则：**你最终推理/注入用哪个 KVBank，就检查哪个 KVBank 对应的 blocks.jsonl。**
+先设定当前专题的 work 目录（下面以 SFTSV 为例）：
 
-1) **整体统计**（空块率、token 分布、重复率、疑似乱码比例、表格覆盖率）
+```bash
+export TOPIC_WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+```
+
+#### 1.3.1（优先）检查 evidence blocks：`blocks.evidence.jsonl`
+
+1) **整体统计 + 抽样**（空块率、重复率、疑似乱码比例、抽样原文）
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
-  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --blocks_jsonl "$TOPIC_WORK_DIR/blocks.evidence.jsonl" \
   --sample 10
 ```
 
-2) **只抽样表格相关 blocks**（医学场景优先确认表格是否保留下来）
+> 说明：evidence blocks 目标是“更短、更单意图、更可直接回答”，通常不强调 `--tables_only`。
+
+#### 1.3.2（可选）回看 raw blocks：`blocks.jsonl`（表格/上下文/定位碎片化问题）
+
+1) **整体统计 + 抽样**
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
-  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --blocks_jsonl "$TOPIC_WORK_DIR/blocks.jsonl" \
+  --sample 10
+```
+
+2) **只抽样表格相关 blocks**（仅当你开启 `extract_tables/split_tables`，并且确实希望表格进入 raw 库/表格路由时才需要）
+
+```bash
+python -u scripts/inspect_blocks_quality.py \
+  --blocks_jsonl "$TOPIC_WORK_DIR/blocks.jsonl" \
   --tables_only \
   --sample 10
 ```
@@ -289,43 +306,80 @@ python -u scripts/inspect_blocks_quality.py \
 > 如果你的仓库是“monorepo 布局”（即 repo root 下还有 `external_kv_injection/` 子目录），则把上述命令里的脚本路径改为：
 > `python -u external_kv_injection/scripts/inspect_blocks_quality.py ...`
 
-产物：
-- `$WORK_DIR/raw_chunks.jsonl`（raw context 存储层，不进 attention）
-- `$WORK_DIR/blocks.jsonl`（256-token memory blocks）
-- `$WORK_DIR/kvbank_blocks/`（FAISS KVBank：embedding + K/V + metadata）
+产物（专题 work_dir 下）：
+- `$TOPIC_WORK_DIR/raw_chunks.jsonl`（PDF 抽取后的 raw context，不进 attention）
+- `$TOPIC_WORK_DIR/blocks.evidence.jsonl`（DeepSeek 抽取式证据句，推荐优先检索/注入）
+- `$TOPIC_WORK_DIR/kvbank_evidence/`（evidence KVBank）
+- （可选回溯）`$TOPIC_WORK_DIR/blocks.jsonl` + `$TOPIC_WORK_DIR/kvbank_blocks/`（raw blocks/KVBank，用于补上下文/表格）
 
-### 1.4 后台构建 KVBank（blocks → kvbank，nohup + 实时看日志）
+### 1.4 后台构建 KVBank（evidence-first）：blocks → kvbank，nohup + 实时看日志
 
 > `blocks_to_kvbank` 阶段计算量大且**非常吃内存**。建议启用**方案A：分片 KVBank**（`--shard_size`），让它边处理边落盘，避免一次性 `np.stack` 把内存打爆。
+
+同样先设定当前专题 work 目录（下面以 SFTSV 为例）：
+
+```bash
+export TOPIC_WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+```
+
+#### 1.4.1（优先）构建 evidence KVBank：`blocks.evidence.jsonl` → `kvbank_evidence/`
 
 1) 启动后台任务（日志同时写文件，方便随时 `tail -f`）
 
 ```bash
-mkdir -p "$WORK_DIR/logs"
+mkdir -p "$TOPIC_WORK_DIR/logs"
 
-nohup bash -lc "python -u scripts/build_kvbank_from_blocks.py \
-  --blocks '$WORK_DIR/blocks.jsonl' \
-  --out_dir '$WORK_DIR/kvbank_blocks' \
+nohup bash -lc "python -u scripts/build_kvbank_from_blocks_jsonl.py \
+  --blocks_jsonl '$TOPIC_WORK_DIR/blocks.evidence.jsonl' \
+  --out_dir '$TOPIC_WORK_DIR/kvbank_evidence' \
   --base_llm '$BASE_LLM' \
-  --retrieval_encoder_model '$DOMAIN_ENCODER' \
+  --domain_encoder_model '$DOMAIN_ENCODER' \
   --layers 0,1,2,3 \
   --block_tokens 256 \
-  --shard_size 1024 2>&1 | tee -a '$WORK_DIR/logs/blocks_to_kvbank.log'" \
+  --shard_size 1024 2>&1 | tee -a '$TOPIC_WORK_DIR/logs/evidence_blocks_to_kvbank.log'" \
   >/dev/null 2>&1 &
-echo "started, log=$WORK_DIR/logs/blocks_to_kvbank.log"
+echo "started, log=$TOPIC_WORK_DIR/logs/evidence_blocks_to_kvbank.log"
 ```
 
 2) 在当前终端“实时看输出”（不影响后台运行）
 
 ```bash
-tail -f "$WORK_DIR/logs/blocks_to_kvbank.log"
+tail -f "$TOPIC_WORK_DIR/logs/evidence_blocks_to_kvbank.log"
 ```
 
-3) 检查是否落盘成功（分片模式下，会出现 `kvbank_blocks/manifest.json` + `kvbank_blocks/shards/00000/...`）
+3) 检查是否落盘成功（分片模式下，会出现 `kvbank_evidence/manifest.json` + `kvbank_evidence/shards/00000/...`）
 
 ```bash
-ls -alh "$WORK_DIR/kvbank_blocks"
-ls -alh "$WORK_DIR/kvbank_blocks/shards" | head
+ls -alh "$TOPIC_WORK_DIR/kvbank_evidence"
+ls -alh "$TOPIC_WORK_DIR/kvbank_evidence/shards" | head
+```
+
+#### 1.4.2（可选）构建 raw KVBank：`blocks.jsonl` → `kvbank_blocks/`（表格/补上下文）
+
+> 只有当你需要 raw fallback（或表格路由）时才跑这一段；否则可跳过。
+
+```bash
+mkdir -p "$TOPIC_WORK_DIR/logs"
+
+nohup bash -lc "python -u scripts/build_kvbank_from_blocks.py \
+  --blocks '$TOPIC_WORK_DIR/blocks.jsonl' \
+  --out_dir '$TOPIC_WORK_DIR/kvbank_blocks' \
+  --base_llm '$BASE_LLM' \
+  --retrieval_encoder_model '$DOMAIN_ENCODER' \
+  --layers 0,1,2,3 \
+  --block_tokens 256 \
+  --shard_size 1024 2>&1 | tee -a '$TOPIC_WORK_DIR/logs/raw_blocks_to_kvbank.log'" \
+  >/dev/null 2>&1 &
+echo "started, log=$TOPIC_WORK_DIR/logs/raw_blocks_to_kvbank.log"
+```
+
+```bash
+tail -f "$TOPIC_WORK_DIR/logs/raw_blocks_to_kvbank.log"
+```
+
+```bash
+ls -alh "$TOPIC_WORK_DIR/kvbank_blocks"
+ls -alh "$TOPIC_WORK_DIR/kvbank_blocks/shards" | head
 ```
 
 ## 2) 测试：多步注入（Multi-step Injection，2×V100 友好）
