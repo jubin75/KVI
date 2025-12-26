@@ -655,6 +655,14 @@ def main() -> None:
     bank = FaissKVBank.load(Path(args.kv_dir))
     evidence_bank = FaissKVBank.load(Path(str(args.kv_dir_evidence))) if args.kv_dir_evidence else None
 
+    if evidence_bank is not None:
+        print(
+            f"[retriever] mode=evidence-first kv_dir_raw={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence}",
+            flush=True,
+        )
+    else:
+        print(f"[retriever] mode=raw-only kv_dir_raw={args.kv_dir}", flush=True)
+
     # Build the main retriever (evidence-first if available).
     if evidence_bank is not None:
         retriever_main = EvidenceFirstRetriever(
@@ -691,6 +699,7 @@ def main() -> None:
         res = retriever.search(qv, top_k=int(args.top_k_blocks), filters=None, query_text=retrieval_query_text)
         print("=== Retrieval Only ===")
         print(f"kv_dir={args.kv_dir}", flush=True)
+        print(f"kv_dir_evidence={args.kv_dir_evidence}", flush=True)
         print(f"top_k_blocks={int(args.top_k_blocks)} retrieved_candidates={len(res.items)}", flush=True)
         for i, it in enumerate(res.items, start=1):
             bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
@@ -702,14 +711,15 @@ def main() -> None:
             )
 
         if int(args.print_top_candidates_text) > 0:
-            if not args.blocks_jsonl:
-                raise SystemExit("--print_top_candidates_text requires --blocks_jsonl")
+            if (not args.blocks_jsonl) and (not args.blocks_jsonl_evidence):
+                raise SystemExit("--print_top_candidates_text requires --blocks_jsonl or --blocks_jsonl_evidence")
             n = int(args.print_top_candidates_text)
             wanted = [
                 str((it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id"))) for it in res.items[:n]
             ]
             wanted_set = set(wanted)
-            blocks_path = Path(str(args.blocks_jsonl))
+            # Prefer evidence blocks for printing when available, otherwise fall back to raw blocks.
+            blocks_path = Path(str(args.blocks_jsonl_evidence or args.blocks_jsonl))
             found: dict[str, dict] = {}
             with blocks_path.open("r", encoding="utf-8") as f:
                 for line_no, line in enumerate(f, start=1):

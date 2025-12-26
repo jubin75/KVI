@@ -382,47 +382,48 @@ ls -alh "$TOPIC_WORK_DIR/kvbank_blocks"
 ls -alh "$TOPIC_WORK_DIR/kvbank_blocks/shards" | head
 ```
 
-## 2) 测试：多步注入（Multi-step Injection，2×V100 友好）
+## 2) 测试：多步注入（evidence-first，推荐）
+
+> 结论：默认用 **evidence KVBank** 做检索与注入（噪声更低、相关性更强），必要时再回退 raw 库补上下文。
+
+下面以 SFTSV 为例（flat layout：`/home/jb/KVI`）：
 
 ```bash
-python external_kv_injection/scripts/run_multistep_inject_demo.py \
+python -u scripts/run_multistep_inject_demo.py \
   --model "$BASE_LLM" \
-  --kv_dir "$WORK_DIR/kvbank_blocks" \
-  --kv_dir_tables "$WORK_DIR/kvbank_tables" \
-  --enable_table_routing \
-  --table_top_k 4 \
+  --topic sftsv --topic_work_dir "/home/jb/KVI/topics" \
   --domain_encoder_model "$DOMAIN_ENCODER" \
-  --prompt "请结合知识库逐步推理回答：SFTSV 的主要传播途径是什么？并给出依据。" \
-  --blocks_jsonl "$WORK_DIR/blocks.jsonl" \
+  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --blocks_jsonl "/home/jb/KVI/topics/SFTSV/work/blocks.jsonl" \
+  --blocks_jsonl_evidence "/home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl" \
   --allowed_langs "zh,en" \
   --layers 0,1,2,3 \
-  --max_steps 8 \
-  --max_step_tokens 1024 \
-  --max_total_tokens 2048 \
-  --top_k_blocks 8 \
+  --max_steps 1 \
   --max_blocks_per_step 1 \
-  --use_attention_entropy \
-  --entropy_threshold 0.35 \
-  --max_new_tokens 128
+  --top_k_blocks 16 \
+  --ground_with_selected_text \
+  --max_new_tokens 256
 ```
 
 说明：
-- `--blocks_jsonl + --allowed_langs`：在混语料（尤其包含日文）PDF 上强烈建议开启，避免检索命中非目标语言 block 后“注入导致语义退化/乱码/重复输出 prompt”。
-- `--max_blocks_per_step 1`：对 RoPE 模型（如 Qwen2）建议先从 1 开始，稳定后再逐步增大到 2/4。
+- `--topic ... --topic_work_dir ...`：脚本会优先探测 `kvbank_evidence`（并在需要时回退 raw 的 `kvbank_blocks`）。
+- `--blocks_jsonl(_evidence) + --allowed_langs`：强烈建议开启，避免混语料导致命中非目标语言 block 后注入退化。
+- `--max_steps=1 + --max_blocks_per_step=1`：先用“最小注入”验证相关性与稳定性；稳定后再把 `--max_steps` 提到 2/4。
 
-### 2.1（新增）用 evidence-first 双库跑 demo（默认优先 evidence，必要时回退 raw）
+### 2.1（等价写法）显式指定 evidence + raw（不使用 topic mode）
 
 如果你的专题库 work_dir 下存在：
 
 - `kvbank_evidence/manifest.json`
 - `blocks.evidence.jsonl`
 
-那么可以直接启用 evidence-first（推荐用 topic mode，脚本会自动探测）：
+如果你不想用 `--topic` 自动探测，也可以显式指定两个库的路径（效果等价）：
 
 ```bash
 python -u scripts/run_multistep_inject_demo.py \
   --model "$BASE_LLM" \
-  --topic sftsv --topic_work_dir "/home/jb/KVI/topics" \
+  --kv_dir "/home/jb/KVI/topics/SFTSV/work/kvbank_blocks" \
+  --kv_dir_evidence "/home/jb/KVI/topics/SFTSV/work/kvbank_evidence" \
   --domain_encoder_model "$DOMAIN_ENCODER" \
   --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
   --max_steps 1 \
