@@ -117,6 +117,13 @@ def main() -> None:
     p.add_argument("--max_total_tokens", type=int, default=2048)
     p.add_argument("--top_k_blocks", type=int, default=8)
     p.add_argument("--max_blocks_per_step", type=int, default=8, help="Cap selected blocks per step. For RoPE models, try 1 first.")
+    p.add_argument(
+        "--min_kv_len_to_inject",
+        type=int,
+        default=None,
+        help="Minimum kv_len to inject. Default: 128 for raw blocks; auto-lowered to 16 when evidence KVBank is enabled "
+        "(evidence sentences are shorter by design).",
+    )
     p.add_argument("--max_new_tokens", type=int, default=128)
     # Baseline is extremely useful for A/B debug; default to printing it.
     p.add_argument("--skip_baseline", action="store_true", help="If set, do NOT print baseline answer (no injection).")
@@ -775,6 +782,11 @@ def main() -> None:
         in_len = int(inputs0["input_ids"].shape[1])
         print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
 
+    # Evidence blocks are intentionally short; a high min_kv_len_to_inject will filter them all out.
+    if args.min_kv_len_to_inject is None:
+        args.min_kv_len_to_inject = 16 if evidence_bank is not None else 128
+        print(f"[inject] auto min_kv_len_to_inject={int(args.min_kv_len_to_inject)}", flush=True)
+
     cfg = MultiStepConfig(
         inject_layers=[int(x.strip()) for x in args.layers.split(",") if x.strip() != ""],
         block_tokens=256,
@@ -783,6 +795,7 @@ def main() -> None:
         max_steps=args.max_steps,
         top_k_blocks=args.top_k_blocks,
         max_blocks_per_step=int(args.max_blocks_per_step),
+        min_kv_len_to_inject=int(args.min_kv_len_to_inject),
         use_attention_entropy=bool(args.use_attention_entropy),
         entropy_threshold=float(args.entropy_threshold),
         debug_print_candidates_top_n=int(args.debug_print_candidates),
