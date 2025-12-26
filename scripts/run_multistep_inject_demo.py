@@ -411,6 +411,7 @@ def main() -> None:
             "末尾不要",
             "要求：",
             "Evidence:",
+            "Evidence not addressed",
             "根据以下句子",
             "请结合知识库",
         ]
@@ -438,6 +439,36 @@ def main() -> None:
         up = (user_prompt or "").strip()
         if up and cleaned.startswith(up):
             cleaned = cleaned[len(up) :].lstrip()
+        # Drop common "assistant-y" boilerplate that often appears as repeated tail paragraphs.
+        # Keep this generic (not task-template specific).
+        def _drop_boilerplate_paragraphs(s: str) -> str:
+            paras = [p.strip() for p in re.split(r"\n\s*\n+", s.replace("\r", "\n")) if p.strip()]
+            if not paras:
+                return s.strip()
+            drop_re = re.compile(
+                r"("
+                r"如有其他问题|如有任何问题|请告知|请随时|请告诉我|请确认|"
+                r"当前回答|上述回答|以上回答|本回答|已基于提供的信息|已基于提供的证据|"
+                r"建议查阅最新|祝您|"
+                r"If you have any other questions|please let me know|based on the provided (evidence|information)"
+                r")",
+                flags=re.IGNORECASE,
+            )
+            kept: list[str] = []
+            seen_norm: set[str] = set()
+            for p in paras:
+                pn = re.sub(r"\s+", " ", p).strip()
+                # Drop short boilerplate paras (often repeated).
+                if drop_re.search(pn) and len(pn) <= 240:
+                    continue
+                # De-dupe exact repeated paras.
+                if pn in seen_norm:
+                    continue
+                seen_norm.add(pn)
+                kept.append(p)
+            return "\n\n".join(kept).strip()
+
+        cleaned = _drop_boilerplate_paragraphs(cleaned)
         trip = _extract_structured_triplet(cleaned)
         return (trip or cleaned).strip()
 

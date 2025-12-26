@@ -284,6 +284,20 @@ python -u scripts/inspect_blocks_quality.py \
 
 > 说明：evidence blocks 目标是“更短、更单意图、更可直接回答”，通常不强调 `--tables_only`。
 
+2) **关键词抽样验证：库里是否包含某类证据句（例如“发病机制/免疫机制”）**
+
+> 用途：快速回答“evidence 库里有没有机制/pathogenesis/immune 相关证据句”，避免只凭感觉猜。  
+> 脚本会流式扫描 `blocks.evidence.jsonl`，统计每个关键词命中次数，并随机抽样打印命中的 block（含 `doc_id/source_uri/line_no` + snippet）。
+
+```bash
+python -u scripts/sample_blocks_by_keywords.py \
+  --blocks_jsonl "$TOPIC_WORK_DIR/blocks.evidence.jsonl" \
+  --keywords "pathogenesis,mechanism,immune,cytokine,MODS,multi-organ,致病,发病机制,免疫,细胞因子,器官功能衰竭" \
+  --sample 20 \
+  --seed 0 \
+  --max_chars 600
+```
+
 #### 1.3.2（可选）回看 raw blocks：`blocks.jsonl`（表格/上下文/定位碎片化问题）
 
 1) **整体统计 + 抽样**
@@ -402,6 +416,7 @@ python -u scripts/run_multistep_inject_demo.py \
   --max_blocks_per_step 1 \
   --top_k_blocks 16 \
   --ground_with_selected_text \
+  --no_repeat_ngram_size 12 \
   --max_new_tokens 256
 ```
 
@@ -433,6 +448,7 @@ python -u scripts/run_multistep_inject_demo.py \
   --blocks_jsonl_evidence "/home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl" \
   --allowed_langs "zh,en" \
   --ground_with_selected_text \
+  --no_repeat_ngram_size 12 \
   --max_new_tokens 256
 ```
 
