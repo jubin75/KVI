@@ -169,7 +169,7 @@ def main() -> None:
     p.add_argument(
         "--no_repeat_ngram_size",
         type=int,
-        default=6,
+        default=12,
         help="No-repeat ngram constraint during final decode to reduce repetitive filler (0 disables).",
     )
     p.add_argument(
@@ -414,6 +414,9 @@ def main() -> None:
             "Evidence not addressed",
             "根据以下句子",
             "请结合知识库",
+            # common prompt-echo instruction in CN demos
+            "注意回答内容不要重复",
+            "注意内容不要重复",
         ]
         lines = [ln.strip() for ln in text.splitlines()]
         out_lines: list[str] = []
@@ -469,6 +472,46 @@ def main() -> None:
             return "\n\n".join(kept).strip()
 
         cleaned = _drop_boilerplate_paragraphs(cleaned)
+
+        def _dedupe_sentences(s: str) -> str:
+            """
+            Remove repetitive loops inside a single paragraph (common failure mode for greedy decoding),
+            while keeping the first occurrence. This is conservative: only dedupes medium/long sentences.
+            """
+            s0 = (s or "").strip()
+            if len(s0) < 240:
+                return s0
+            # Split while preserving delimiters.
+            parts = re.split(r"([。！？!?\.])", s0)
+            if len(parts) <= 1:
+                return s0
+            out: list[str] = []
+            seen: set[str] = set()
+
+            def _norm_sent(x: str) -> str:
+                x = x.strip()
+                x = re.sub(r"\s+", "", x)
+                x = x.lower()
+                # normalize common punctuation/quotes
+                x = x.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+                return x
+
+            # Recombine [sent, delim] pairs.
+            for i in range(0, len(parts), 2):
+                sent = parts[i].strip() if i < len(parts) else ""
+                delim = parts[i + 1] if i + 1 < len(parts) else ""
+                if not sent:
+                    continue
+                # only dedupe non-trivial sentences (avoid nuking short list labels)
+                if len(sent) >= 12:
+                    key = _norm_sent(sent)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                out.append(sent + delim)
+            return "".join(out).strip()
+
+        cleaned = _dedupe_sentences(cleaned)
         trip = _extract_structured_triplet(cleaned)
         return (trip or cleaned).strip()
 

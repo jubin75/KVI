@@ -57,7 +57,7 @@ def main() -> None:
     p.add_argument("--blocks_jsonl", required=True, help="Input raw blocks.jsonl")
     p.add_argument("--out_jsonl", required=True, help="Output evidence blocks jsonl (e.g., blocks.evidence.jsonl)")
     p.add_argument("--topic_goal", required=True, help="Topic goal text (used to guide extraction)")
-    p.add_argument("--max_sentences_per_block", type=int, default=2)
+    p.add_argument("--max_sentences_per_block", type=int, default=3)
     p.add_argument("--max_blocks", type=int, default=0, help="If >0, only process first N blocks (debug)")
     p.add_argument("--deepseek_base_url", type=str, default="https://api.deepseek.com")
     p.add_argument("--deepseek_model", type=str, default="deepseek-chat")

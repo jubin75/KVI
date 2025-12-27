@@ -42,14 +42,16 @@ You MUST ONLY copy exact substrings from the provided raw_block_text into the 'q
 
 
 USER_TEMPLATE = """topic_goal: {topic_goal}
-task: Extract up to {max_sentences} high-value, reusable evidence sentences for the topic_goal.
+task: Extract up to {max_sentences} evidence sentences for the topic_goal (HIGH RECALL).
 
 Rules (MUST follow):
 1) Output JSON only. No markdown, no explanation.
 2) Extractive-only: each quote MUST be an exact substring of raw_block_text (verbatim; you may ignore line breaks when selecting the substring, but do not change words).
 3) Provide span offsets (char_start, char_end) into the raw_block_text for each quote.
-4) Prefer sentences that are actionable or answerable: key findings, guideline recommendations, definitions, transmission routes, diagnosis criteria, treatment recommendations, contraindications, dosages, outcomes.
-5) If nothing is reusable/high-value, return keep=false and a short reject_reason.
+4) HIGH RECALL: If any sentence is relevant to the topic_goal, keep it (even if it is only "supporting" or "background").
+   Prefer factual, reusable statements about: transmission routes/vectors, reservoirs/hosts, epidemiology, clinical features/outcomes,
+   pathogenesis/mechanisms/immune response, diagnosis, prevention, treatment and guideline recommendations (if present in raw_block_text).
+5) Only return keep=false if there is truly NOTHING relevant to the topic_goal in raw_block_text.
 6) Do NOT create new medical advice; you may extract recommendations ONLY if they already appear in the raw_block_text.
 
 Return JSON schema:
@@ -79,7 +81,8 @@ class ExtractiveEvidenceConfig:
     deepseek_model: str = "deepseek-chat"
     api_key_env: str = "DEEPSEEK_API_KEY"
     max_sentences: int = 3
-    max_chars: int = 7000
+    # Allow a bit more context to increase recall (still bounded to avoid overly long requests).
+    max_chars: int = 9000
 
 
 class DeepSeekExtractiveEvidence:

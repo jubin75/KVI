@@ -205,7 +205,10 @@ python -u scripts/build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py \
   --raw_chunks_jsonl "$WORK_DIR/raw_chunks.jsonl" \
   --out_jsonl "$WORK_DIR/blocks.evidence.jsonl" \
   --topic_goal "$(jq -r .goal config/topics/SFTSV/config.json)" \
-  --max_sentences_per_paragraph 2
+  --max_sentences_per_paragraph 3
+
+# 提示：如果你发现 evidence 覆盖不足（抽取偏保守），可以把上面的 max_sentences_per_paragraph 提到 4 或 5，
+# 会增加证据句密度（也可能带来少量噪声，需要用 1.3 的关键词抽样再确认）。
 
 # 2) evidence blocks -> kvbank_evidence
 python -u scripts/build_kvbank_from_blocks_jsonl.py \

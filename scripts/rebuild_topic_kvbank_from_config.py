@@ -146,7 +146,7 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
     deepseek_base_url: str,
     deepseek_model: str,
     deepseek_api_key_env: str,
-    max_sentences_per_paragraph: int = 2,
+    max_sentences_per_paragraph: int = 3,
     max_paragraphs: int = 0,
 ) -> Dict[str, Any]:
     """
@@ -395,10 +395,10 @@ def main() -> None:
     enable_evidence = bool(evidence_cfg.get("enabled", True))
     # preferred: raw_chunks -> paragraphs -> evidence sentences
     source_level = str(evidence_cfg.get("source_level", "raw_chunks")).strip().lower()
-    max_sentences_per_paragraph = int(evidence_cfg.get("max_sentences_per_paragraph", evidence_cfg.get("max_sentences_per_block", 2)))
+    max_sentences_per_paragraph = int(evidence_cfg.get("max_sentences_per_paragraph", evidence_cfg.get("max_sentences_per_block", 3)))
     max_paragraphs = int(evidence_cfg.get("max_paragraphs", 0))
     # legacy: blocks -> evidence sentences
-    max_sentences_per_block = int(evidence_cfg.get("max_sentences_per_block", 2))
+    max_sentences_per_block = int(evidence_cfg.get("max_sentences_per_block", 3))
     max_blocks_evidence = int(evidence_cfg.get("max_blocks", 0))
     if enable_evidence:
         print(
