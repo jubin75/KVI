@@ -175,6 +175,15 @@ python -u scripts/rebuild_topic_kvbank_from_config.py \
   --config config/topics/SARS2/config.json
 ```
 
+可选：从“完全干净”开始（仅删目标产物）
+
+如果你想确保没有旧文件干扰（非必须），可以先删 evidence 相关两项再跑重建：
+
+```bash
+rm -rf /home/jb/KVI/topics/SFTSV/work/kvbank_evidence
+rm -f /home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl
+```
+
 完成后，如何判断成功（从头构建 + 双库，一共 6 个硬产物）：
 - `topics/<TOPIC>/doc_filter_results.jsonl`：doc-level 筛选记录（KEEP/DROP/UNCERTAIN）
 - `topics/<TOPIC>/pdfs/`：KEEP 的 PDF（默认软链）
@@ -263,6 +272,13 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
   --split_tables \
   --shard_size 1024
 ```
+
+为什么 runbook 里同时有 `rebuild_topic_kvbank_from_config.py` 和 `build_kvbank_from_pdf_dir_multistep.py`？
+
+- **`rebuild_topic_kvbank_from_config.py`（推荐主线）**：专题库“一条命令”流水线。它会按 `config/topics/<TOPIC>/config.json` 先做 doc-level DeepSeek（摘要）筛选，然后跑 PDF→raw_chunks→blocks→KVBank，并默认继续生成 `blocks.evidence.jsonl` + `kvbank_evidence/`（双库策略）。
+- **`build_kvbank_from_pdf_dir_multistep.py`（调试/拆解入口）**：不依赖 topic config 的通用脚本，用来在你**已经有一批 PDF** 时直接做 PDF→work_dir→KVBank，适合定位问题（比如抽取/OCR、切块、建库哪一步异常），也适合你临时做一个非专题的实验目录。
+
+结论：**正常情况下只跑 `rebuild_topic_kvbank_from_config.py` 就够了**；只有当你要“逐段排错/做非专题 quick experiment”时才跑 `build_kvbank_from_pdf_dir_multistep.py`。
 
 ### 1.3 质量检查（evidence-first）：如何确认 blocks 文本“抽取质量好”
 
