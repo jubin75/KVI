@@ -49,6 +49,18 @@ def _split_paragraphs(text: str) -> List[str]:
     return [p for p in parts if len(p) >= 30]
 
 
+def _approx_token_count(text: str) -> int:
+    """
+    Cheap, tokenizer-free proxy for 'token_count' used in QA/inspection.
+    Counts alnum "words" and individual CJK characters as units.
+    """
+    t = str(text or "").strip()
+    if not t:
+        return 0
+    units = re.findall(r"[A-Za-z0-9]+|[\u4E00-\u9FFF]", t)
+    return int(len(units))
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--raw_chunks_jsonl", required=True, help="Input raw_chunks.jsonl")
@@ -111,7 +123,8 @@ def main() -> None:
                         "source_uri": source_uri,
                         "lang": lang,
                         "text": quote,
-                        "meta": {
+                        "token_count": int(_approx_token_count(quote)),
+                        "metadata": {
                             "from_raw_chunk_id": chunk_id,
                             "paragraph_index": int(p_idx),
                             "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},

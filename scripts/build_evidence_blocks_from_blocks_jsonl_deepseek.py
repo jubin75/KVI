@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -37,6 +38,18 @@ def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
         return obj if isinstance(obj, dict) else None
     except Exception:
         return None
+
+
+def _approx_token_count(text: str) -> int:
+    """
+    Cheap, tokenizer-free proxy for 'token_count' used in QA/inspection.
+    Counts alnum "words" and individual CJK characters as units.
+    """
+    t = str(text or "").strip()
+    if not t:
+        return 0
+    units = re.findall(r"[A-Za-z0-9]+|[\u4E00-\u9FFF]", t)
+    return int(len(units))
 
 
 def main() -> None:
@@ -105,7 +118,8 @@ def main() -> None:
                     "source_uri": source_uri,
                     "lang": lang,
                     "text": quote,
-                    "meta": {
+                    "token_count": int(_approx_token_count(quote)),
+                    "metadata": {
                         "from_raw_block_id": raw_block_id,
                         "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},
                         "relevance": it.get("relevance"),

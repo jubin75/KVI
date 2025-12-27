@@ -112,6 +112,18 @@ def _quantiles(xs: List[int]) -> Dict[str, float]:
     return {"min": float(xs2[0]), "avg": float(avg), "p50": float(p50), "p95": float(p95), "max": float(xs2[-1])}
 
 
+def _approx_token_count(text: str) -> int:
+    """
+    Cheap, tokenizer-free proxy used when `token_count` is missing.
+    Counts alnum "words" and individual CJK characters as units.
+    """
+    t = normalize_text(str(text or ""))
+    if not t:
+        return 0
+    units = re.findall(r"[A-Za-z0-9]+|[\u4E00-\u9FFF]", t)
+    return int(len(units))
+
+
 def _nonprintable_ratio(s: str) -> float:
     if not s:
         return 0.0
@@ -188,7 +200,11 @@ def main() -> None:
         if not text:
             empty += 1
             continue
-        tc = int(r.get("token_count") or 0)
+        tc_raw = r.get("token_count")
+        if isinstance(tc_raw, int) and tc_raw > 0:
+            tc = int(tc_raw)
+        else:
+            tc = int(_approx_token_count(text))
         token_counts.append(tc)
         q_scores.append(float(quality_score(text)))
         if _nonprintable_ratio(text) >= 0.02:

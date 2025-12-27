@@ -47,6 +47,20 @@ def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _approx_token_count(text: str) -> int:
+    """
+    Cheap, tokenizer-free proxy for 'token_count' (for QA/debugging only).
+    Counts alnum "words" and individual CJK characters as units.
+    """
+    import re
+
+    t = str(text or "").strip()
+    if not t:
+        return 0
+    units = re.findall(r"[A-Za-z0-9]+|[\u4E00-\u9FFF]", t)
+    return int(len(units))
+
+
 def build_evidence_blocks_from_blocks_jsonl(
     *,
     blocks_jsonl: Path,
@@ -110,7 +124,8 @@ def build_evidence_blocks_from_blocks_jsonl(
                     "source_uri": source_uri,
                     "lang": lang,
                     "text": quote,
-                    "meta": {
+                    "token_count": int(_approx_token_count(quote)),
+                    "metadata": {
                         "from_raw_block_id": raw_block_id,
                         "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},
                         "relevance": it.get("relevance"),
@@ -194,7 +209,8 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
                         "source_uri": source_uri,
                         "lang": lang,
                         "text": quote,
-                        "meta": {
+                        "token_count": int(_approx_token_count(quote)),
+                        "metadata": {
                             "from_raw_chunk_id": chunk_id,
                             "paragraph_index": int(p_idx),
                             "span": {"char_start": span.get("char_start"), "char_end": span.get("char_end")},
