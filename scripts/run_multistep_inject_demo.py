@@ -332,8 +332,9 @@ def main() -> None:
 
     def _strip_chat_artifacts(text: str) -> str:
         # Truncate if the model starts a new turn (common in chatty base models).
-        # Keep it conservative: only cut on newline + Human/User markers.
-        m = re.search(r"\n\s*(Human|User)\s*:\s*", text)
+        # Important: some degenerate outputs concatenate markers without a newline, e.g. "...HaematophysiHuman: ...".
+        # So we cut on the first occurrence anywhere, not only on "\n".
+        m = re.search(r"(\n\s*)?(Human|User|Assistant)\s*:\s*", text)
         if m:
             text = text[: m.start()]
         return text.strip()
