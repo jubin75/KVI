@@ -523,6 +523,34 @@ def main() -> None:
             return "".join(out).strip()
 
         cleaned = _dedupe_sentences(cleaned)
+
+        def _drop_repeated_paragraph_attempts(s: str) -> str:
+            """
+            Some degenerate outputs repeat the same first sentence in a new paragraph and then trail off
+            (e.g. duplicated "SFTSV的主要传播途径是..." followed by an incomplete token).
+            Keep the first occurrence and drop later paras whose prefix is already seen.
+            """
+            paras = [p.strip() for p in re.split(r"\n\s*\n+", (s or "").replace("\r", "\n")) if p.strip()]
+            if len(paras) <= 1:
+                return (s or "").strip()
+            seen: set[str] = set()
+            kept: list[str] = []
+
+            def _norm_prefix(p: str) -> str:
+                p = re.sub(r"\s+", "", p.strip()).lower()
+                # only compare a short prefix to catch "second attempt" repeats
+                return p[:36]
+
+            for p in paras:
+                key = _norm_prefix(p)
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                kept.append(p)
+            return "\n\n".join(kept).strip()
+
+        cleaned = _drop_repeated_paragraph_attempts(cleaned)
         trip = _extract_structured_triplet(cleaned)
         return (trip or cleaned).strip()
 
