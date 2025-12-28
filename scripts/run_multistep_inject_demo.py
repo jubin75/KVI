@@ -417,6 +417,11 @@ def main() -> None:
             # common prompt-echo instruction in CN demos
             "注意回答内容不要重复",
             "注意内容不要重复",
+            # common "process text" echoes that pollute answers
+            "但请注意",
+            "因此应简化为",
+            "因此，最终答案为",
+            "最终答案为",
         ]
         lines = [ln.strip() for ln in text.splitlines()]
         out_lines: list[str] = []
@@ -425,8 +430,13 @@ def main() -> None:
                 if out_lines and out_lines[-1] != "":
                     out_lines.append("")
                 continue
-            if any(m in ln for m in bad_markers) and len(ln) <= 160:
-                # drop instruction echo lines
+            # Drop obvious instruction/process echoes (even if the line is long).
+            if any(m in ln for m in bad_markers):
+                # Keep evidence lines even if they contain markers like "Evidence:" etc.
+                if ln.startswith("证据原文") or ln.lower().startswith("evidence"):
+                    out_lines.append(ln)
+                    continue
+                # Otherwise: drop prompt echo / process narration.
                 continue
             out_lines.append(ln)
         # drop repeated leading question-like line (common echo)

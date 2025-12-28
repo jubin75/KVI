@@ -447,7 +447,9 @@ class MultiStepInjector:
                     # Default is intentionally minimal and generic (not task-specific).
                     instr = (
                         "请基于【证据句】回答，不要复述问题/提示，不要编造证据；"
-                        "若证据未覆盖某点，请明确写“证据未提及”。"
+                        "若证据未覆盖某点，请明确写“证据未提及”；"
+                        "不要输出与证据句相矛盾的否定（例如证据句已包含人传人/体液接触时，不要写“证据未提及人传人/体液接触”）；"
+                        "回答保持简洁，不要输出“逐字引用/最终答案为/但请注意”等过程性文字。"
                     )
                 prompt_for_final = (
                     prompt
