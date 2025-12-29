@@ -14,12 +14,47 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from external_kv_injection.scripts.rebuild_topic_kvbank_from_config import _approx_token_count, _safe_json_loads  # type: ignore
-from external_kv_injection.src.runtime.struct_slots import build_schema_from_evidence_texts, schema_to_injection_text  # type: ignore
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT_STR = str(_REPO_ROOT)
+if _REPO_ROOT_STR not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_STR)
+
+try:
+    # monorepo layout: repo root contains external_kv_injection/
+    from external_kv_injection.src.runtime.struct_slots import (  # type: ignore
+        build_schema_from_evidence_texts,
+        schema_to_injection_text,
+    )
+except ModuleNotFoundError:
+    # flat layout (KVI): repo root is already external_kv_injection/, modules are under src/
+    from src.runtime.struct_slots import build_schema_from_evidence_texts, schema_to_injection_text  # type: ignore
+
+
+def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
+    try:
+        obj = json.loads(line)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def _approx_token_count(text: str) -> int:
+    """
+    Cheap, tokenizer-free proxy for 'token_count' (for QA/debugging only).
+    Counts alnum "words" and individual CJK characters as units.
+    """
+    import re
+
+    t = str(text or "").strip()
+    if not t:
+        return 0
+    units = re.findall(r"[A-Za-z0-9]+|[\u4E00-\u9FFF]", t)
+    return int(len(units))
 
 
 def build_schema_blocks_from_evidence_jsonl(
