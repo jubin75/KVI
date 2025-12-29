@@ -71,8 +71,9 @@ class StepDebug:
     # If these stay ~0, injection likely isn't affecting model computation (or prefix is being ignored).
     logit_delta_vs_zero_prefix: Optional[float] = None
     hidden_delta_vs_zero_prefix: Optional[float] = None
-    redundancy_hits: int
-    ext_attn_entropy: Optional[float]
+    # Defaults are required because these fields come after defaulted fields above (dataclasses constraint).
+    redundancy_hits: int = 0
+    ext_attn_entropy: Optional[float] = None
     retrieved_candidates: int = 0
     note: Optional[str] = None
 
