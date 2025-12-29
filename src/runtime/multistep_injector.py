@@ -23,7 +23,7 @@ import torch
 
 from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
-from .schema_answerability import SCHEMA_SLOT_ENUM, SchemaAnswerabilityConfig, choose_answerable_schema
+from .schema_answerability import SCHEMA_SLOT_ENUM, SchemaAnswerabilityConfig, choose_answerable_schema, infer_slots_from_query
 
 
 @dataclass(frozen=True)
@@ -150,21 +150,31 @@ class MultiStepInjector:
 
         # Schema retrieval is NOT ranked similarity search: choose answerable schema(s) by a selector
         # that ignores ANN scores.
-        cand_slots: List[List[str]] = []
+        # IMPORTANT: Use answerable_slots for gating (if present); fallback to slots.
+        # Only answerable_slots (not generic "slots") can satisfy required_slots.
+        cand_answerable_slots: List[List[str]] = []
         for it in candidates:
             meta = getattr(it, "meta", {}) or {}
-            slots = meta.get("slots")
-            if not isinstance(slots, list):
-                slots = (meta.get("metadata") or {}).get("slots") if isinstance(meta.get("metadata"), dict) else []
-            if not isinstance(slots, list):
-                slots = []
-            cand_slots.append([str(s) for s in slots if str(s).strip()])
+            # Prefer answerable_slots over slots (answerable_slots = subset that evidence can substantively answer).
+            ans_slots = meta.get("answerable_slots")
+            if not isinstance(ans_slots, list):
+                ans_slots = (meta.get("metadata") or {}).get("answerable_slots") if isinstance(meta.get("metadata"), dict) else None
+            if isinstance(ans_slots, list) and ans_slots:
+                cand_answerable_slots.append([str(s) for s in ans_slots if str(s).strip()])
+            else:
+                # Fallback: use slots (legacy schema blocks without explicit answerable_slots).
+                slots = meta.get("slots")
+                if not isinstance(slots, list):
+                    slots = (meta.get("metadata") or {}).get("slots") if isinstance(meta.get("metadata"), dict) else []
+                if not isinstance(slots, list):
+                    slots = []
+                cand_answerable_slots.append([str(s) for s in slots if str(s).strip()])
 
         sel_idx, sel_dbg = choose_answerable_schema(
             query_text=str(query_text or ""),
             candidate_ids=candidate_ids,
             candidate_texts=candidate_texts,
-            candidate_slots=cand_slots,
+            candidate_slots=cand_answerable_slots,  # Use answerable_slots for slot gating
             answered_slots=set(answered_slots),
             required_slots=set(required_slots),
             cfg=SchemaAnswerabilityConfig(max_selected=int(self.cfg.schema_max_selected_per_step)),
@@ -210,7 +220,14 @@ class MultiStepInjector:
 
         # Track semantic progress across steps (slot-based).
         answered_slots: Set[str] = set()
-        req_slots = set(str(s) for s in (self.cfg.schema_required_slots or SCHEMA_SLOT_ENUM) if str(s))
+        # Dynamic required_slots: if not explicitly provided, infer from user query.
+        if self.cfg.schema_required_slots:
+            req_slots = set(str(s) for s in self.cfg.schema_required_slots if str(s))
+        else:
+            req_slots = infer_slots_from_query(str(query_text or prompt))
+            if not req_slots:
+                # Fallback: use all predefined slots (backward compat).
+                req_slots = set(SCHEMA_SLOT_ENUM)
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -611,6 +628,7 @@ class MultiStepInjector:
               It is NOT the retrieval query rewrite.
             - By default, we avoid hardcoding "intent" rules: we simply pick a few sentences from the selected blocks.
             - If `keywords` is provided, we will prefer sentences containing those keywords (user-configurable hook).
+            - MUST strip instruction/meta-language artifacts (e.g., "请回答", "依据", "Human:", "Assistant:").
             """
             if not texts:
                 return ""
@@ -618,10 +636,35 @@ class MultiStepInjector:
             picked: List[str] = []
             import re
 
+            # Instruction/meta-language patterns to strip (case-insensitive).
+            meta_patterns = [
+                r"^(请|Please)\s*(回答|answer|respond)",
+                r"^(依据|Evidence|Proof|证据)[：:]\s*",
+                r"(Human|User|Assistant|System)\s*[：:]",
+                r"^\[?(注|Note|提示|Hint)\]?[：:]\s*",
+                r"^(主要|其他).*(途径|途经|方式)[：:]",  # instruction-like headers
+                r"^证据原文[：:]",
+                r"^回答要求",
+            ]
+            meta_re = re.compile("|".join(meta_patterns), re.IGNORECASE)
+
+            def _is_meta(s: str) -> bool:
+                """Return True if sentence is instruction/meta-language (should be stripped)."""
+                s_stripped = s.strip()
+                if meta_re.search(s_stripped):
+                    return True
+                # Very short fragments that look like labels.
+                if len(s_stripped) < 10 and (":" in s_stripped or "：" in s_stripped):
+                    return True
+                return False
+
             for t in texts:
                 # Split into rough sentences.
                 sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t) if s.strip()]
                 for s in sents:
+                    # Skip instruction/meta-language sentences.
+                    if _is_meta(s):
+                        continue
                     sl = s.lower()
                     # If keywords provided, prefer matching ones; otherwise accept any sentence.
                     if kws and not any(k in sl for k in kws):
@@ -636,9 +679,9 @@ class MultiStepInjector:
                 if len(picked) >= 3:
                     break
             if not picked:
-                # fallback: first 1–2 sentences
+                # fallback: first 1–2 sentences (after filtering meta).
                 t0 = texts[0]
-                sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t0) if s.strip()]
+                sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t0) if s.strip() and not _is_meta(s)]
                 picked = sents[:2] if sents else [t0[:400]]
             picked = [p.replace("\n", " ").strip() for p in picked if p.strip()]
             out = "\n".join([f"- {p}" for p in picked[:3]])
@@ -683,13 +726,22 @@ class MultiStepInjector:
             if evidence or raw_ctx:
                 instr = (grounding_instructions or "").strip()
                 if not instr:
+                    # Generation contract: slot-level rendering exactly once, clean output.
+                    # uncovered_slots: slots that were required but NOT answered by any selected schema.
+                    uncovered_slots = set(req_slots) - answered_slots
+                    uncovered_str = ", ".join(sorted(uncovered_slots)) if uncovered_slots else ""
                     instr = (
-                        "请基于【证据句】回答，不要复述问题/提示，不要编造证据；"
-                        "若证据未覆盖某点，请明确写“证据未提及”；"
-                        "不要输出与证据句相矛盾的否定；"
-                        "不要逐字复述证据句；"
-                        "回答保持简洁，不要输出过程性文字。"
+                        "请基于【证据句】回答，遵循以下规则：\n"
+                        "1) 每个语义槽只输出一次，不重复；\n"
+                        "2) 不要复述问题、提示或证据句原文；\n"
+                        "3) 不要输出指令性文字（如'请回答'、'依据'等）；\n"
+                        "4) 不要编造证据，仅使用提供的证据句；\n"
                     )
+                    if uncovered_str:
+                        instr += f"5) 对于无法回答的槽位（{uncovered_str}），直接输出：'现有证据不足以回答该问题。'\n"
+                    else:
+                        instr += "5) 若证据未覆盖某点，输出：'证据未提及'。\n"
+                    instr += "6) 回答简洁，不要输出过程性文字。"
                 prompt_for_final = prompt
                 if evidence:
                     prompt_for_final += "\n\n【证据句（逐字引用，仅用于核对；不要复述）】\n" + evidence

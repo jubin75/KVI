@@ -48,6 +48,9 @@ class SchemaBlock(TypedDict, total=False):
     block_id: str
     text: str
     slots: List[SchemaSlot]
+    # answerable_slots: subset of slots that the evidence can SUBSTANTIVELY answer.
+    # If absent, falls back to slots. Only answerable_slots satisfy required slots.
+    answerable_slots: List[SchemaSlot]
     doc_id: str
     source_uri: str
     token_count: int
@@ -117,6 +120,114 @@ def _query_terms(q: str, *, max_terms: int) -> List[str]:
     return toks[: max_terms]
 
 
+# Fallback regex patterns (used when dynamic extraction yields nothing).
+_SLOT_PATTERNS_FALLBACK: Tuple[Tuple[str, re.Pattern], ...] = (
+    ("transmission", re.compile(r"(transmit|传播|spread|route|vector|tick|蜱)", re.I)),
+    ("pathogenesis", re.compile(r"(pathogen|mechanism|发病机制|致病|cytokine|immun|inflam)", re.I)),
+    ("clinical_features", re.compile(r"(symptom|症状|clinical|manifest|fever|sign)", re.I)),
+    ("diagnosis", re.compile(r"(diagnos|检测|诊断|test|pcr|elisa|assay)", re.I)),
+    ("treatment", re.compile(r"(treat|治疗|therap|drug|antivir|cure|药物)", re.I)),
+    ("epidemiology", re.compile(r"(epidem|流行病|incidence|prevalence|outbreak)", re.I)),
+    ("prevention", re.compile(r"(prevent|预防|vaccine|vaccin|prophyla)", re.I)),
+    ("prognosis", re.compile(r"(prognos|预后|outcome|mortality|survival)", re.I)),
+)
+
+# Dynamic slot extraction: question-word → slot-type mapping.
+_QUESTION_SLOT_MAP: Tuple[Tuple[re.Pattern, str], ...] = (
+    (re.compile(r"(how|怎么|如何).*(transmit|传播|spread)", re.I), "transmission"),
+    (re.compile(r"(what|什么).*(cause|原因|机制|mechan)", re.I), "pathogenesis"),
+    (re.compile(r"(what|哪些).*(symptom|症状|表现)", re.I), "clinical_features"),
+    (re.compile(r"(how|怎么|如何).*(diagnos|诊断|检测)", re.I), "diagnosis"),
+    (re.compile(r"(how|怎么|如何).*(treat|治疗|cure)", re.I), "treatment"),
+    (re.compile(r"(what|哪些).*(risk|危险因素|风险)", re.I), "risk_factors"),
+    (re.compile(r"(what|哪些).*(complicat|并发症)", re.I), "complications"),
+    (re.compile(r"(what|多少).*(mortality|死亡率|fatality)", re.I), "prognosis"),
+    (re.compile(r"(how|怎么).*(prevent|预防)", re.I), "prevention"),
+)
+
+# Concept extraction patterns (noun phrases / key terms → dynamic slots).
+_CONCEPT_PATTERNS: Tuple[re.Pattern, ...] = (
+    re.compile(r"\b(risk\s*factor|危险因素|风险因素)\b", re.I),
+    re.compile(r"\b(complicat\w*|并发症)\b", re.I),
+    re.compile(r"\b(incubation|潜伏期)\b", re.I),
+    re.compile(r"\b(reservoir|宿主|动物宿主)\b", re.I),
+    re.compile(r"\b(seroprevalence|血清阳性率)\b", re.I),
+    re.compile(r"\b(case\s*fatality|病死率)\b", re.I),
+    re.compile(r"\b(viral\s*load|病毒载量)\b", re.I),
+    re.compile(r"\b(immune\s*evasion|免疫逃逸)\b", re.I),
+    re.compile(r"\b(cytokine\s*storm|细胞因子风暴)\b", re.I),
+    re.compile(r"\b(human-to-human|人传人)\b", re.I),
+)
+
+
+def _extract_dynamic_slots(query: str) -> Set[str]:
+    """
+    Extract slots dynamically from query using:
+    1) Question-word → slot-type mapping
+    2) Concept pattern matching → generate slot from matched concept
+    Returns set of slot identifiers (arbitrary strings, not limited to enum).
+    """
+    q = (query or "").strip()
+    if not q:
+        return set()
+    slots: Set[str] = set()
+    # 1) Question-word patterns.
+    for pat, slot_id in _QUESTION_SLOT_MAP:
+        if pat.search(q):
+            slots.add(slot_id)
+    # 2) Concept patterns → derive slot name from matched text.
+    for pat in _CONCEPT_PATTERNS:
+        m = pat.search(q)
+        if m:
+            # Normalize matched concept to slot_id (lowercase, underscores).
+            concept = m.group(0).lower().strip()
+            concept = re.sub(r"\s+", "_", concept)
+            concept = re.sub(r"[^a-z0-9_\u4e00-\u9fff]", "", concept)
+            if concept:
+                slots.add(concept)
+    return slots
+
+
+def infer_slots_from_query(query: str) -> Set[str]:
+    """
+    Infer required_slots from user query.
+    Strategy: dynamic extraction first, fallback to regex patterns.
+    Returns a set of slot identifiers (arbitrary, not limited to SCHEMA_SLOT_ENUM).
+    """
+    q = (query or "").strip()
+    if not q:
+        return set()
+    # 1) Try dynamic extraction.
+    slots = _extract_dynamic_slots(q)
+    if slots:
+        return slots
+    # 2) Fallback: regex patterns.
+    for slot_id, pattern in _SLOT_PATTERNS_FALLBACK:
+        if pattern.search(q):
+            slots.add(slot_id)
+    return slots
+
+
+def _fuzzy_slot_match(candidate_slots: Set[str], required_slots: Set[str]) -> Set[str]:
+    """
+    Fuzzy slot matching: a candidate slot matches a required slot if:
+    1) Exact match, OR
+    2) One is substring of the other (e.g., "risk" matches "risk_factors"), OR
+    3) Normalized forms match (underscores/spaces/case ignored).
+    Returns the set of required_slots that are covered by candidate_slots.
+    """
+    matched: Set[str] = set()
+    for req in required_slots:
+        req_norm = req.lower().replace("_", "").replace(" ", "")
+        for cand in candidate_slots:
+            cand_norm = cand.lower().replace("_", "").replace(" ", "")
+            # Exact or substring match.
+            if req_norm == cand_norm or req_norm in cand_norm or cand_norm in req_norm:
+                matched.add(req)
+                break
+    return matched
+
+
 def choose_answerable_schema(
     *,
     query_text: str,
@@ -129,6 +240,7 @@ def choose_answerable_schema(
 ) -> Tuple[List[int], dict]:
     """
     Returns selected indices into candidate_* arrays, plus a small debug dict.
+    Supports arbitrary slots via fuzzy matching (not limited to SCHEMA_SLOT_ENUM).
     """
     if cfg is None:
         cfg = SchemaAnswerabilityConfig()
@@ -148,10 +260,11 @@ def choose_answerable_schema(
             slots_i = {str(s) for s in (candidate_slots[i] or []) if str(s)}
         covered_by_candidate.append(slots_i)
 
-        # Slot-gating (STRICT):
+        # Slot-gating (STRICT) with fuzzy matching for dynamic slots:
         # A schema is selectable ONLY IF it covers at least one still-unanswered required slot.
         if uncovered:
-            if not (slots_i & uncovered):
+            matched_slots = _fuzzy_slot_match(slots_i, uncovered)
+            if not matched_slots:
                 rejected_due_to_slot_overlap.append(str(candidate_ids[i]))
                 scored.append((-1, i))
                 continue
@@ -192,7 +305,8 @@ def choose_answerable_schema(
     for i in selected:
         cov = covered_by_candidate[i]
         covered_slots_sel.append(sorted(cov))
-        newly_answered |= (cov & uncovered) if uncovered else set()
+        # Use fuzzy matching to determine newly answered slots.
+        newly_answered |= _fuzzy_slot_match(cov, uncovered) if uncovered else set()
 
     dbg = {
         "selector": "slot_gating_then_lexical_overlap" if required_slots else "lexical_overlap",

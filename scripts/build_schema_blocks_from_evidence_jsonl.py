@@ -107,22 +107,46 @@ def build_schema_blocks_from_evidence_jsonl(
             lang = recs[0].get("lang", None)
             block_id = f"{doc_id}::schema"
 
+            # Infer answerable_slots from evidence content (heuristic, minimal).
+            # This is a simple keyword-based proxy; real labeling should happen upstream.
+            inferred_answerable: List[str] = []
+            ev_text_joined = " ".join(ev_texts).lower()
+            # Only mark a slot as "answerable" if evidence contains substantive keywords (not just mentions).
+            if any(kw in ev_text_joined for kw in ["transmit", "tick", "vector", "route", "spread", "传播", "蜱"]):
+                inferred_answerable.append("transmission")
+            if any(kw in ev_text_joined for kw in ["pathogen", "mechan", "cytokine", "immun", "inflam", "发病机制", "致病"]):
+                inferred_answerable.append("pathogenesis")
+            if any(kw in ev_text_joined for kw in ["symptom", "fever", "clinical", "manifest", "症状", "临床"]):
+                inferred_answerable.append("clinical_features")
+            if any(kw in ev_text_joined for kw in ["diagnos", "test", "pcr", "elisa", "检测", "诊断"]):
+                inferred_answerable.append("diagnosis")
+            if any(kw in ev_text_joined for kw in ["treat", "therap", "drug", "antivir", "治疗", "药物"]):
+                inferred_answerable.append("treatment")
+
+            # answerable_slots: only slots where evidence can SUBSTANTIVELY answer.
+            # slots: all declared slots (may include weak mentions); answerable_slots is the subset that gates selection.
+            declared_slots = list(default_slots or [])
+            answerable_slots = [s for s in inferred_answerable if not declared_slots or s in declared_slots]
+            if not answerable_slots and declared_slots:
+                # Conservative: if no heuristic match but default_slots provided, mark none as answerable.
+                answerable_slots = []
+
             out_rec = {
                 "block_id": block_id,
                 "doc_id": doc_id,
                 "source_uri": source_uri,
                 "lang": lang,
                 "text": schema_text,
-                # IMPORTANT: do NOT implement slot extraction here.
-                # Slots should be provided by upstream labeling. As a minimal demo hook, callers may
-                # supply `default_slots` to tag all schema blocks with the same slot set.
-                "slots": list(default_slots or []),
+                "slots": declared_slots,
+                # answerable_slots: subset of slots that evidence can actually answer.
+                "answerable_slots": answerable_slots,
                 "token_count": int(_approx_token_count(schema_text)),
                 "metadata": {
                     "schema_version": "v1",
                     "group_by": group_by,
                     "from_evidence_block_ids": ev_block_ids[:1000],
                     "num_evidence_blocks": int(len(ev_block_ids)),
+                    "inferred_answerable_slots": inferred_answerable,  # debug trace
                 },
             }
             fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
