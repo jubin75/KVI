@@ -64,6 +64,7 @@ def build_schema_blocks_from_evidence_jsonl(
     group_by: str = "doc_id",
     max_docs: int = 0,
     max_evidence_per_doc: int = 200,
+    default_slots: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     if group_by not in {"doc_id"}:
         raise ValueError("Only group_by='doc_id' is supported in this demo.")
@@ -112,6 +113,10 @@ def build_schema_blocks_from_evidence_jsonl(
                 "source_uri": source_uri,
                 "lang": lang,
                 "text": schema_text,
+                # IMPORTANT: do NOT implement slot extraction here.
+                # Slots should be provided by upstream labeling. As a minimal demo hook, callers may
+                # supply `default_slots` to tag all schema blocks with the same slot set.
+                "slots": list(default_slots or []),
                 "token_count": int(_approx_token_count(schema_text)),
                 "metadata": {
                     "schema_version": "v1",
@@ -138,14 +143,21 @@ def main() -> None:
     p.add_argument("--group_by", default="doc_id", choices=["doc_id"])
     p.add_argument("--max_docs", type=int, default=0)
     p.add_argument("--max_evidence_per_doc", type=int, default=200)
+    p.add_argument(
+        "--default_slots",
+        default="",
+        help="Optional comma-separated slots to assign to ALL schema blocks (demo hook; real labeling happens upstream).",
+    )
     args = p.parse_args()
 
+    ds = [s.strip() for s in str(args.default_slots or "").split(",") if s.strip()]
     stats = build_schema_blocks_from_evidence_jsonl(
         blocks_evidence_jsonl=Path(str(args.blocks_jsonl_evidence)),
         out_jsonl=Path(str(args.out_jsonl)),
         group_by=str(args.group_by),
         max_docs=int(args.max_docs),
         max_evidence_per_doc=int(args.max_evidence_per_doc),
+        default_slots=ds,
     )
     print(f"[schema_blocks] done stats={stats}", flush=True)
 

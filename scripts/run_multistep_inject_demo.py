@@ -130,6 +130,12 @@ def main() -> None:
     p.add_argument("--top_k_blocks", type=int, default=8)
     p.add_argument("--max_blocks_per_step", type=int, default=8, help="Cap selected blocks per step. For RoPE models, try 1 first.")
     p.add_argument(
+        "--schema_required_slots",
+        default="",
+        help="Optional comma-separated required schema slots (derived upstream). "
+        "If empty, defaults to ALL slots and will only prevent repeated slot injection.",
+    )
+    p.add_argument(
         "--min_kv_len_to_inject",
         type=int,
         default=None,
@@ -958,6 +964,7 @@ def main() -> None:
         use_attention_entropy=bool(args.use_attention_entropy),
         entropy_threshold=float(args.entropy_threshold),
         debug_print_candidates_top_n=int(args.debug_print_candidates),
+        schema_required_slots=[s.strip() for s in str(args.schema_required_slots or "").split(",") if s.strip()] or None,
     )
     lookup = None
     if bool(args.ground_with_selected_text) or bool(args.use_struct_slots):

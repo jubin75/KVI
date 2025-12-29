@@ -224,6 +224,13 @@ def build_kvbank_from_blocks_jsonl(
 
             meta_payload = rec.get("metadata") or {}
             is_table = bool(_is_table_block(text, meta_payload))
+            # Schema blocks may carry a top-level `slots` field (recommended) or `metadata.slots` (fallback).
+            slots = rec.get("slots", None)
+            if not isinstance(slots, list):
+                slots = meta_payload.get("slots") if isinstance(meta_payload, dict) else None
+            if not isinstance(slots, list):
+                slots = []
+            slots = [str(s) for s in slots if isinstance(s, (str, int, float)) and str(s).strip()]
 
             meta = {
                 "block_id": rec.get("block_id"),
@@ -237,6 +244,8 @@ def build_kvbank_from_blocks_jsonl(
                 "kv_len": kv_len,
                 "max_kv_tokens": block_tokens,
                 "citation": rec.get("block_id"),
+                # slot availability (schema-first selector uses this; non-schema blocks can be empty)
+                "slots": slots,
                 # carry structured metadata (tables/disease/date/paragraph_type, etc.)
                 "metadata": meta_payload,
                 "is_table": bool(is_table),

@@ -1,7 +1,8 @@
 # Linux(/home/jb/KVI) 实验 Runbook：数据集→训练→测试（可复制执行）
 
 > 约定：所有命令在 `/home/jb/KVI` 执行。  
-> 目标：你可以按本文从零跑通：PDF→raw context→blocks→KVBank→（可选）projector/gate 训练→单步/多步注入测试。
+> 目标：你可以按本文从零跑通：PDF→raw context→blocks→KVBank→（可选）projector/gate 训练→单步/多步注入测试。  
+> **架构规范**：slot-aware schema 注入遵循 `docs/slot_enum.md`；schema code review 遵循 `docs/73_schema_code_review.md`。
 
 ## 0) 安装依赖（Python + 系统包）
 
@@ -230,6 +231,57 @@ python -u scripts/build_kvbank_from_blocks_jsonl.py \
   --shard_size 1024
 ```
 
+#### 1.2.2.2（新增，推荐）Schema 版本：blocks.schema + kvbank_schema（slot-aware 注入）
+
+为了解决"重复注入同一语义维度导致答案坍缩"的问题，我们在 evidence 之上引入 **schema-first + slot-aware 策略**：
+
+- **schema 库**：从 evidence 聚合的高信息密度槽位约束 → `blocks.schema.jsonl` → `kvbank_schema/`
+- **evidence 库**：保留用于 grounding/citation（retrieval-only，**永不注入**）
+- **raw 库**：保留用于回溯/fallback 上下文（retrieval-only，**永不注入**）
+
+**核心约束（见 `docs/slot_enum.md`）**：
+- Schema KV 是**唯一允许注入**的 cache
+- Evidence/raw **只能 append prompt**，不可注入 KV
+- 每步最多注入 1 个 schema；slot 覆盖用完即停止
+
+##### 1) 从 evidence blocks 生成 schema blocks
+
+```bash
+export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+
+python -u scripts/build_schema_blocks_from_evidence_jsonl.py \
+  --blocks_jsonl_evidence "$WORK_DIR/blocks.evidence.jsonl" \
+  --out_jsonl "$WORK_DIR/blocks.schema.jsonl" \
+  --default_slots "transmission,pathogenesis"
+```
+
+> `--default_slots`：临时给所有 schema 打同一组 slots（真实应由上游标注）
+
+##### 2) 构建 schema KVBank
+
+```bash
+python -u scripts/build_kvbank_from_blocks_jsonl.py \
+  --blocks_jsonl "$WORK_DIR/blocks.schema.jsonl" \
+  --out_dir "$WORK_DIR/kvbank_schema" \
+  --base_llm "$BASE_LLM" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --block_tokens 256 \
+  --shard_size 1024
+```
+
+##### 3) 检查 schema blocks 质量
+
+```bash
+python -u scripts/inspect_blocks_quality.py \
+  --blocks_jsonl "$WORK_DIR/blocks.schema.jsonl" \
+  --sample 10
+```
+
+完成后，如何判断成功（schema-first 增加的 2 个硬产物）：
+- `$WORK_DIR/blocks.schema.jsonl`（schema blocks，带 `slots` 字段）
+- `$WORK_DIR/kvbank_schema/manifest.json`（schema KVBank）
+
 ### 1.2.3（调试主线）把链路拆成三段，逐段排错
 
 当你需要定位“到底是筛选不准、抽取不行、还是建库出错”时，用这三段式：
@@ -415,7 +467,44 @@ ls -alh "$TOPIC_WORK_DIR/kvbank_blocks"
 ls -alh "$TOPIC_WORK_DIR/kvbank_blocks/shards" | head
 ```
 
-## 2) 测试：多步注入（evidence-first，推荐）
+## 2) 测试：多步注入
+
+### 2.0（推荐，新增）Schema-first 注入（slot-aware，最严格）
+
+> 核心规则（见 `docs/slot_enum.md`）：
+> - **只有 schema KV 可注入**（schema text forward → cache）
+> - evidence/raw **只能 append prompt**（grounding），不可注入 KV
+> - 每步最多注入 1 个 schema；slot 覆盖用完即停止
+
+必须同时提供三库：`kvbank_schema`（注入）+ `kvbank_evidence`（grounding）+ `kvbank_blocks`（fallback）
+
+```bash
+export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+
+python -u scripts/run_multistep_inject_demo.py \
+  --model "$BASE_LLM" \
+  --kv_dir "$WORK_DIR/kvbank_blocks" \
+  --kv_dir_evidence "$WORK_DIR/kvbank_evidence" \
+  --kv_dir_schema "$WORK_DIR/kvbank_schema" \
+  --blocks_jsonl_schema "$WORK_DIR/blocks.schema.jsonl" \
+  --blocks_jsonl_evidence "$WORK_DIR/blocks.evidence.jsonl" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --schema_required_slots "transmission,pathogenesis" \
+  --use_struct_slots \
+  --ground_with_selected_text \
+  --no_repeat_ngram_size 12 \
+  --max_new_tokens 256 \
+  --debug_print_candidates 10
+```
+
+验证要点：
+- 日志应出现 `[retriever] routing=schema->evidence->raw ...`
+- StepDebug.note 应包含 `schema_selector=...`（slot 覆盖信息）
+- 若选中 schema 不引入新 slot → 停止（`stop_reason=no_new_slots`）
+- 答案末尾只会 append `【证据句】/【回退上下文（raw）】`，**schema text 不会出现在 prompt**
+
+### 2.1（legacy）Evidence-first 注入
 
 > 结论：默认用 **evidence KVBank** 做检索与注入（噪声更低、相关性更强），必要时再回退 raw 库补上下文。
 
@@ -444,7 +533,7 @@ python -u scripts/run_multistep_inject_demo.py \
 - `--blocks_jsonl(_evidence) + --allowed_langs`：强烈建议开启，避免混语料导致命中非目标语言 block 后注入退化。
 - `--max_steps=1 + --max_blocks_per_step=1`：先用“最小注入”验证相关性与稳定性；稳定后再把 `--max_steps` 提到 2/4。
 
-### 2.1（等价写法）显式指定 evidence + raw（不使用 topic mode）
+### 2.1.1（等价写法）显式指定 evidence + raw（不使用 topic mode）
 
 如果你的专题库 work_dir 下存在：
 

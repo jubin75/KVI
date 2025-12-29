@@ -23,7 +23,7 @@ import torch
 
 from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
-from .schema_answerability import SchemaAnswerabilityConfig, choose_answerable_schema
+from .schema_answerability import SCHEMA_SLOT_ENUM, SchemaAnswerabilityConfig, choose_answerable_schema
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,10 @@ class MultiStepConfig:
     struct_slots_decay: Optional[Dict[int, float]] = None
     # Schema selection: answerability (NOT similarity ranking).
     schema_max_selected_per_step: int = 1
+    # Optional: required slots to answer for this query (derived upstream). If not set, defaults to ALL slots.
+    schema_required_slots: Optional[Sequence[str]] = None
+    # Stop-rule epsilon for "injection has no effect" sanity check.
+    stop_epsilon_logit_delta_vs_zero: float = 0.05
 
 
 @dataclass
@@ -103,7 +107,12 @@ class MultiStepInjector:
         self.total_injected_tokens = 0
 
     def _select_schema_texts(
-        self, items: Sequence[Any], *, query_text: str
+        self,
+        items: Sequence[Any],
+        *,
+        query_text: str,
+        answered_slots: Set[str],
+        required_slots: Set[str],
     ) -> Tuple[List[Any], List[str], int, Dict[str, Any]]:
         """
         Select schema candidates (by ID de-dupe + allowlist) and return their TEXT (from block_text_lookup).
@@ -141,10 +150,23 @@ class MultiStepInjector:
 
         # Schema retrieval is NOT ranked similarity search: choose answerable schema(s) by a selector
         # that ignores ANN scores.
+        cand_slots: List[List[str]] = []
+        for it in candidates:
+            meta = getattr(it, "meta", {}) or {}
+            slots = meta.get("slots")
+            if not isinstance(slots, list):
+                slots = (meta.get("metadata") or {}).get("slots") if isinstance(meta.get("metadata"), dict) else []
+            if not isinstance(slots, list):
+                slots = []
+            cand_slots.append([str(s) for s in slots if str(s).strip()])
+
         sel_idx, sel_dbg = choose_answerable_schema(
             query_text=str(query_text or ""),
             candidate_ids=candidate_ids,
             candidate_texts=candidate_texts,
+            candidate_slots=cand_slots,
+            answered_slots=set(answered_slots),
+            required_slots=set(required_slots),
             cfg=SchemaAnswerabilityConfig(max_selected=int(self.cfg.schema_max_selected_per_step)),
         )
         selected: List[Any] = []
@@ -185,6 +207,10 @@ class MultiStepInjector:
         if not bool(use_struct_slots):
             # Enforce the new contract: schema KV is the ONLY KV allowed to constrain generation.
             raise ValueError("This runtime enforces schema-only injection. Pass use_struct_slots=True.")
+
+        # Track semantic progress across steps (slot-based).
+        answered_slots: Set[str] = set()
+        req_slots = set(str(s) for s in (self.cfg.schema_required_slots or SCHEMA_SLOT_ENUM) if str(s))
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -238,7 +264,70 @@ class MultiStepInjector:
                     cands.append(f"{bid}@{float(getattr(it, 'score', 0.0)):.4f}" + (f"({src})" if src else ""))
                 shown = min(int(topn), len(result.items or []))
                 print(f"[retrieval] step={step} top{shown}=" + " | ".join(cands), flush=True)
-            selected, schema_texts, redundancy_hits, sel_dbg = self._select_schema_texts(result.items, query_text=str(query_text or ""))
+            selected, schema_texts, redundancy_hits, sel_dbg = self._select_schema_texts(
+                result.items,
+                query_text=str(query_text or ""),
+                answered_slots=answered_slots,
+                required_slots=req_slots,
+            )
+
+            # Stop-rule (inline, minimal):
+            # 1) No selectable schema remains for uncovered slots.
+            if not selected:
+                step_debugs.append(
+                    StepDebug(
+                        step=step,
+                        selected_block_ids=[],
+                        injected_tokens=0,
+                        total_injected_tokens=self.total_injected_tokens,
+                        logit_delta=0.0,
+                        hidden_delta=0.0,
+                        redundancy_hits=int(redundancy_hits),
+                        ext_attn_entropy=None,
+                        retrieved_candidates=int(len(result.items)),
+                        note=f"stop_reason=no_selectable_schema_for_uncovered_slots selector={sel_dbg}",
+                    )
+                )
+                break
+
+            newly_answered = set(sel_dbg.get("newly_answered_slots") or [])
+            # 2) Newly selected schema does NOT introduce new slots.
+            if not newly_answered:
+                step_debugs.append(
+                    StepDebug(
+                        step=step,
+                        selected_block_ids=[str(it.meta.get("block_id") or it.meta.get("chunk_id")) for it in selected],
+                        injected_tokens=0,
+                        total_injected_tokens=self.total_injected_tokens,
+                        logit_delta=0.0,
+                        hidden_delta=0.0,
+                        redundancy_hits=int(redundancy_hits),
+                        ext_attn_entropy=None,
+                        retrieved_candidates=int(len(result.items)),
+                        note=f"stop_reason=no_new_slots selector={sel_dbg}",
+                    )
+                )
+                break
+            # 3) redundancy_hits > 0
+            if int(redundancy_hits) > 0:
+                step_debugs.append(
+                    StepDebug(
+                        step=step,
+                        selected_block_ids=[str(it.meta.get("block_id") or it.meta.get("chunk_id")) for it in selected],
+                        injected_tokens=0,
+                        total_injected_tokens=self.total_injected_tokens,
+                        logit_delta=0.0,
+                        hidden_delta=0.0,
+                        redundancy_hits=int(redundancy_hits),
+                        ext_attn_entropy=None,
+                        retrieved_candidates=int(len(result.items)),
+                        note=f"stop_reason=redundancy_hits selector={sel_dbg}",
+                    )
+                )
+                break
+
+            # Commit semantic progress for this step.
+            answered_slots |= newly_answered
 
             if not selected:
                 # no new info -> stop (but still emit a debug record for observability)
@@ -462,6 +551,11 @@ class MultiStepInjector:
             if ctrl_hidden is not None:
                 hidden_delta_vs_zero = float(torch.mean(torch.abs(hidden - ctrl_hidden)).item())
 
+            # 4) logit_delta_vs_zero_prefix < epsilon triggers STOP after this step.
+            stop_reason = None
+            if logit_delta_vs_zero is not None and float(logit_delta_vs_zero) < float(self.cfg.stop_epsilon_logit_delta_vs_zero):
+                stop_reason = f"logit_delta_vs_zero<{float(self.cfg.stop_epsilon_logit_delta_vs_zero):.4f}"
+
             step_debugs.append(
                 StepDebug(
                     step=step,
@@ -475,7 +569,7 @@ class MultiStepInjector:
                     redundancy_hits=redundancy_hits,
                     ext_attn_entropy=ext_entropy,
                     retrieved_candidates=int(len(result.items)),
-                    note=f"schema_selector={sel_dbg}",
+                    note=(f"schema_selector={sel_dbg}" + (f" stop_reason={stop_reason}" if stop_reason else "")),
                 )
             )
 
@@ -497,6 +591,8 @@ class MultiStepInjector:
                 if all(window[i] > window[i + 1] for i in range(len(window) - 1)) and window[-1] <= self.cfg.entropy_threshold:
                     signals += 1
 
+            if stop_reason is not None:
+                break
             if signals >= 2:
                 break
 
