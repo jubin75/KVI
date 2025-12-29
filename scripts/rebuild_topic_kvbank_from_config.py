@@ -31,12 +31,16 @@ try:
         DeepSeekExtractiveEvidence,
         ExtractiveEvidenceConfig,
     )
+    from external_kv_injection.scripts.build_schema_blocks_from_evidence_jsonl import (  # type: ignore
+        build_schema_blocks_from_evidence_jsonl,
+    )
 except ModuleNotFoundError:
     from src.pipelines.pdf_to_raw_context_chunks import RawChunkConfig, build_raw_context_chunks_from_pdf_dir  # type: ignore
     from src.pipelines.raw_chunks_to_blocks import build_blocks_from_raw_chunks  # type: ignore
     from src.pipelines.blocks_to_kvbank import build_kvbank_from_blocks_jsonl  # type: ignore
     from scripts.build_topic_pdf_subset_deepseek import main as _doc_filter_main  # type: ignore
     from src.llm_filter.extractive_evidence import DeepSeekExtractiveEvidence, ExtractiveEvidenceConfig  # type: ignore
+    from scripts.build_schema_blocks_from_evidence_jsonl import build_schema_blocks_from_evidence_jsonl  # type: ignore
 
 
 def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
@@ -350,9 +354,11 @@ def main() -> None:
     raw_chunks = work_dir / "raw_chunks.jsonl"
     blocks = work_dir / "blocks.jsonl"
     blocks_evidence = work_dir / "blocks.evidence.jsonl"
+    blocks_schema = work_dir / "blocks.schema.jsonl"
     kv_dir = work_dir / "kvbank_blocks"
     kv_dir_tables = work_dir / "kvbank_tables"
     kv_dir_evidence = work_dir / "kvbank_evidence"
+    kv_dir_schema = work_dir / "kvbank_schema"
 
     print(
         f"[rebuild_topic] topic={topic_name} work_dir={work_dir} pdfs_dir={out_pdf_dir} "
@@ -431,6 +437,28 @@ def main() -> None:
             )
         print(f"[rebuild_topic] wrote_evidence_blocks stats={ev_stats}", flush=True)
 
+    # 2.6) Build schema blocks (from evidence blocks) and a schema KVBank.
+    schema_cfg = build_cfg.get("schema_build") if isinstance(build_cfg.get("schema_build"), dict) else {}
+    if not isinstance(schema_cfg, dict):
+        schema_cfg = {}
+    enable_schema = bool(schema_cfg.get("enabled", True))
+    max_docs_schema = int(schema_cfg.get("max_docs", 0))
+    max_evidence_per_doc = int(schema_cfg.get("max_evidence_per_doc", 200))
+    if enable_schema:
+        if not blocks_evidence.exists():
+            raise SystemExit(
+                "schema_build enabled but blocks.evidence.jsonl not found. "
+                "Schema blocks are built from evidence blocks in this demo."
+            )
+        schema_stats = build_schema_blocks_from_evidence_jsonl(
+            blocks_evidence_jsonl=blocks_evidence,
+            out_jsonl=blocks_schema,
+            group_by="doc_id",
+            max_docs=max_docs_schema,
+            max_evidence_per_doc=max_evidence_per_doc,
+        )
+        print(f"[rebuild_topic] wrote_schema_blocks stats={schema_stats}", flush=True)
+
     stats = build_kvbank_from_blocks_jsonl(
         blocks_jsonl=blocks,
         out_dir=kv_dir,
@@ -461,6 +489,21 @@ def main() -> None:
         )
         print(f"[rebuild_topic] kvbank_evidence_done stats={ev_kv_stats}", flush=True)
         print(f"[rebuild_topic] kv_dir_evidence={kv_dir_evidence}", flush=True)
+
+    if enable_schema and blocks_schema.exists():
+        sc_kv_stats = build_kvbank_from_blocks_jsonl(
+            blocks_jsonl=blocks_schema,
+            out_dir=kv_dir_schema,
+            split_tables=False,
+            out_dir_tables=None,
+            base_llm_name_or_path=base_llm,
+            retrieval_encoder_model=retrieval_encoder_model,
+            layers=layers,
+            block_tokens=block_tokens,
+            shard_size=(shard_size if shard_size > 0 else None),
+        )
+        print(f"[rebuild_topic] kvbank_schema_done stats={sc_kv_stats}", flush=True)
+        print(f"[rebuild_topic] kv_dir_schema={kv_dir_schema}", flush=True)
 
 
 if __name__ == "__main__":

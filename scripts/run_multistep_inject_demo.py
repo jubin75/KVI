@@ -47,6 +47,12 @@ def main() -> None:
     p.add_argument("--model", required=True)
     p.add_argument("--kv_dir", default=None, help="Path to KVBank. If omitted, use --topic + --topic_work_dir.")
     p.add_argument(
+        "--kv_dir_schema",
+        default=None,
+        help="Path to Schema KVBank (kvbank_schema). This is the ONLY bank allowed to be injected. "
+        "If omitted, use --topic + --topic_work_dir auto-detection.",
+    )
+    p.add_argument(
         "--kv_dir_evidence",
         default=None,
         help="Optional evidence KVBank dir (e.g. $WORK_DIR/kvbank_evidence). "
@@ -71,6 +77,12 @@ def main() -> None:
         default=None,
         help="Optional evidence blocks jsonl path (e.g. $WORK_DIR/blocks.evidence.jsonl). "
         "Used for debug text lookups / lang filtering when evidence KVBank is enabled.",
+    )
+    p.add_argument(
+        "--blocks_jsonl_schema",
+        default=None,
+        help="Optional schema blocks jsonl path (e.g. $WORK_DIR/blocks.schema.jsonl). "
+        "Required for schema injection (schema texts must be forwarded to build KV cache).",
     )
     p.add_argument(
         "--allowed_langs",
@@ -157,6 +169,13 @@ def main() -> None:
         help="If set, append a few evidence sentences extracted from the selected blocks to the prompt during final decode. "
         "This greatly reduces hallucinations like 'mosquito transmission' when selected blocks clearly say 'tick bites'. "
         "Requires --blocks_jsonl.",
+    )
+    p.add_argument(
+        "--use_struct_slots",
+        action="store_true",
+        help="If set, enable Evidence->Schema(struct slots)->Injection/Generation: "
+        "build a compact schema summary from selected evidence blocks and inject that schema prefix "
+        "(instead of injecting evidence sentences as answer text). Requires --blocks_jsonl or --blocks_jsonl_evidence.",
     )
     p.add_argument(
         "--grounding_instructions",
@@ -258,6 +277,20 @@ def main() -> None:
                     return p
             return None
 
+        def _pick_schema_kv_dir(base_dir: Path) -> Optional[Path]:
+            opts = [base_dir / "kvbank_schema", base_dir / "kvbank_schema_v2"]
+            for p in opts:
+                if (p / "manifest.json").exists():
+                    return p
+            return None
+
+        def _pick_schema_blocks_jsonl(base_dir: Path) -> Optional[Path]:
+            opts = [base_dir / "blocks.schema.jsonl", base_dir / "blocks.schema.v2.jsonl"]
+            for p in opts:
+                if p.exists():
+                    return p
+            return None
+
         chosen_base = None
         chosen_kv = None
         for b in candidates:
@@ -295,16 +328,27 @@ def main() -> None:
             if bev is not None:
                 args.blocks_jsonl_evidence = str(bev)
 
+        # Optional: schema library auto-detect (required for schema injection).
+        if args.kv_dir_schema is None:
+            sk = _pick_schema_kv_dir(Path(str(chosen_base)))
+            if sk is not None:
+                args.kv_dir_schema = str(sk)
+        if args.blocks_jsonl_schema is None:
+            bs = _pick_schema_blocks_jsonl(Path(str(chosen_base)))
+            if bs is not None:
+                args.blocks_jsonl_schema = str(bs)
+
         print(
             f"[topic_mode] topic={args.topic} topic_work_dir={args.topic_work_dir} chosen_base={chosen_base} "
-            f"kv_dir={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence} "
-            f"kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
+            f"kv_dir={args.kv_dir} kv_dir_schema={args.kv_dir_schema} kv_dir_evidence={args.kv_dir_evidence} "
+            f"kv_dir_tables={args.kv_dir_tables} blocks_jsonl={args.blocks_jsonl} "
+            f"blocks_jsonl_schema={args.blocks_jsonl_schema} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
             flush=True,
         )
     else:
         print(
-            f"[config] kv_dir={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence} kv_dir_tables={args.kv_dir_tables} "
-            f"blocks_jsonl={args.blocks_jsonl} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
+            f"[config] kv_dir={args.kv_dir} kv_dir_schema={args.kv_dir_schema} kv_dir_evidence={args.kv_dir_evidence} kv_dir_tables={args.kv_dir_tables} "
+            f"blocks_jsonl={args.blocks_jsonl} blocks_jsonl_schema={args.blocks_jsonl_schema} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
             flush=True,
         )
 
@@ -676,6 +720,8 @@ def main() -> None:
     blocks_jsonls = []
     if args.blocks_jsonl:
         blocks_jsonls.append(str(args.blocks_jsonl))
+    if args.blocks_jsonl_schema:
+        blocks_jsonls.append(str(args.blocks_jsonl_schema))
     if args.blocks_jsonl_evidence:
         blocks_jsonls.append(str(args.blocks_jsonl_evidence))
 
@@ -705,7 +751,8 @@ def main() -> None:
                 return float(bad / max(tot, 1))
 
             allowed_block_ids = set()
-            if bool(args.ground_with_selected_text):
+            # Schema injection requires block_text lookup too (schema texts must be forwarded).
+            if bool(args.ground_with_selected_text) or bool(args.use_struct_slots):
                 block_text_by_id = {}
             dropped_lang = 0
             dropped_nonprintable = 0
@@ -772,39 +819,37 @@ def main() -> None:
             flush=True,
         )
 
-    bank = FaissKVBank.load(Path(args.kv_dir))
-    evidence_bank = FaissKVBank.load(Path(str(args.kv_dir_evidence))) if args.kv_dir_evidence else None
+    # ---------------------------
+    # Retrieval routing (MUST FOLLOW):
+    # schema (answerability/injection) -> evidence (grounding/citation) -> raw (fallback expansion)
+    # ---------------------------
+    if not args.kv_dir_schema:
+        raise SystemExit("Missing --kv_dir_schema (schema KVBank). Schema KV is the ONLY KV allowed to be injected.")
+    if not args.blocks_jsonl_schema:
+        raise SystemExit("Missing --blocks_jsonl_schema (required to forward schema texts for KV cache injection).")
+    if not args.kv_dir_evidence:
+        raise SystemExit("Missing --kv_dir_evidence (evidence bank is required for grounding/citation).")
+    if not args.kv_dir:
+        raise SystemExit("Missing --kv_dir (raw bank required for evidence->raw fallback expansion).")
 
-    if evidence_bank is not None:
-        print(
-            f"[retriever] mode=evidence-first kv_dir_raw={args.kv_dir} kv_dir_evidence={args.kv_dir_evidence}",
-            flush=True,
-        )
-    else:
-        print(f"[retriever] mode=raw-only kv_dir_raw={args.kv_dir}", flush=True)
+    bank_raw = FaissKVBank.load(Path(args.kv_dir))
+    bank_schema = FaissKVBank.load(Path(str(args.kv_dir_schema)))
+    bank_evidence = FaissKVBank.load(Path(str(args.kv_dir_evidence)))
 
-    # Build the main retriever (evidence-first if available).
-    if evidence_bank is not None:
-        retriever_main = EvidenceFirstRetriever(
-            evidence_kv_bank=evidence_bank, raw_kv_bank=bank, cfg=EvidenceFirstRetrieverConfig()
-        )
-    else:
-        retriever_main = Retriever(bank)
+    print(
+        f"[retriever] routing=schema->evidence->raw kv_dir_schema={args.kv_dir_schema} kv_dir_evidence={args.kv_dir_evidence} kv_dir_raw={args.kv_dir}",
+        flush=True,
+    )
 
-    # Table routing is only supported on the raw bank in this demo. If evidence is enabled, we keep
-    # retrieval simple and deterministic (evidence-first already reduces noise significantly).
-    if evidence_bank is not None and bool(args.enable_table_routing):
-        print("[warn] evidence-first enabled; table routing is ignored in this mode.", flush=True)
-        retriever = retriever_main
-    elif bool(args.enable_table_routing) and args.kv_dir_tables and int(args.table_top_k) > 0:
-        table_bank = FaissKVBank.load(Path(args.kv_dir_tables))
-        retriever = RoutedRetriever(
-            kv_bank=bank,
-            table_kv_bank=table_bank,
-            cfg=RoutedRetrieverConfig(enable_table_routing=True, table_top_k=int(args.table_top_k)),
-        )
-    else:
-        retriever = retriever_main
+    # Injection retriever: schema-first (answerability). Only schema is eligible for injection.
+    retriever = Retriever(bank_schema)
+    # Grounding retriever: evidence-first then raw fallback. Retrieval-only; never injected.
+    retriever_grounding = EvidenceFirstRetriever(
+        evidence_kv_bank=bank_evidence, raw_kv_bank=bank_raw, cfg=EvidenceFirstRetrieverConfig()
+    )
+
+    if bool(args.enable_table_routing):
+        print("[warn] table routing is ignored under schema-only injection; evidence/raw are retrieval-only.", flush=True)
 
     enc = HFSentenceEncoder(
         HFSentenceEncoderConfig(model_name_or_path=args.domain_encoder_model, max_length=256, normalize=True)
@@ -895,10 +940,11 @@ def main() -> None:
         in_len = int(inputs0["input_ids"].shape[1])
         print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
 
-    # Evidence blocks are intentionally short; a high min_kv_len_to_inject will filter them all out.
+    # Schema-only injection forwards schema texts and injects schema cache; min_kv_len_to_inject is not used
+    # for schema selection. Keep the arg for backward compatibility, but set a safe default if omitted.
     if args.min_kv_len_to_inject is None:
-        args.min_kv_len_to_inject = 16 if evidence_bank is not None else 128
-        print(f"[inject] auto min_kv_len_to_inject={int(args.min_kv_len_to_inject)}", flush=True)
+        args.min_kv_len_to_inject = 0
+        print(f"[inject] schema-only mode; min_kv_len_to_inject={int(args.min_kv_len_to_inject)} (unused)", flush=True)
 
     cfg = MultiStepConfig(
         inject_layers=[int(x.strip()) for x in args.layers.split(",") if x.strip() != ""],
@@ -914,18 +960,22 @@ def main() -> None:
         debug_print_candidates_top_n=int(args.debug_print_candidates),
     )
     lookup = None
-    if bool(args.ground_with_selected_text):
-        if not args.blocks_jsonl and not args.blocks_jsonl_evidence:
-            raise SystemExit("--ground_with_selected_text requires --blocks_jsonl or --blocks_jsonl_evidence")
+    if bool(args.ground_with_selected_text) or bool(args.use_struct_slots):
+        if not args.blocks_jsonl_schema:
+            raise SystemExit("--use_struct_slots requires --blocks_jsonl_schema (schema text lookup).")
         if not isinstance(block_text_by_id, dict):
             raise SystemExit(
-                "--ground_with_selected_text requires building block text lookup; "
+                "--ground_with_selected_text/--use_struct_slots requires building block text lookup; "
                 "please ensure blocks_jsonl is provided and --allowed_langs is non-empty."
             )
         lookup = lambda bid: block_text_by_id.get(str(bid))  # type: ignore[assignment]
 
     injector = MultiStepInjector(
-        retriever=retriever, cfg=cfg, allowed_block_ids=allowed_block_ids, block_text_lookup=lookup
+        retriever=retriever,
+        cfg=cfg,
+        allowed_block_ids=allowed_block_ids,
+        block_text_lookup=lookup,
+        grounding_retriever=retriever_grounding,
     )
     answer, dbg = injector.run(
         model=model,
@@ -938,6 +988,7 @@ def main() -> None:
         no_repeat_ngram_size=int(args.no_repeat_ngram_size),
         ground_with_selected_text=bool(args.ground_with_selected_text),
         grounding_instructions=str(args.grounding_instructions or ""),
+        use_struct_slots=bool(args.use_struct_slots),
     )
 
     print("=== Step Debug ===")
