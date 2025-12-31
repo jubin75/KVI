@@ -648,6 +648,7 @@ class MultiStepInjector:
             kws = [str(x).strip().lower() for x in (keywords or []) if str(x).strip()]
             picked: List[str] = []
             import re
+            from difflib import SequenceMatcher
 
             # Instruction/meta-language patterns to strip (case-insensitive).
             meta_patterns = [
@@ -671,6 +672,38 @@ class MultiStepInjector:
                     return True
                 return False
 
+            def _has_cjk(s: str) -> bool:
+                return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
+
+            def _sent_lang(s: str) -> str:
+                # very lightweight: treat any CJK as "zh", otherwise "en"
+                return "zh" if _has_cjk(s) else "en"
+
+            def _norm_sent(s: str) -> str:
+                s0 = (s or "").strip().lower()
+                s0 = re.sub(r"\s+", " ", s0)
+                # normalize quotes/punct a bit
+                s0 = s0.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+                s0 = re.sub(r"[，,。\.；;：:！!？?\(\)\[\]\{\}<>\"']", "", s0)
+                return s0
+
+            def _near_dup(a: str, b: str, *, thr: float = 0.92) -> bool:
+                na = _norm_sent(a)
+                nb = _norm_sent(b)
+                if not na or not nb:
+                    return False
+                if na == nb:
+                    return True
+                if na in nb or nb in na:
+                    return True
+                if min(len(na), len(nb)) < 24:
+                    return False
+                return SequenceMatcher(a=na, b=nb).ratio() >= float(thr)
+
+            # Language unification: prefer query language, and keep evidence in a single language.
+            preferred_lang = _sent_lang(q or "")
+            candidates_by_lang: dict[str, list[str]] = {"zh": [], "en": []}
+
             for t in texts:
                 # Split into rough sentences.
                 sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t) if s.strip()]
@@ -682,15 +715,30 @@ class MultiStepInjector:
                     # If keywords provided, prefer matching ones; otherwise accept any sentence.
                     if kws and not any(k in sl for k in kws):
                         continue
-                    # Prefer explicit "main route" type sentences.
-                    if "main route" in sl or "most likely route" in sl or "primary" in sl or "主要" in s:
-                        picked.append(s)
-                    else:
-                        picked.append(s)
-                    if len(picked) >= 3:
+                    # Collect candidates (we will dedupe + language-filter later).
+                    candidates_by_lang[_sent_lang(s)].append(s)
+                # keep scanning; we dedupe across blocks too
+
+            def _select_from_lang(lang: str, max_n: int) -> list[str]:
+                out: list[str] = []
+                for s in candidates_by_lang.get(lang, []):
+                    if _is_meta(s):
+                        continue
+                    # Deduplicate semantically similar sentences (approx; no embeddings).
+                    if any(_near_dup(s, prev) for prev in out):
+                        continue
+                    out.append(s)
+                    if len(out) >= max_n:
                         break
-                if len(picked) >= 3:
-                    break
+                return out
+
+            # Prefer evidence in the same language as the query if available.
+            picked = _select_from_lang(preferred_lang, 3)
+            if not picked:
+                # Fallback: pick a single language (whichever has more candidates) to avoid CN/EN mixing.
+                alt = "zh" if len(candidates_by_lang["zh"]) >= len(candidates_by_lang["en"]) else "en"
+                picked = _select_from_lang(alt, 3)
+
             if not picked:
                 # fallback: first 1–2 sentences (after filtering meta).
                 t0 = texts[0]
