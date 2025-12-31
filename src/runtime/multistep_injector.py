@@ -366,10 +366,11 @@ class MultiStepInjector:
             # - Drop meta-instruction phrases embedded inside schema blocks
             import re
 
-            def _sanitize_schema(s: str) -> str:
+            def _sanitize_schema(s: str, *, query: str) -> str:
                 s0 = (s or "").replace("\r", "\n")
                 # Remove inline meta-instruction parentheses commonly included by schema builders.
                 s0 = re.sub(r"\((do\s+not|DO\s+NOT)[^\)]{0,160}\)", "", s0, flags=re.IGNORECASE)
+                prefer_zh = bool(re.search(r"[\u4e00-\u9fff]", query or ""))
                 lines = []
                 for ln in s0.split("\n"):
                     t = ln.strip()
@@ -381,10 +382,27 @@ class MultiStepInjector:
                     # Drop placeholder-value lines.
                     if re.search(r":\s*(n/?a|none|null|unknown|tbd)\s*$", t, flags=re.IGNORECASE):
                         continue
+                    # Drop field labels like "transmission_primary:" which tend to push EN format.
+                    t = re.sub(r"^[a-z_]{3,32}\s*:\s*", "", t, flags=re.IGNORECASE)
+                    # If query is Chinese, strip most English glue while preserving:
+                    # - CJK spans
+                    # - scientific names / abbreviations like "H. longicornis"
+                    if prefer_zh:
+                        # Keep CJK spans
+                        cjk = re.findall(r"[\u4e00-\u9fff][\u4e00-\u9fff0-9A-Za-z\.\-/]{0,40}", t)
+                        sci = re.findall(r"\b[A-Z]\.\s*[a-z]{3,20}\b|\b[a-z]{3,20}\b", t)
+                        kept = []
+                        if cjk:
+                            kept.extend(cjk)
+                        # Only keep scientific-looking latin tokens (avoid generic English words).
+                        for tok in sci:
+                            if "." in tok or (tok.islower() and len(tok) >= 8):
+                                kept.append(tok)
+                        t = "；".join(dict.fromkeys([x.strip() for x in kept if x.strip()])) if kept else t
                     lines.append(t)
                 return "\n".join(lines).strip()
 
-            schema_text = _sanitize_schema(schema_text)
+            schema_text = _sanitize_schema(schema_text, query=str(query_text or prompt))
             if not schema_text:
                 raise RuntimeError("schema injection: empty schema_text after sanitize (all placeholder/meta)")
 
@@ -745,8 +763,8 @@ class MultiStepInjector:
                 sents = [s.strip() for s in re.split(r"(?<=[\.\!\?。！？])\s+", t0) if s.strip() and not _is_meta(s)]
                 picked = sents[:2] if sents else [t0[:400]]
             picked = [p.replace("\n", " ").strip() for p in picked if p.strip()]
-            out = "\n".join([f"- {p}" for p in picked[:3]])
-            return out
+            # Evidence text only (no bullets) to reduce "echo bullets" degeneration.
+            return "\n".join(picked[:3]).strip()
 
         prompt_for_final = prompt
         # Grounding/citation: schema-first does NOT bypass evidence lookup.
@@ -889,6 +907,27 @@ class MultiStepInjector:
             out[0, list(banned)] = float("-inf")
             return out
 
+        def _apply_repetition_penalty(logits: torch.Tensor, seq: torch.Tensor, penalty: float) -> torch.Tensor:
+            """
+            Light repetition penalty to reduce stubborn loops that are not caught by n-gram banning.
+            penalty > 1.0 discourages already-seen tokens.
+            """
+            p = float(penalty)
+            if p <= 1.0:
+                return logits
+            if seq.numel() <= 0:
+                return logits
+            toks = seq[0].tolist()
+            if not toks:
+                return logits
+            out = logits.clone()
+            seen = set(int(t) for t in toks[-2048:])  # cap for perf
+            idx = torch.tensor(list(seen), device=out.device, dtype=torch.long)
+            # Standard repetition penalty: if logit > 0 divide; else multiply.
+            vals = out[0, idx]
+            out[0, idx] = torch.where(vals > 0, vals / p, vals * p)
+            return out
+
         # First step: consume full prompt with the injected prefix cache.
         # Provide explicit positions starting at prefix_len for RoPE/cache bookkeeping.
         pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long).unsqueeze(0)
@@ -917,6 +956,8 @@ class MultiStepInjector:
         past = out.past_key_values
         seq0 = input_ids
         logits0 = out.logits[:, -1, :]
+        # Mild penalty to prevent repeating the prompt/evidence tokens.
+        logits0 = _apply_repetition_penalty(logits0, seq0, penalty=1.08)
         logits0 = _ban_repeated_ngrams(logits0, seq0, int(no_repeat_ngram_size))
         next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
@@ -953,6 +994,7 @@ class MultiStepInjector:
             past = out.past_key_values
             seq = torch.cat([input_ids] + generated, dim=1)
             logits = out.logits[:, -1, :]
+            logits = _apply_repetition_penalty(logits, seq, penalty=1.08)
             logits = _ban_repeated_ngrams(logits, seq, int(no_repeat_ngram_size))
             next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
