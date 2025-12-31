@@ -95,6 +95,32 @@ class TestWrapper(unittest.TestCase):
         self.assertEqual(fa.text, "现有证据不足以回答该问题。")
         self.assertEqual(fa.failure_reason, "pdf_miss")
 
+    def test_units_pipeline_retries_evidence_for_transmission_too(self):
+        raw = "现有证据不足以回答该问题。"
+        fa = postprocess_answer_units(
+            raw,
+            user_prompt="主要传播途径是什么？",
+            question_intent={"intent_slots": ["transmission"], "evidence_lookup_fn": lambda q: ["Tick bite is the main route."]},
+        )
+        self.assertIn("基于检索到的证据", fa.text)
+        self.assertTrue(fa.used_evidence)
+
+    def test_units_pipeline_does_not_retry_for_non_evidence_slots(self):
+        raw = "现有证据不足以回答该问题。"
+        called = {"n": 0}
+
+        def _lookup(q: str):
+            called["n"] += 1
+            return ["Should not be called"]
+
+        fa = postprocess_answer_units(
+            raw,
+            user_prompt="给我一个定义。",
+            question_intent={"intent_slots": ["definition"], "evidence_lookup_fn": _lookup},
+        )
+        self.assertEqual(called["n"], 0)
+        self.assertEqual(fa.text, "现有证据不足以回答该问题。")
+
     def test_units_pipeline_retries_evidence_for_common_medical_intent(self):
         raw = "现有证据不足以回答该问题。"
         fa = postprocess_answer_units(

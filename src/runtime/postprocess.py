@@ -465,6 +465,23 @@ _TEMPLATE_GARBAGE_RE = re.compile(
 )
 
 
+# Slots that are expected to be evidence-grounded (cost-aware).
+# For other slots (e.g. definition/background/research_gap), forcing an evidence retry on every fallback
+# can waste retrieval time and is not necessary for a good UX.
+EVIDENCE_EXPECTED_SLOTS: set[str] = {
+    "transmission",
+    "pathogenesis",
+    "clinical_features",
+    "diagnosis",
+    "treatment",
+    "epidemiology",
+    "risk_factors",
+    "complications",
+    "prognosis",
+    "prevention",
+}
+
+
 def _unit_norm_key(u: AnswerUnit) -> Tuple[str, str]:
     # normalized_text + slot is the dedupe key as required
     return (_norm_for_dedupe(u.text), str(u.slot or ""))
@@ -641,7 +658,10 @@ def enforce_evidence_policy(answer_units: Sequence[AnswerUnit], question_intent:
     inferred_slots = (question_intent or {}).get("intent_slots")
     if not isinstance(inferred_slots, list) or not inferred_slots:
         inferred_slots = _infer_question_intent_slots(user_prompt)
-    common_medical = any(s in {"risk_factors", "complications", "prognosis"} for s in inferred_slots)
+    # Evidence policy (cost-aware):
+    # Only force an evidence-layer retry for slots that are expected to be evidence-grounded.
+    inferred_set = {str(s) for s in inferred_slots if str(s).strip()}
+    needs_evidence = bool(inferred_set & set(EVIDENCE_EXPECTED_SLOTS))
 
     # Detect whether any unit has evidence ids (if caller provides them).
     any_evidence = any(bool(u.evidence_ids) for u in units)
@@ -656,8 +676,8 @@ def enforce_evidence_policy(answer_units: Sequence[AnswerUnit], question_intent:
     evidence_lookup_fn = (question_intent or {}).get("evidence_lookup_fn")
     query_text = str((question_intent or {}).get("query_text") or user_prompt)
 
-    # If it's a common medical intent and we have a lookup fn, retry evidence.
-    if common_medical and callable(evidence_lookup_fn):
+    # If we need evidence for this intent and we have a lookup fn, retry evidence.
+    if needs_evidence and callable(evidence_lookup_fn):
         try:
             ev_texts = evidence_lookup_fn(query_text)
         except Exception:
@@ -668,7 +688,7 @@ def enforce_evidence_policy(answer_units: Sequence[AnswerUnit], question_intent:
             ev_block = "\n".join([f"- {t}" for t in ev_texts[:3]])
             out = "基于检索到的证据：\n" + ev_block
             return FinalAnswer(text=out.strip(), failure_reason=None, used_evidence=True)
-        # evidence retry still empty -> pdf miss (library has no relevant evidence)
+        # evidence retry still empty -> pdf miss (library has no relevant evidence for this intent)
         return FinalAnswer(text="现有证据不足以回答该问题。", failure_reason="pdf_miss", used_evidence=False)
 
     # If we cannot infer any intent slot, mark slot miss.

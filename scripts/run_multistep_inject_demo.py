@@ -17,6 +17,7 @@ import json
 import re
 import unicodedata
 from typing import Optional
+from enum import Enum
 
 import torch
 
@@ -36,13 +37,15 @@ try:
     )
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
-    from external_kv_injection.src.runtime.postprocess import postprocess_answer_units  # type: ignore
+    from external_kv_injection.src.runtime.postprocess import postprocess_answer  # type: ignore
+    from external_kv_injection.src.runtime.schema_answerability import infer_slots_from_query  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
     from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
-    from src.runtime.postprocess import postprocess_answer_units  # type: ignore
+    from src.runtime.postprocess import postprocess_answer  # type: ignore
+    from src.runtime.schema_answerability import infer_slots_from_query  # type: ignore
 
 
 def main() -> None:
@@ -237,6 +240,11 @@ def main() -> None:
         help="When printing top candidates full text, truncate each candidate to first N chars (0 = no truncation).",
     )
     args = p.parse_args()
+
+    class AnswerMode(str, Enum):
+        GROUNDED = "GROUNDED"  # schema injection + evidence appended grounding
+        UNGROUNDED = "UNGROUNDED"  # base LLM (no injection)
+        REFUSE = "REFUSE"  # deterministic refusal/fallback
 
     # 专题库 mode: resolve paths from topic_work_dir/topic
     if args.kv_dir is None:
@@ -712,50 +720,13 @@ def main() -> None:
 
     def _postprocess_answer(text: str, user_prompt: str) -> str:
         """
-        Backward-compatible wrapper: keep the old signature but run the new AnswerUnit pipeline.
-        Includes an optional evidence "retry" using the already-available grounding retriever.
+        Backward-compatible signature.
+        IMPORTANT (new design): postprocess MUST NOT decide answer mode (grounded vs ungrounded vs refuse).
+        It only performs generic hygiene/dedup/anti-degeneration.
         """
+        return postprocess_answer(text or "", user_prompt=user_prompt)
 
-        def _evidence_lookup_fn(q: str) -> list[str]:
-            # Retrieve evidence-first using the same encoder as the pipeline.
-            try:
-                qv = query_embed_fn(q)
-            except Exception:
-                return []
-            try:
-                gr = retriever_grounding.search(qv, top_k=6, filters=None, query_text=q)
-            except Exception:
-                return []
-            out: list[str] = []
-            for it in (gr.items or [])[:6]:
-                # EvidenceFirstRetriever sets retrieval_source in meta.
-                src = (it.meta or {}).get("retrieval_source")
-                if src != "evidence":
-                    continue
-                bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
-                if not bid:
-                    continue
-                # block_text_by_id already includes evidence+raw+schema depending on allowlist build.
-                txt = block_text_by_id.get(str(bid)) if isinstance(block_text_by_id, dict) else None
-                if isinstance(txt, str) and txt.strip():
-                    # keep it short; postprocess module will bullet it
-                    out.append(re.sub(r"\s+", " ", txt).strip()[:320])
-                if len(out) >= 4:
-                    break
-            return out
-
-        fa = postprocess_answer_units(
-            text,
-            user_prompt=user_prompt,
-            question_intent={
-                "user_prompt": user_prompt,
-                "query_text": retrieval_query_text,
-                "evidence_lookup_fn": _evidence_lookup_fn,
-            },
-        )
-        return fa.text
-
-    if (not bool(args.skip_baseline)) or bool(args.print_baseline):
+    def _base_llm_answer() -> str:
         inputs0 = tok(model_prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             out0 = model.generate(
@@ -765,10 +736,114 @@ def main() -> None:
                 use_cache=True,
                 no_repeat_ngram_size=int(args.no_repeat_ngram_size),
             )
-        print("=== Baseline (no injection) ===")
-        # Print only newly generated tokens (exclude prompt) for easier A/B compare.
         in_len = int(inputs0["input_ids"].shape[1])
-        print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
+        return tok.decode(out0[0][in_len:], skip_special_tokens=True)
+
+    def _base_llm_answer_unguarded(extra_guard: str) -> str:
+        """
+        UNGROUNDED mode very-light guard:
+        - NOT schema, NOT slots; a single sentence to discourage fabricated sources.
+        """
+        guarded_prompt = (model_prompt or "").rstrip() + "\n\n" + (extra_guard or "").strip()
+        inputs0 = tok(guarded_prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out0 = model.generate(
+                **inputs0,
+                max_new_tokens=int(args.max_new_tokens),
+                do_sample=False,
+                use_cache=True,
+                no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+            )
+        in_len = int(inputs0["input_ids"].shape[1])
+        return tok.decode(out0[0][in_len:], skip_special_tokens=True)
+
+    def _infer_required_slots_for_mode() -> set[str]:
+        # Prefer explicit CLI override.
+        if str(args.schema_required_slots or "").strip():
+            return {s.strip() for s in str(args.schema_required_slots).split(",") if s.strip()}
+        # Otherwise infer from retrieval query (not model prompt) so it matches retrieval behavior.
+        return set(infer_slots_from_query(str(retrieval_query_text or raw_user_prompt)))
+
+    _EVIDENCE_REQUEST_RE = re.compile(r"(基于证据|给出证据|证据句|引用|文献|出处|doi|citation|evidence)", re.I)
+    _HIGH_RISK_RE = re.compile(
+        r"(诊断|确诊|用药剂量|剂量|处方|用药方案|指南|规范|法律|法规|合规|regulation|legal)",
+        re.I,
+    )
+
+    _INTENT_MECHANISM_RE = re.compile(r"(mechanism|pathogenesis|发病机制|致病机制|机制|免疫机制)", re.I)
+    _INTENT_TRANSMISSION_RE = re.compile(r"(transmit|transmission|传播|途径|媒介|vector|tick|蜱)", re.I)
+    _INTENT_TREATMENT_RE = re.compile(r"(treat|treatment|治疗|用药|药物|方案|antivir)", re.I)
+    _INTENT_EPI_RE = re.compile(r"(epidemiology|流行|发病率|发生率|分布|prevalence|incidence)", re.I)
+    _INTENT_OVERVIEW_RE = re.compile(r"(overview|概述|介绍|是什么|定义|what is|简介)", re.I)
+
+    def _infer_intent(*, required_slots: set[str], user_prompt: str) -> str:
+        """
+        Determine a coarse question intent (stable, minimal).
+        This is used ONLY for AnswerMode decision, not for retrieval or slot/schema changes.
+        """
+        rs = {str(s) for s in (required_slots or set()) if str(s).strip()}
+        up = str(user_prompt or "")
+        # Prefer slot-derived intent if available.
+        if "transmission" in rs or _INTENT_TRANSMISSION_RE.search(up):
+            return "transmission"
+        if "pathogenesis" in rs or _INTENT_MECHANISM_RE.search(up):
+            return "mechanism"
+        if "treatment" in rs or _INTENT_TREATMENT_RE.search(up):
+            return "general_treatment"
+        if "epidemiology" in rs or _INTENT_EPI_RE.search(up):
+            return "epidemiology"
+        if _INTENT_OVERVIEW_RE.search(up):
+            return "overview"
+        # Unknown intent (treat as not-answerable without evidence to be safe).
+        return "unknown"
+
+    def _decide_answer_mode(*, required_slots: set[str], evidence_hit: bool, user_prompt: str) -> tuple[AnswerMode, dict]:
+        """
+        Decision rule (must be pre-injection):
+        - REFUSE can only be triggered by (question type + user instruction): requires_evidence && !evidence_hit
+        - If evidence missing but question is answerable, fall back to UNGROUNDED base LLM
+        """
+        intent = _infer_intent(required_slots=required_slots, user_prompt=user_prompt)
+        question_answerable = intent in {"mechanism", "transmission", "general_treatment", "epidemiology", "overview"}
+
+        # Patch 2: REFUSE only by "question type + user instruction"
+        wants_evidence = bool(_EVIDENCE_REQUEST_RE.search(user_prompt or ""))
+        high_risk = bool(_HIGH_RISK_RE.search(user_prompt or ""))
+        requires_evidence = bool(wants_evidence or high_risk or (not question_answerable))
+
+        if requires_evidence and not bool(evidence_hit):
+            return AnswerMode.REFUSE, {
+                "intent": intent,
+                "question_answerable": bool(question_answerable),
+                "requires_evidence": bool(requires_evidence),
+                "wants_evidence": bool(wants_evidence),
+                "high_risk": bool(high_risk),
+            }
+
+        # If we can ground, do GROUNDED only when slots exist (schema is meaningful).
+        if required_slots and bool(evidence_hit):
+            return AnswerMode.GROUNDED, {
+                "intent": intent,
+                "question_answerable": bool(question_answerable),
+                "requires_evidence": bool(requires_evidence),
+                "wants_evidence": bool(wants_evidence),
+                "high_risk": bool(high_risk),
+            }
+
+        # Otherwise use base LLM (no injection).
+        return AnswerMode.UNGROUNDED, {
+            "intent": intent,
+            "question_answerable": bool(question_answerable),
+            "requires_evidence": bool(requires_evidence),
+            "wants_evidence": bool(wants_evidence),
+            "high_risk": bool(high_risk),
+        }
+
+    base_answer_raw = None
+    if (not bool(args.skip_baseline)) or bool(args.print_baseline):
+        base_answer_raw = _base_llm_answer()
+        print("=== Baseline (no injection) ===")
+        print(_postprocess_answer(base_answer_raw, raw_user_prompt))
 
     # Schema-only injection forwards schema texts and injects schema cache; min_kv_len_to_inject is not used
     # for schema selection. Keep the arg for backward compatibility, but set a safe default if omitted.
@@ -808,19 +883,64 @@ def main() -> None:
         block_text_lookup=lookup,
         grounding_retriever=retriever_grounding,
     )
-    answer, dbg = injector.run(
-        model=model,
-        tokenizer=tok,
-        prompt=model_prompt,
-        query_text=retrieval_query_text,
-        device=device,
-        max_new_tokens=args.max_new_tokens,
-        query_embed_fn=query_embed_fn,
-        no_repeat_ngram_size=int(args.no_repeat_ngram_size),
-        ground_with_selected_text=bool(args.ground_with_selected_text),
-        grounding_instructions=str(args.grounding_instructions or ""),
-        use_struct_slots=bool(args.use_struct_slots),
+
+    # ---------------------------
+    # AnswerMode decision (MUST be BEFORE injection)
+    # ---------------------------
+    required_slots_for_mode = _infer_required_slots_for_mode()
+
+    # Evidence hit check: must be evidence-layer text we can actually bind (via block_text_by_id lookup).
+    evidence_hit = False
+    try:
+        qv = query_embed_fn(retrieval_query_text)
+        ev_items, _ev_dbg = bank_evidence.search(qv, top_k=8, filters=None)
+        if isinstance(block_text_by_id, dict):
+            for it in ev_items:
+                bid = (it.meta or {}).get("block_id") or (it.meta or {}).get("chunk_id") or (it.meta or {}).get("id")
+                if not bid:
+                    continue
+                t = block_text_by_id.get(str(bid))
+                if isinstance(t, str) and t.strip() and re.search(r"[A-Za-z\u4e00-\u9fff]", t) and len(t.strip()) >= 16:
+                    evidence_hit = True
+                    break
+    except Exception:
+        evidence_hit = False
+
+    mode, mode_dbg = _decide_answer_mode(
+        required_slots=required_slots_for_mode, evidence_hit=bool(evidence_hit), user_prompt=raw_user_prompt
     )
+    print(
+        f"[mode] AnswerMode={mode} required_slots={sorted(required_slots_for_mode)} "
+        f"evidence_hit={bool(evidence_hit)} mode_dbg={mode_dbg}",
+        flush=True,
+    )
+
+    answer = ""
+    dbg = []
+    if mode == AnswerMode.REFUSE:
+        # Deterministic refusal/fallback when evidence is explicitly required or task is high-risk.
+        answer = "未检索到可用证据，无法按要求回答。"
+        dbg = []
+    elif mode == AnswerMode.UNGROUNDED:
+        # Base LLM mode (no injection).
+        guard = "如果无法确定，请说明不确定性，不要编造具体实验或数据来源。"
+        answer = _base_llm_answer_unguarded(guard)
+        dbg = []
+    else:
+        # GROUNDED: schema injection + evidence appended grounding
+        answer, dbg = injector.run(
+            model=model,
+            tokenizer=tok,
+            prompt=model_prompt,
+            query_text=retrieval_query_text,
+            device=device,
+            max_new_tokens=args.max_new_tokens,
+            query_embed_fn=query_embed_fn,
+            no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+            ground_with_selected_text=bool(args.ground_with_selected_text),
+            grounding_instructions=str(args.grounding_instructions or ""),
+            use_struct_slots=bool(args.use_struct_slots),
+        )
 
     print("=== Step Debug ===")
     if not dbg:
@@ -843,6 +963,9 @@ def main() -> None:
                 scan_paths = []
                 if args.blocks_jsonl:
                     scan_paths.append(Path(str(args.blocks_jsonl)))
+                # Also scan schema blocks for selected schema ids (otherwise they will show as "not found").
+                if args.blocks_jsonl_schema:
+                    scan_paths.append(Path(str(args.blocks_jsonl_schema)))
                 if args.blocks_jsonl_evidence:
                     scan_paths.append(Path(str(args.blocks_jsonl_evidence)))
                 for blocks_path in scan_paths:
