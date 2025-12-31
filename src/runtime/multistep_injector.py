@@ -11,6 +11,31 @@ Multi-step Injection Runtime
 工程实现选择（HF Transformers 友好）
 - 外部 KV 以 past_key_values 前缀注入（不改写 attention forward）
 - hidden state 演化：每一步以当前 prompt/已生成文本的 last_hidden 构造 query embedding
+
+================================================================================
+SLOT BYPASS SEMANTICS (CRITICAL ARCHITECTURE CONTRACT)
+================================================================================
+
+Slots are *retrieval-side bypass signals* (交通信号灯), NOT a semantic protocol (答题卡).
+
+What slots MAY do (and only here, before generation):
+- Influence candidate filtering / selection priority
+- Influence injection eligibility (should_inject)
+- Provide coverage statistics / debug logging
+
+What slots MUST NOT do (hard prohibition):
+- MUST NOT enter the LLM prompt (no "slots", "required/uncovered", checklists)
+- MUST NOT influence decoding (no constraints/penalties conditional on slots)
+- MUST NOT influence stop conditions (no "answered", no "covered => stop")
+- MUST NOT influence postprocess validation/completeness checks
+- MUST NOT be interpreted as "question answered" or "grounded"
+
+Schema-only injection:
+- Injected schema text is a *structural hint*, not evidence and not "completion"
+- Injecting schema MUST NOT mark anything as semantically answered
+- If slot filtering yields no injectable schema blocks, generation proceeds as base LLM
+
+If you change this file, keep the LLM behavior identical to a system where slots do not exist.
 """
 
 from __future__ import annotations
@@ -23,7 +48,7 @@ import torch
 
 from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
-from .schema_answerability import SchemaAnswerabilityConfig, choose_answerable_schema, infer_slots_from_query
+from .schema_answerability import infer_slots_from_query
 
 
 @dataclass(frozen=True)
@@ -55,9 +80,9 @@ class MultiStepConfig:
     # Optional per-layer decay for struct-slot prefix (layer_id -> scale in (0,1]).
     # If empty/None, no decay is applied.
     struct_slots_decay: Optional[Dict[int, float]] = None
-    # Schema selection: answerability (NOT similarity ranking).
+    # Schema selection: retrieval-side only (slots are bypass signals; not semantic "answeredness").
     schema_max_selected_per_step: int = 1
-    # Optional: required slots to answer for this query (derived upstream). If not set, defaults to ALL slots.
+    # (compat) Optional slot signal override for retrieval-side filtering only.
     schema_required_slots: Optional[Sequence[str]] = None
     # Stop-rule epsilon for "injection has no effect" sanity check.
     stop_epsilon_logit_delta_vs_zero: float = 0.05
@@ -122,13 +147,17 @@ class MultiStepInjector:
         items: Sequence[Any],
         *,
         query_text: str,
-        answered_slots: Set[str],
-        required_slots: Set[str],
+        slot_signal: Set[str],
     ) -> Tuple[List[Any], List[str], int, Dict[str, Any]]:
         """
         Select schema candidates (by ID de-dupe + allowlist) and return their TEXT (from block_text_lookup).
 
         IMPORTANT: Schema injection must NOT use evidence/raw KV. We only use schema texts here.
+
+        Slot bypass invariants:
+        - `slot_signal` is ONLY a pre-generation gating/prioritization signal.
+        - This function MUST NOT create/update any semantic "answered" state.
+        - This function MUST NOT imply semantic completeness or grounding.
 
         Returns: selected_items, selected_texts, redundancy_hits, selector_debug
         """
@@ -159,10 +188,9 @@ class MultiStepInjector:
             if len(candidates) >= int(self.cfg.top_k_blocks):
                 break
 
-        # Schema retrieval is NOT ranked similarity search: choose answerable schema(s) by a selector
-        # that ignores ANN scores.
-        # IMPORTANT: Use answerable_slots for gating (if present); fallback to slots.
-        # Only answerable_slots (not generic "slots") can satisfy required_slots.
+        # Slots are bypass-side signals only:
+        # - used ONLY to decide whether a candidate block is eligible for injection (and to prioritize)
+        # - MUST NOT be treated as semantic completion/answering
         cand_answerable_slots: List[List[str]] = []
         for it in candidates:
             meta = getattr(it, "meta", {}) or {}
@@ -181,15 +209,99 @@ class MultiStepInjector:
                     slots = []
                 cand_answerable_slots.append([str(s) for s in slots if str(s).strip()])
 
-        sel_idx, sel_dbg = choose_answerable_schema(
-            query_text=str(query_text or ""),
-            candidate_ids=candidate_ids,
-            candidate_texts=candidate_texts,
-            candidate_slots=cand_answerable_slots,  # Use answerable_slots for slot gating
-            answered_slots=set(answered_slots),
-            required_slots=set(required_slots),
-            cfg=SchemaAnswerabilityConfig(max_selected=int(self.cfg.schema_max_selected_per_step)),
-        )
+        # ---- bypass-only API: should we inject this block under the current slot signal? ----
+        import re
+
+        def _norm_slot(s: str) -> str:
+            return (s or "").strip().lower().replace(" ", "").replace("_", "")
+
+        slot_norm = {_norm_slot(s) for s in (slot_signal or set()) if _norm_slot(s)}
+
+        def should_inject(*, block_slots: List[str]) -> bool:
+            # If we have no slot signal, allow injection (pure bypass signal).
+            if not slot_norm:
+                return True
+            bs = {_norm_slot(s) for s in (block_slots or []) if _norm_slot(s)}
+            if not bs:
+                return False
+            for a in slot_norm:
+                for b in bs:
+                    if a == b or (a in b) or (b in a):
+                        return True
+            return False
+
+        eligible = [i for i, s in enumerate(cand_answerable_slots) if should_inject(block_slots=s)]
+        if not eligible:
+            # No eligible schema blocks under current slot signal -> inject nothing; caller proceeds as base LLM.
+            sel_dbg = {
+                "selector": "slot_bypass_filter_then_lexical_overlap",
+                "slot_signal": sorted(list(slot_signal or set())),
+                "candidates": int(len(candidate_ids)),
+                "eligible": 0,
+                "selected_ids": [],
+            }
+            return [], [], redundancy_hits, sel_dbg
+
+        # Rank eligible blocks by cheap lexical overlap (still ignores ANN score).
+        def _has_cjk(s: str) -> bool:
+            return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
+
+        def _query_terms(q: str, max_terms: int = 32) -> List[str]:
+            q = (q or "").strip().lower()
+            if not q:
+                return []
+            if _has_cjk(q):
+                chars = [c for c in q if re.match(r"[\u4e00-\u9fff]", c)]
+                bigrams = ["".join(chars[i : i + 2]) for i in range(max(0, len(chars) - 1))]
+                return bigrams[:max_terms]
+            toks = re.findall(r"[a-z0-9][a-z0-9\-\_]{1,30}", q)
+            stop = {
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "of",
+                "to",
+                "in",
+                "on",
+                "for",
+                "with",
+                "by",
+                "is",
+                "are",
+                "was",
+                "were",
+                "be",
+                "as",
+                "that",
+                "this",
+                "these",
+                "those",
+                "it",
+                "its",
+            }
+            toks = [t for t in toks if t not in stop]
+            return toks[:max_terms]
+
+        terms = _query_terms(str(query_text or ""), max_terms=32)
+        scored: List[Tuple[int, int]] = []
+        for i in eligible:
+            tl = (candidate_texts[i] or "").lower()
+            ov = 0
+            for t in terms:
+                if t and t in tl:
+                    ov += 1
+            scored.append((ov, i))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        sel_idx = [i for _ov, i in scored[: max(1, int(self.cfg.schema_max_selected_per_step))]]
+        sel_dbg = {
+            "selector": "slot_bypass_filter_then_lexical_overlap",
+            "slot_signal": sorted(list(slot_signal or set())),
+            "candidates": int(len(candidate_ids)),
+            "eligible": int(len(eligible)),
+            "selected_ids": [candidate_ids[i] for i in sel_idx],
+        }
         selected: List[Any] = []
         texts: List[str] = []
         for i in sel_idx[: max(1, int(self.cfg.schema_max_selected_per_step))]:
@@ -218,6 +330,10 @@ class MultiStepInjector:
         执行多步注入推理：
         - 每一步：根据当前状态构造 query embedding → 检索 blocks → 注入 → 走一次 forward 更新 hidden/logits
         - 满足 stopping policy 则停止并进入最终 generate
+
+        Slot bypass invariants (do not violate):
+        - Slots MUST NOT influence prompt text, decoding, stop rules, or postprocess.
+        - Slots may only influence whether a block is injected (retrieval-side bypass signal).
         """
 
         step_debugs: List[StepDebug] = []
@@ -229,15 +345,12 @@ class MultiStepInjector:
             # Enforce the new contract: schema KV is the ONLY KV allowed to constrain generation.
             raise ValueError("This runtime enforces schema-only injection. Pass use_struct_slots=True.")
 
-        # Slot signals are side-channel only (pre-generation):
-        # - used for schema/evidence selection & logging
-        # - MUST NOT influence decoding, stop rules, or prompt contracts
-        answered_slots: Set[str] = set()
-        # Required slots are used ONLY to help schema selection (pre-generation), never for prompt enforcement.
+        # Slot signals are bypass-side only (retrieval/injection eligibility).
+        # They MUST NOT influence decoding, stop rules, prompt contracts, or postprocess.
         if self.cfg.schema_required_slots:
-            req_slots = {str(s) for s in self.cfg.schema_required_slots if str(s).strip()}
+            slot_signal = {str(s) for s in self.cfg.schema_required_slots if str(s).strip()}
         else:
-            req_slots = infer_slots_from_query(str(query_text or prompt))
+            slot_signal = infer_slots_from_query(str(query_text or prompt))
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -294,8 +407,7 @@ class MultiStepInjector:
             selected, schema_texts, redundancy_hits, sel_dbg = self._select_schema_texts(
                 result.items,
                 query_text=str(query_text or ""),
-                answered_slots=answered_slots,
-                required_slots=req_slots,
+                slot_signal=set(slot_signal),
             )
 
             # Stop-rule (slot-agnostic):
@@ -317,7 +429,6 @@ class MultiStepInjector:
                 )
                 break
 
-            newly_answered = set(sel_dbg.get("newly_answered_slots") or [])
             # 2) redundancy_hits > 0 (de-dupe/empty-text indicates we're circling already-used blocks)
             if int(redundancy_hits) > 0:
                 step_debugs.append(
@@ -335,9 +446,6 @@ class MultiStepInjector:
                     )
                 )
                 break
-
-            # Commit slot signals for logging only (side-channel).
-            answered_slots |= newly_answered
 
             if not selected:
                 # no new info -> stop (but still emit a debug record for observability)
