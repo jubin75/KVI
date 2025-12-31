@@ -992,11 +992,18 @@ class MultiStepInjector:
                                 s0 = (s or "").strip()
                                 if not s0:
                                     return ""
+                                # Strip leading instruction-echo fragments like "(不重复)(不超过20字)".
+                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(不重复|不超过|简要|一句话|20字|1-2|1–2)[^\)\）]{0,24}[\)\）]\s*", "", s0)
+                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
                                 sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
                                 out_sents: List[str] = []
                                 seen_norm: set[str] = set()
                                 for x in sents:
-                                    nx = re.sub(r"\s+", "", x).lower()
+                                    # Normalize aggressively for de-dupe (handles hidden spaces/punct variations).
+                                    nx = x
+                                    nx = re.sub(r"\s+", "", nx)
+                                    nx = re.sub(r"[，,。\.；;：:！!？?\(\)\（\）\[\]\{\}<>\"'“”‘’\-—_]", "", nx)
+                                    nx = nx.lower()
                                     if nx in seen_norm:
                                         continue
                                     seen_norm.add(nx)
@@ -1009,7 +1016,7 @@ class MultiStepInjector:
                                 q_slot = _slot_question(s, lang=lang)
                                 # Minimal language guard (no slot ids/field names); evidence remains unmodified.
                                 if lang == "zh":
-                                    q_slot = "请用中文简要回答（1-2句，不要重复）：" + q_slot
+                                    q_slot = "请用中文回答：" + q_slot
                                 else:
                                     q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
                                 p_slot = q_slot + "\n\n" + evidence
