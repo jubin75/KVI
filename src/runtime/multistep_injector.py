@@ -50,6 +50,8 @@ from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
 from .schema_answerability import infer_slots_from_query
 
+import hashlib
+
 
 @dataclass(frozen=True)
 class MultiStepConfig:
@@ -97,6 +99,12 @@ class MultiStepConfig:
 
     # Decoding stability
     repetition_penalty: float = 1.08
+
+    # Schema KV-only prefix (non-text, non-reversible)
+    # Length of the injected KV prefix (NOT visible as tokens; affects attention only via cache prefix).
+    schema_kv_prefix_len: int = 32
+    # Scale of schema V vectors (smaller = weaker bias).
+    schema_kv_scale: float = 0.02
 
 
 @dataclass
@@ -161,8 +169,8 @@ class MultiStepInjector:
 
         Returns: selected_items, selected_texts, redundancy_hits, selector_debug
         """
-        if self.block_text_lookup is None:
-            raise ValueError("Schema injection requires block_text_lookup to resolve schema text by block_id.")
+        # block_text_lookup is optional: schema texts must never enter the model token sequence.
+        # We may still use schema text for retrieval-side lexical ranking when available.
 
         candidates: List[Any] = []
         candidate_ids: List[str] = []
@@ -178,13 +186,10 @@ class MultiStepInjector:
             if str(bid) in self.used_block_ids:
                 redundancy_hits += 1
                 continue
-            t = self.block_text_lookup(str(bid))
-            if not isinstance(t, str) or not t.strip():
-                redundancy_hits += 1
-                continue
+            t = self.block_text_lookup(str(bid)) if self.block_text_lookup is not None else ""
             candidates.append(it)
             candidate_ids.append(str(bid))
-            candidate_texts.append(t.strip())
+            candidate_texts.append(t.strip() if isinstance(t, str) else "")
             if len(candidates) >= int(self.cfg.top_k_blocks):
                 break
 
@@ -294,7 +299,11 @@ class MultiStepInjector:
                     ov += 1
             scored.append((ov, i))
         scored.sort(key=lambda x: x[0], reverse=True)
-        sel_idx = [i for _ov, i in scored[: max(1, int(self.cfg.schema_max_selected_per_step))]]
+        # If we have no schema text (all empty), just pick the first eligible blocks to keep behavior stable.
+        if all(not (candidate_texts[i] or "").strip() for i in eligible):
+            sel_idx = eligible[: max(1, int(self.cfg.schema_max_selected_per_step))]
+        else:
+            sel_idx = [i for _ov, i in scored[: max(1, int(self.cfg.schema_max_selected_per_step))]]
         sel_dbg = {
             "selector": "slot_bypass_filter_then_lexical_overlap",
             "slot_signal": sorted(list(slot_signal or set())),
@@ -310,6 +319,63 @@ class MultiStepInjector:
             self.used_block_ids.add(candidate_ids[i])
 
         return selected, texts, redundancy_hits, sel_dbg
+
+    @staticmethod
+    def _infer_kv_layout(model: torch.nn.Module) -> Tuple[int, int]:
+        """
+        Infer (num_kv_heads, head_dim) for building KV-only prefixes.
+        This must not depend on schema text.
+        """
+        cfg = getattr(model, "config", None)
+        if cfg is None:
+            raise ValueError("Model has no config; cannot infer KV layout.")
+        hidden = int(getattr(cfg, "hidden_size", 0) or 0)
+        n_heads = int(getattr(cfg, "num_attention_heads", 0) or 0)
+        n_kv = int(getattr(cfg, "num_key_value_heads", 0) or 0) or n_heads
+        if hidden <= 0 or n_heads <= 0 or n_kv <= 0:
+            raise ValueError(f"Invalid model config for KV layout: hidden={hidden} heads={n_heads} kv_heads={n_kv}")
+        head_dim = int(hidden // n_heads)
+        return int(n_kv), int(head_dim)
+
+    def _schema_kv_prefix_for_ids(
+        self,
+        *,
+        model: torch.nn.Module,
+        schema_ids: List[str],
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Dict[int, ExtKV]:
+        """
+        Build a KV-only prefix for schema_ids without ever tokenizing schema text.
+
+        Encoding rule: hash(schema_id, layer_id) -> deterministic pseudo-random K/V vectors
+        (non-reversible, non-language). This is an engineering placeholder for a future learned/offline table.
+        """
+        if not schema_ids:
+            return {}
+        n_kv_heads, head_dim = self._infer_kv_layout(model)
+        L = max(1, int(self.cfg.schema_kv_prefix_len))
+        scale = float(self.cfg.schema_kv_scale)
+
+        # Aggregate multiple schema ids by averaging their KV contributions (still KV-only).
+        ext_by_layer: Dict[int, ExtKV] = {}
+        for li in self.cfg.inject_layers:
+            k_acc = torch.zeros((1, n_kv_heads, L, head_dim), device=device, dtype=torch.float32)
+            v_acc = torch.zeros((1, n_kv_heads, L, head_dim), device=device, dtype=torch.float32)
+            for sid in schema_ids:
+                seed_bytes = hashlib.sha256(f"{sid}||layer={int(li)}".encode("utf-8")).digest()[:8]
+                seed = int.from_bytes(seed_bytes, "little", signed=False) % (2**32)
+                rng = np.random.default_rng(seed)
+                k = rng.standard_normal(size=(1, n_kv_heads, L, head_dim), dtype=np.float32)
+                v = rng.standard_normal(size=(1, n_kv_heads, L, head_dim), dtype=np.float32)
+                k_acc += torch.from_numpy(k).to(device=device)
+                v_acc += torch.from_numpy(v).to(device=device)
+            k_acc /= float(len(schema_ids))
+            v_acc /= float(len(schema_ids))
+            # Scale V to act like a mild attention bias.
+            v_acc = v_acc * scale
+            ext_by_layer[int(li)] = ExtKV(K=k_acc.to(dtype=dtype), V=v_acc.to(dtype=dtype))
+        return ext_by_layer
 
     def run(
         self,
@@ -469,126 +535,34 @@ class MultiStepInjector:
                 break
 
             # ---- build prefix cache ----
-            # Schema injection path:
-            # - Build schema from retrieved schema texts
-            # - Forward schema text through base LLM to obtain attention cache
-            # - Inject that cache at specified layers (optionally with layer-wise decay)
-            # Schema text must NOT be concatenated into the user prompt.
-            # Schema text must be forwarded through the base LLM to obtain KV cache.
-            # We forward the selected schema text(s) directly (no prompt concatenation for schema).
-            schema_text = "\n\n".join([t.strip() for t in schema_texts if isinstance(t, str) and t.strip()])
-            if not schema_text:
-                raise RuntimeError("schema injection: empty schema_text after selection")
-
-            # Sanitize schema text to reduce placeholder-heavy degeneration.
-            # - Drop obvious placeholder fields like "N/A" / "unknown" / "TBD"
-            # - Drop meta-instruction phrases embedded inside schema blocks
-            import re
-
-            def _sanitize_schema(s: str, *, query: str) -> str:
-                s0 = (s or "").replace("\r", "\n")
-                # Remove inline meta-instruction parentheses commonly included by schema builders.
-                s0 = re.sub(r"\((do\s+not|DO\s+NOT)[^\)]{0,160}\)", "", s0, flags=re.IGNORECASE)
-                prefer_zh = bool(re.search(r"[\u4e00-\u9fff]", query or ""))
-                lines = []
-                for ln in s0.split("\n"):
-                    t = ln.strip()
-                    if not t:
-                        continue
-                    # Drop header-like meta lines.
-                    if re.search(r"confirmed\s+evidence\s+slots", t, flags=re.IGNORECASE):
-                        continue
-                    # Drop placeholder-value lines.
-                    if re.search(r":\s*(n/?a|none|null|unknown|tbd)\s*$", t, flags=re.IGNORECASE):
-                        continue
-                    # Drop field labels like "transmission_primary:" which tend to push EN format.
-                    t = re.sub(r"^[a-z_]{3,32}\s*:\s*", "", t, flags=re.IGNORECASE)
-                    # If query is Chinese, strip most English glue while preserving:
-                    # - CJK spans
-                    # - scientific names / abbreviations like "H. longicornis"
-                    if prefer_zh:
-                        # Keep CJK spans
-                        cjk = re.findall(r"[\u4e00-\u9fff][\u4e00-\u9fff0-9A-Za-z\.\-/]{0,40}", t)
-                        sci = re.findall(r"\b[A-Z]\.\s*[a-z]{3,20}\b|\b[a-z]{3,20}\b", t)
-                        kept = []
-                        if cjk:
-                            kept.extend(cjk)
-                        # Only keep scientific-looking latin tokens (avoid generic English words).
-                        for tok in sci:
-                            if "." in tok or (tok.islower() and len(tok) >= 8):
-                                kept.append(tok)
-                        t = "；".join(dict.fromkeys([x.strip() for x in kept if x.strip()])) if kept else t
-                    lines.append(t)
-                return "\n".join(lines).strip()
-
-            schema_text = _sanitize_schema(schema_text, query=str(query_text or prompt))
-            if not schema_text:
-                raise RuntimeError("schema injection: empty schema_text after sanitize (all placeholder/meta)")
-
+            # Schema KV-only injection path (NO schema text tokens):
+            # - Select schema block ids (retrieval-side)
+            # - Build a KV-only prefix from schema ids (hash->embedding->K/V), non-reversible
+            # - Inject that prefix at specified layers
             dtype = next(model.parameters()).dtype
-            schema_inputs = tokenizer(schema_text, return_tensors="pt").to(device)
-            schema_ids = schema_inputs["input_ids"]
-            if schema_ids.shape[1] > int(self.cfg.struct_slots_max_prefix_tokens):
-                schema_ids = schema_ids[:, : int(self.cfg.struct_slots_max_prefix_tokens)]
-            schema_mask = torch.ones_like(schema_ids)
-
-            with torch.no_grad():
-                out_schema = model(
-                    input_ids=schema_ids,
-                    attention_mask=schema_mask,
-                    use_cache=True,
-                    return_dict=True,
-                )
-            past_schema = getattr(out_schema, "past_key_values", None)
-            if past_schema is None:
-                raise RuntimeError("schema injection: model did not return past_key_values")
-
-            def _to_legacy(pkv: Any) -> Any:
-                if pkv is None:
-                    return None
-                if hasattr(pkv, "to_legacy_cache"):
-                    try:
-                        return pkv.to_legacy_cache()  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-                return pkv
-
-            legacy = _to_legacy(past_schema)
-
-            def _as_bhld(x: torch.Tensor) -> torch.Tensor:
-                # Expect either [B, H, L, D] or [B, L, H, D]. Convert to [B, H, L, D].
-                if not isinstance(x, torch.Tensor):
-                    x = torch.as_tensor(x)
-                if x.ndim != 4:
-                    raise ValueError(f"Unexpected KV tensor rank: {x.ndim}")
-                d1, d2 = int(x.shape[1]), int(x.shape[2])
-                if d1 > 64 and d2 <= 64:
-                    return x.permute(0, 2, 1, 3).contiguous()
-                return x
-
-            ext_by_layer: Dict[int, ExtKV] = {}
-            decay = self.cfg.struct_slots_decay or {}
-            for li in self.cfg.inject_layers:
-                pair = None
-                try:
-                    pair = legacy[int(li)]
-                except Exception:
-                    pair = None
-                if pair is None:
-                    continue
-                k, v = pair
-                k = _as_bhld(k).to(device=device, dtype=dtype)
-                v = _as_bhld(v).to(device=device, dtype=dtype)
-                scale = float(decay.get(int(li), 1.0))
-                if scale != 1.0:
-                    v = v * scale
-                ext_by_layer[int(li)] = ExtKV(K=k, V=v)
-
+            schema_block_ids = [str(it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")) for it in selected]
+            schema_block_ids = [x for x in schema_block_ids if x]
+            ext_by_layer = self._schema_kv_prefix_for_ids(model=model, schema_ids=schema_block_ids, device=device, dtype=dtype)
             if not ext_by_layer:
-                raise RuntimeError("schema injection: empty ext_by_layer (cannot inject)")
+                # No injection; proceed with base LLM behavior (no suppression).
+                step_debugs.append(
+                    StepDebug(
+                        step=step,
+                        selected_block_ids=schema_block_ids,
+                        injected_tokens=0,
+                        total_injected_tokens=self.total_injected_tokens,
+                        logit_delta=0.0,
+                        hidden_delta=0.0,
+                        redundancy_hits=int(redundancy_hits),
+                        ext_attn_entropy=None,
+                        retrieved_candidates=int(len(result.items)),
+                        note=f"no_kv_prefix_built selector={sel_dbg}",
+                    )
+                )
+                break
 
             past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
-            injected_tokens_effective = int(schema_ids.shape[1])
+            injected_tokens_effective = int(self.cfg.schema_kv_prefix_len)
 
             # update total injected token accounting (used by stopping policy + safety cap)
             self.total_injected_tokens += int(injected_tokens_effective)
