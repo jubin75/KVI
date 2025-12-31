@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
+import re
 import torch
 
 from ..retriever import Retriever
@@ -97,6 +98,11 @@ class MultiStepConfig:
 
     # Decoding stability
     repetition_penalty: float = 1.08
+
+    # Scheme A: evidence-aware slot gating at generation time.
+    # If enabled, for required slots that are NOT covered by evidence, we emit fixed uncertainty templates
+    # and do not call the model to elaborate those aspects.
+    enable_evidence_slot_gating: bool = True
 
     # Schema KV injection scale (applied to V only; <1.0 weakens bias, >1.0 strengthens).
     # NOTE: Schema KV comes from kvbank_schema (precomputed K_ext/V_ext). No schema text is tokenized.
@@ -847,6 +853,77 @@ class MultiStepInjector:
             # Evidence text only (no bullets) to reduce "echo bullets" degeneration.
             return "\n".join(picked[:max_n]).strip()
 
+        def _lang_of_query(q: str) -> str:
+            return "zh" if re.search(r"[\u4e00-\u9fff]", q or "") else "en"
+
+        def _slot_question(slot: str, *, lang: str) -> str:
+            """
+            Slot-specific question used for covered-slot generation.
+            IMPORTANT: must not mention slot ids/field names; only natural-language questions.
+            """
+            s = (slot or "").strip().lower()
+            if lang == "zh":
+                return {
+                    "transmission": "该疾病的主要传播途径是什么？",
+                    "pathogenesis": "该疾病的发病机制是什么？",
+                    "clinical_features": "该疾病的主要临床表现是什么？",
+                    "diagnosis": "该疾病如何诊断/检测？",
+                    "treatment": "该疾病如何治疗？",
+                    "epidemiology": "该疾病的流行病学特征是什么？",
+                    "risk_factors": "该疾病的风险因素是什么？",
+                    "complications": "该疾病常见并发症有哪些？",
+                    "prognosis": "该疾病的预后如何？",
+                    "prevention": "该疾病如何预防？",
+                    "overview": "请简要概述该疾病。",
+                    "mechanism": "该疾病的机制是什么？",
+                }.get(s, "请回答用户问题中相关方面。")
+            return {
+                "transmission": "What is the primary mode of transmission?",
+                "pathogenesis": "What is the pathogenesis?",
+                "clinical_features": "What are the main clinical features?",
+                "diagnosis": "How is it diagnosed/tested?",
+                "treatment": "How is it treated?",
+                "epidemiology": "What are key epidemiological characteristics?",
+                "risk_factors": "What are the risk factors?",
+                "complications": "What complications are reported?",
+                "prognosis": "What is the prognosis?",
+                "prevention": "How can it be prevented?",
+                "overview": "Provide a brief overview.",
+                "mechanism": "What is the mechanism?",
+            }.get(s, "Answer the relevant aspect of the user question.")
+
+        def _slot_title(slot: str, *, lang: str) -> str:
+            s = (slot or "").strip().lower()
+            if lang == "zh":
+                return {
+                    "transmission": "传播途径",
+                    "pathogenesis": "发病机制",
+                    "clinical_features": "临床表现",
+                    "diagnosis": "诊断",
+                    "treatment": "治疗",
+                    "epidemiology": "流行病学",
+                    "risk_factors": "风险因素",
+                    "complications": "并发症",
+                    "prognosis": "预后",
+                    "prevention": "预防",
+                    "overview": "概述",
+                    "mechanism": "机制",
+                }.get(s, s)
+            return s
+
+        def _slot_uncertainty(slot: str, *, lang: str) -> str:
+            s = (slot or "").strip().lower()
+            if lang == "zh":
+                # Fixed uncertainty templates (no mechanistic steps).
+                return {
+                    "pathogenesis": "具体发病机制尚不明确。",
+                    "mechanism": "具体机制尚不明确。",
+                }.get(s, "该方面证据不足，无法确定。")
+            return {
+                "pathogenesis": "The specific pathogenesis is not well established based on the provided evidence.",
+                "mechanism": "The specific mechanism is not well established based on the provided evidence.",
+            }.get(s, "Evidence is insufficient to answer this aspect.")
+
         prompt_for_final = prompt
         # Grounding/citation: schema-first does NOT bypass evidence lookup.
         # Evidence/raw are retrieval-only; NEVER injected into attention.
@@ -886,7 +963,49 @@ class MultiStepInjector:
             if not evidence and not raw_ctx:
                 print("[grounding] no evidence/raw texts found; proceeding without appended grounding.", flush=True)
             if evidence:
-                # Prompt = user question + evidence text only (no labels, no slot language, no instructions).
+                if bool(self.cfg.enable_evidence_slot_gating):
+                    # Scheme A: evidence-aware slot gating (pre-generation guard).
+                    # - required_slots from user question
+                    # - evidence_covered_slots from selected evidence text
+                    qtxt = str(query_text or prompt)
+                    required_slots = set(infer_slots_from_query(qtxt))
+                    evidence_covered_slots = set(infer_slots_from_query(str(evidence)))
+                    if required_slots:
+                        lang = _lang_of_query(qtxt)
+                        covered = [s for s in sorted(required_slots) if s in evidence_covered_slots]
+                        uncovered = [s for s in sorted(required_slots) if s not in evidence_covered_slots]
+
+                        parts: List[str] = []
+                        # Generate ONLY for covered slots (each as a separate generation call).
+                        if covered:
+                            per_slot_tokens = max(32, int(max_new_tokens // max(1, len(covered))))
+                            for s in covered:
+                                q_slot = _slot_question(s, lang=lang)
+                                p_slot = q_slot + "\n\n" + evidence
+                                ans_slot = self._greedy_generate_with_past_prefix(
+                                    model=model,
+                                    tokenizer=tokenizer,
+                                    prompt=p_slot,
+                                    device=device,
+                                    past_key_values=last_past_key_values,
+                                    max_new_tokens=int(per_slot_tokens),
+                                    no_repeat_ngram_size=int(no_repeat_ngram_size),
+                                    repetition_penalty=float(self.cfg.repetition_penalty),
+                                ).strip()
+                                if ans_slot:
+                                    title = _slot_title(s, lang=lang)
+                                    parts.append(f"{title}：{ans_slot}" if lang == "zh" else f"{title}: {ans_slot}")
+
+                        # For uncovered required slots, emit fixed uncertainty templates only.
+                        for s in uncovered:
+                            title = _slot_title(s, lang=lang)
+                            tmpl = _slot_uncertainty(s, lang=lang)
+                            parts.append(f"{title}：{tmpl}" if lang == "zh" else f"{title}: {tmpl}")
+
+                        if parts:
+                            return "\n".join(parts).strip(), step_debugs
+
+                # Default: Prompt = user question + evidence text only.
                 prompt_for_final = prompt + "\n\n" + evidence
 
         # final generation using last injected state: simplest approach is do generate without further injection
