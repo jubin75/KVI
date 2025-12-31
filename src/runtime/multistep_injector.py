@@ -736,12 +736,15 @@ class MultiStepInjector:
                         "2) 不要复述问题、提示或证据句原文；\n"
                         "3) 不要输出指令性文字（如'请回答'、'依据'等）；\n"
                         "4) 不要编造证据，仅使用提供的证据句；\n"
+                        "5) 禁止输出占位符/模板词（例如：'证据未提及'、'N/A'、'TBD'、'unknown'）；\n"
                     )
                     if uncovered_str:
-                        instr += f"5) 对于无法回答的槽位（{uncovered_str}），直接输出：'现有证据不足以回答该问题。'\n"
+                        instr += (
+                            f"6) 对于无法回答的槽位（{uncovered_str}），只能各输出一次简短结论：'证据不足'；不要反复列出占位符。\n"
+                        )
                     else:
-                        instr += "5) 若证据未覆盖某点，输出：'证据未提及'。\n"
-                    instr += "6) 回答简洁，不要输出过程性文字。"
+                        instr += "6) 若证据未覆盖某点：直接省略该点，不要输出任何占位符。\n"
+                    instr += "7) 回答简洁，不要输出过程性文字。"
                 prompt_for_final = prompt
                 if evidence:
                     prompt_for_final += "\n\n【证据句（逐字引用，仅用于核对；不要复述）】\n" + evidence
