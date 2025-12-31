@@ -16,6 +16,7 @@ import sys
 import json
 import re
 import unicodedata
+from typing import Optional
 
 import torch
 
@@ -35,11 +36,13 @@ try:
     )
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
+    from external_kv_injection.src.runtime.postprocess import postprocess_answer  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
     from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
+    from src.runtime.postprocess import postprocess_answer  # type: ignore
 
 
 def main() -> None:
@@ -379,230 +382,6 @@ def main() -> None:
             except Exception:
                 return user_prompt
         return user_prompt
-
-    def _strip_chat_artifacts(text: str) -> str:
-        # Truncate if the model starts a new turn (common in chatty base models).
-        # Important: some degenerate outputs concatenate markers without a newline, e.g. "...HaematophysiHuman: ...".
-        # So we cut on the first occurrence anywhere, not only on "\n".
-        m = re.search(r"(\n\s*)?(Human|User|Assistant)\s*:\s*", text)
-        if m:
-            text = text[: m.start()]
-        return text.strip()
-
-    def _postprocess_answer(text: str, user_prompt: str) -> str:
-        """
-        Reduce common degenerate artifacts:
-        - prompt/instruction echo ("请用中文回答", "要求：", "Evidence:")
-        - duplicated leading question lines
-        Keep it conservative: only drop short lines containing obvious instruction markers.
-        """
-        text = _strip_chat_artifacts(text or "")
-        if not text:
-            return text
-
-        def _extract_structured_triplet(s: str) -> str:
-            """
-            If the model outputs multiple messy attempts, keep ONLY the first complete 3-line structure:
-              主要传播途径：...
-              其他...：...
-              证据原文：...
-            This prevents late-turn degeneration/prompt-echo from polluting the printed answer.
-            """
-            s0 = s.replace("\r", "\n")
-            # Remove fenced code blocks entirely (they often contain prompt-echo).
-            s0 = re.sub(r"```[\s\S]*?```", "", s0)
-            lines0 = [ln.strip() for ln in s0.splitlines() if ln.strip()]
-            if not lines0:
-                return ""
-
-            main_i = None
-            for i, ln in enumerate(lines0):
-                if ln.startswith("主要传播途径") and ("：" in ln or ":" in ln):
-                    main_i = i
-                    break
-            if main_i is None:
-                return ""
-
-            def _norm(ln: str) -> str:
-                ln = re.sub(r"\s+", " ", ln).strip()
-                # Drop trailing instruction leftovers.
-                ln = re.sub(r"(证据未提及|未提及则写.*)$", "", ln).strip()
-                return ln
-
-            main = _norm(lines0[main_i])
-            other = ""
-            ev = ""
-            for j in range(main_i + 1, min(len(lines0), main_i + 14)):
-                ln = lines0[j]
-                if not other and (ln.startswith("其他") and ("：" in ln or ":" in ln)):
-                    other = _norm(ln)
-                    continue
-                if not ev and (ln.startswith("证据原文") and ("：" in ln or ":" in ln)):
-                    buf = [ln]
-                    for k in range(j + 1, min(len(lines0), j + 8)):
-                        ln2 = lines0[k]
-                        if ln2.startswith("主要传播途径") or ln2.startswith("其他") or ln2.startswith("请"):
-                            break
-                        if ("请直接按以下格式" in ln2) or ("要求" in ln2) or ("Evidence:" in ln2):
-                            break
-                        buf.append(ln2)
-                    ev = _norm(" ".join(buf))
-                    break
-
-            if not other:
-                other = "其他已报道途径：证据未提及"
-            if not ev:
-                ev = "证据原文：\"\""
-            return "\n".join([main, other, ev]).strip()
-
-        bad_markers = [
-            "请用中文回答",
-            "逐字引用",
-            "不要输出",
-            "末尾不要",
-            "要求：",
-            "Evidence:",
-            "Evidence not addressed",
-            "根据以下句子",
-            "请结合知识库",
-            # common prompt-echo instruction in CN demos
-            "注意回答内容不要重复",
-            "注意内容不要重复",
-            # common "process text" echoes that pollute answers
-            "但请注意",
-            "因此应简化为",
-            "因此，最终答案为",
-            "最终答案为",
-        ]
-        lines = [ln.strip() for ln in text.splitlines()]
-        out_lines: list[str] = []
-        for ln in lines:
-            if not ln:
-                if out_lines and out_lines[-1] != "":
-                    out_lines.append("")
-                continue
-            # Drop obvious instruction/process echoes (even if the line is long).
-            if any(m in ln for m in bad_markers):
-                # Keep evidence lines even if they contain markers like "Evidence:" etc.
-                if ln.startswith("证据原文") or ln.lower().startswith("evidence"):
-                    out_lines.append(ln)
-                    continue
-                # Otherwise: drop prompt echo / process narration.
-                continue
-            out_lines.append(ln)
-        # drop repeated leading question-like line (common echo)
-        if out_lines:
-            first = out_lines[0]
-            if ("SFTSV" in first) and (("传播" in first) or ("transmission" in first.lower())) and len(first) <= 140:
-                # if it looks like the question rather than an answer, drop it
-                if ("？" in first) or ("?" in first):
-                    out_lines = out_lines[1:]
-        # collapse excessive blank lines
-        cleaned = "\n".join(out_lines).strip()
-        # very conservative: if it literally starts with the exact prompt, remove it
-        up = (user_prompt or "").strip()
-        if up and cleaned.startswith(up):
-            cleaned = cleaned[len(up) :].lstrip()
-        # Drop common "assistant-y" boilerplate that often appears as repeated tail paragraphs.
-        # Keep this generic (not task-template specific).
-        def _drop_boilerplate_paragraphs(s: str) -> str:
-            paras = [p.strip() for p in re.split(r"\n\s*\n+", s.replace("\r", "\n")) if p.strip()]
-            if not paras:
-                return s.strip()
-            drop_re = re.compile(
-                r"("
-                r"如有其他问题|如有任何问题|请告知|请随时|请告诉我|请确认|"
-                r"当前回答|上述回答|以上回答|本回答|已基于提供的信息|已基于提供的证据|"
-                r"建议查阅最新|祝您|"
-                r"If you have any other questions|please let me know|based on the provided (evidence|information)"
-                r")",
-                flags=re.IGNORECASE,
-            )
-            kept: list[str] = []
-            seen_norm: set[str] = set()
-            for p in paras:
-                pn = re.sub(r"\s+", " ", p).strip()
-                # Drop short boilerplate paras (often repeated).
-                if drop_re.search(pn) and len(pn) <= 240:
-                    continue
-                # De-dupe exact repeated paras.
-                if pn in seen_norm:
-                    continue
-                seen_norm.add(pn)
-                kept.append(p)
-            return "\n\n".join(kept).strip()
-
-        cleaned = _drop_boilerplate_paragraphs(cleaned)
-
-        def _dedupe_sentences(s: str) -> str:
-            """
-            Remove repetitive loops inside a single paragraph (common failure mode for greedy decoding),
-            while keeping the first occurrence. This is conservative: only dedupes medium/long sentences.
-            """
-            s0 = (s or "").strip()
-            if len(s0) < 240:
-                return s0
-            # Split while preserving delimiters.
-            parts = re.split(r"([。！？!?\.])", s0)
-            if len(parts) <= 1:
-                return s0
-            out: list[str] = []
-            seen: set[str] = set()
-
-            def _norm_sent(x: str) -> str:
-                x = x.strip()
-                x = re.sub(r"\s+", "", x)
-                x = x.lower()
-                # normalize common punctuation/quotes
-                x = x.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
-                return x
-
-            # Recombine [sent, delim] pairs.
-            for i in range(0, len(parts), 2):
-                sent = parts[i].strip() if i < len(parts) else ""
-                delim = parts[i + 1] if i + 1 < len(parts) else ""
-                if not sent:
-                    continue
-                # only dedupe non-trivial sentences (avoid nuking short list labels)
-                if len(sent) >= 12:
-                    key = _norm_sent(sent)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                out.append(sent + delim)
-            return "".join(out).strip()
-
-        cleaned = _dedupe_sentences(cleaned)
-
-        def _drop_repeated_paragraph_attempts(s: str) -> str:
-            """
-            Some degenerate outputs repeat the same first sentence in a new paragraph and then trail off
-            (e.g. duplicated "SFTSV的主要传播途径是..." followed by an incomplete token).
-            Keep the first occurrence and drop later paras whose prefix is already seen.
-            """
-            paras = [p.strip() for p in re.split(r"\n\s*\n+", (s or "").replace("\r", "\n")) if p.strip()]
-            if len(paras) <= 1:
-                return (s or "").strip()
-            seen: set[str] = set()
-            kept: list[str] = []
-
-            def _norm_prefix(p: str) -> str:
-                p = re.sub(r"\s+", "", p.strip()).lower()
-                # only compare a short prefix to catch "second attempt" repeats
-                return p[:36]
-
-            for p in paras:
-                key = _norm_prefix(p)
-                if key and key in seen:
-                    continue
-                if key:
-                    seen.add(key)
-                kept.append(p)
-            return "\n\n".join(kept).strip()
-
-        cleaned = _drop_repeated_paragraph_attempts(cleaned)
-        trip = _extract_structured_triplet(cleaned)
-        return (trip or cleaned).strip()
 
     def _build_acronym_lexicon_from_blocks(blocks_jsonl: Path, max_lines: int = 200_000) -> dict[str, str]:
         """
@@ -944,7 +723,7 @@ def main() -> None:
         print("=== Baseline (no injection) ===")
         # Print only newly generated tokens (exclude prompt) for easier A/B compare.
         in_len = int(inputs0["input_ids"].shape[1])
-        print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
+        print(postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), user_prompt=raw_user_prompt))
 
     # Schema-only injection forwards schema texts and injects schema cache; min_kv_len_to_inject is not used
     # for schema selection. Keep the arg for backward compatibility, but set a safe default if omitted.
@@ -1005,7 +784,7 @@ def main() -> None:
         for d in dbg:
             print(d)
     print("=== Answer ===")
-    print(_postprocess_answer(answer, raw_user_prompt))
+    print(postprocess_answer(answer, user_prompt=raw_user_prompt))
 
     # Optional: print selected block snippets for debugging retrieval quality.
     if args.blocks_jsonl or args.blocks_jsonl_evidence:

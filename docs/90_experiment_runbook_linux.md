@@ -671,12 +671,3 @@ python external_kv_injection/scripts/run_qwen_inject_demo.py \
   --max_new_tokens 128
 ```
 
-如果决定新开 chat，开头请贴这 6 行（足够cursor无缝上）
-### 你的远程工作目录：/home/jb/KVI
-### 你的 WORK_DIR：例如 /home/jb/KVI/_exp_prod
-### 你最终的 blocks 文件：$WORK_DIR/blocks.v2.jsonl
-### 你最终的 KVBank：$WORK_DIR/kvbank_blocks_v2，以及（如有）$WORK_DIR/kvbank_tables_v2
-### 你用的模型：BASE_LLM=...，DOMAIN_ENCODER=...
-### 你要做的下一步（比如“跑 multistep demo + 看 step debug”）
-
-
