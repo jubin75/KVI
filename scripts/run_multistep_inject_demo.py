@@ -924,6 +924,10 @@ def main() -> None:
     elif mode == AnswerMode.UNGROUNDED:
         # Base LLM mode (no injection).
         guard = "如果无法确定，请说明不确定性，不要编造具体实验或数据来源。"
+        print(
+            f"[event] mode_fallback=UNGROUNDED reason=policy_decision mode_dbg={mode_dbg}",
+            flush=True,
+        )
         answer = _base_llm_answer_unguarded(guard)
         dbg = []
     else:
@@ -949,7 +953,30 @@ def main() -> None:
         for d in dbg:
             print(d)
     print("=== Answer ===")
-    print(_postprocess_answer(answer, raw_user_prompt))
+    final_out = _postprocess_answer(answer, raw_user_prompt)
+    # If the mode is UNGROUNDED, show a minimal user-visible notice to avoid "false grounding" UX.
+    if mode == AnswerMode.UNGROUNDED:
+        note = "【提示】以下为基础模型回答，未保证完全基于证据库。"
+        if final_out and final_out.strip():
+            final_out = note + "\n" + final_out.strip()
+    # Guard against "empty answer" degeneration (common when the model emits EOS immediately).
+    if not (final_out or "").strip():
+        print(
+            f"[warn] empty answer after postprocess (mode={mode}). raw_len={len(str(answer or ''))} "
+            f"post_len={len(str(final_out or ''))}. Falling back to UNGROUNDED base LLM.",
+            flush=True,
+        )
+        print(
+            f"[event] mode_fallback=UNGROUNDED reason=empty_after_postprocess prev_mode={mode} mode_dbg={mode_dbg}",
+            flush=True,
+        )
+        guard = "如果无法确定，请说明不确定性，不要编造具体实验或数据来源。"
+        fallback_raw = _base_llm_answer_unguarded(guard)
+        final_out = _postprocess_answer(fallback_raw, raw_user_prompt)
+        note = "【提示】以下为基础模型回答（因 grounded 输出为空而回退），未保证完全基于证据库。"
+        if final_out and final_out.strip():
+            final_out = note + "\n" + final_out.strip()
+    print(final_out)
 
     # Optional: print selected block snippets for debugging retrieval quality.
     if args.blocks_jsonl or args.blocks_jsonl_evidence:
