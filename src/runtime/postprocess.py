@@ -403,12 +403,30 @@ def postprocess_answer(
     """
     Stage C: Final assembly wrapper (orchestration only).
     """
-    cleaned = generic_text_hygiene(raw_text, user_prompt=user_prompt)
-    return schema_aware_formatter(
+    raw = raw_text or ""
+    cleaned = generic_text_hygiene(raw, user_prompt=user_prompt)
+    out = schema_aware_formatter(
         cleaned,
         answered_slots=answered_slots,
         slot_to_section_title=slot_to_section_title,
     )
+    # Safety floor: avoid returning empty text when the raw output clearly contains readable language.
+    # This prevents over-filtering from wiping the entire answer (generic; no task assumptions).
+    if not (out or "").strip():
+        if re.search(r"[A-Za-z\u4e00-\u9fff]", raw):
+            s = _strip_chat_artifacts(raw)
+            s = _normalize_newlines(s)
+            s = _compress_repeated_symbols(s)
+            # Remove exact prompt echo prefix if present (conservative).
+            up = (user_prompt or "").strip()
+            if up:
+                s_strip = s.lstrip()
+                if s_strip.startswith(up):
+                    s = s_strip[len(up) :].lstrip()
+            s = _collapse_blank_lines(s)
+            if s.strip():
+                return s.strip()
+    return (out or "").strip()
 
 
 # -----------------------------------------------------------------------------

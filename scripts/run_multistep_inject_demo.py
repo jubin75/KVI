@@ -923,12 +923,14 @@ def main() -> None:
         dbg = []
     elif mode == AnswerMode.UNGROUNDED:
         # Base LLM mode (no injection).
-        guard = "如果无法确定，请说明不确定性，不要编造具体实验或数据来源。"
         print(
             f"[event] mode_fallback=UNGROUNDED reason=policy_decision mode_dbg={mode_dbg}",
             flush=True,
         )
-        answer = _base_llm_answer_unguarded(guard)
+        # Ensure UNGROUNDED is exactly the same as baseline generation (no prompt rewrite / no extra guard injected).
+        if base_answer_raw is None:
+            base_answer_raw = _base_llm_answer()
+        answer = base_answer_raw
         dbg = []
     else:
         # GROUNDED: schema injection + evidence appended grounding
@@ -956,7 +958,7 @@ def main() -> None:
     final_out = _postprocess_answer(answer, raw_user_prompt)
     # If the mode is UNGROUNDED, show a minimal user-visible notice to avoid "false grounding" UX.
     if mode == AnswerMode.UNGROUNDED:
-        note = "【提示】以下为基础模型回答，未保证完全基于证据库。"
+        note = "【提示】以下为基础模型回答，未保证完全基于证据库；如果无法确定，将说明不确定性，不编造具体实验或数据来源。"
         if final_out and final_out.strip():
             final_out = note + "\n" + final_out.strip()
     # Guard against "empty answer" degeneration (common when the model emits EOS immediately).
@@ -970,10 +972,15 @@ def main() -> None:
             f"[event] mode_fallback=UNGROUNDED reason=empty_after_postprocess prev_mode={mode} mode_dbg={mode_dbg}",
             flush=True,
         )
-        guard = "如果无法确定，请说明不确定性，不要编造具体实验或数据来源。"
-        fallback_raw = _base_llm_answer_unguarded(guard)
+        if base_answer_raw is None:
+            base_answer_raw = _base_llm_answer()
+        fallback_raw = base_answer_raw
+        # For debugging, print a short excerpt of the raw GROUNDED output that got wiped.
+        wiped_excerpt = re.sub(r"\s+", " ", str(answer or "")).strip()[:400]
+        if wiped_excerpt:
+            print(f"[debug] grounded_raw_excerpt={wiped_excerpt}", flush=True)
         final_out = _postprocess_answer(fallback_raw, raw_user_prompt)
-        note = "【提示】以下为基础模型回答（因 grounded 输出为空而回退），未保证完全基于证据库。"
+        note = "【提示】以下为基础模型回答（因 grounded 输出被清空而回退），未保证完全基于证据库；如果无法确定，将说明不确定性，不编造具体实验或数据来源。"
         if final_out and final_out.strip():
             final_out = note + "\n" + final_out.strip()
     print(final_out)

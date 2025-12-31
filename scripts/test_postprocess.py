@@ -131,6 +131,12 @@ class TestWrapper(unittest.TestCase):
         self.assertIn("基于检索到的证据", fa.text)
         self.assertTrue(fa.used_evidence)
 
+    def test_postprocess_safety_floor_avoids_empty(self):
+        # A line that may look instruction-like but still contains readable content.
+        raw = "【证据句】tick bite is the main route."
+        out = postprocess_answer(raw, user_prompt=None)
+        self.assertTrue(out.strip())
+
 
 if __name__ == "__main__":
     unittest.main()
