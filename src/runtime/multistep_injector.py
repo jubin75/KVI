@@ -62,6 +62,17 @@ class MultiStepConfig:
     # Stop-rule epsilon for "injection has no effect" sanity check.
     stop_epsilon_logit_delta_vs_zero: float = 0.05
 
+    # Grounding evidence rendering (pre-generation only; slot-agnostic)
+    evidence_max_sentences: int = 3
+    # If set, force evidence text to a single language by filtering (no translation).
+    # Allowed values: "zh" | "en" | None
+    evidence_target_lang: Optional[str] = None
+    # Near-duplicate threshold for evidence sentence dedupe (SequenceMatcher-based, no embeddings).
+    evidence_near_dup_threshold: float = 0.95
+
+    # Decoding stability
+    repetition_penalty: float = 1.08
+
 
 @dataclass
 class StepDebug:
@@ -705,7 +716,7 @@ class MultiStepInjector:
                 s0 = re.sub(r"[，,。\.；;：:！!？?\(\)\[\]\{\}<>\"']", "", s0)
                 return s0
 
-            def _near_dup(a: str, b: str, *, thr: float = 0.92) -> bool:
+            def _near_dup(a: str, b: str, *, thr: float) -> bool:
                 na = _norm_sent(a)
                 nb = _norm_sent(b)
                 if not na or not nb:
@@ -719,7 +730,9 @@ class MultiStepInjector:
                 return SequenceMatcher(a=na, b=nb).ratio() >= float(thr)
 
             # Language unification: prefer query language, and keep evidence in a single language.
-            preferred_lang = _sent_lang(q or "")
+            forced_lang = str(getattr(self.cfg, "evidence_target_lang", None) or "").strip().lower()
+            forced_lang = forced_lang if forced_lang in {"zh", "en"} else ""
+            preferred_lang = forced_lang or _sent_lang(q or "")
             candidates_by_lang: dict[str, list[str]] = {"zh": [], "en": []}
 
             for t in texts:
@@ -743,7 +756,8 @@ class MultiStepInjector:
                     if _is_meta(s):
                         continue
                     # Deduplicate semantically similar sentences (approx; no embeddings).
-                    if any(_near_dup(s, prev) for prev in out):
+                    thr = float(getattr(self.cfg, "evidence_near_dup_threshold", 0.95))
+                    if any(_near_dup(s, prev, thr=thr) for prev in out):
                         continue
                     out.append(s)
                     if len(out) >= max_n:
@@ -751,11 +765,22 @@ class MultiStepInjector:
                 return out
 
             # Prefer evidence in the same language as the query if available.
-            picked = _select_from_lang(preferred_lang, 3)
+            max_n = int(getattr(self.cfg, "evidence_max_sentences", 3))
+            picked = _select_from_lang(preferred_lang, max_n)
             if not picked:
-                # Fallback: pick a single language (whichever has more candidates) to avoid CN/EN mixing.
-                alt = "zh" if len(candidates_by_lang["zh"]) >= len(candidates_by_lang["en"]) else "en"
-                picked = _select_from_lang(alt, 3)
+                # If a target language was forced but we filtered to empty, warn and fall back to target_lang=None behavior.
+                if forced_lang:
+                    print("[warn] evidence_language_filtered_to_empty", flush=True)
+                    # Retry with query language first, then the other language (still avoid mixing).
+                    qlang = _sent_lang(q or "")
+                    picked = _select_from_lang(qlang, max_n)
+                    if not picked:
+                        other = "zh" if qlang == "en" else "en"
+                        picked = _select_from_lang(other, max_n)
+                else:
+                    # Fallback: pick a single language (whichever has more candidates) to avoid CN/EN mixing.
+                    alt = "zh" if len(candidates_by_lang["zh"]) >= len(candidates_by_lang["en"]) else "en"
+                    picked = _select_from_lang(alt, max_n)
 
             if not picked:
                 # fallback: first 1–2 sentences (after filtering meta).
@@ -764,7 +789,7 @@ class MultiStepInjector:
                 picked = sents[:2] if sents else [t0[:400]]
             picked = [p.replace("\n", " ").strip() for p in picked if p.strip()]
             # Evidence text only (no bullets) to reduce "echo bullets" degeneration.
-            return "\n".join(picked[:3]).strip()
+            return "\n".join(picked[:max_n]).strip()
 
         prompt_for_final = prompt
         # Grounding/citation: schema-first does NOT bypass evidence lookup.
@@ -820,6 +845,7 @@ class MultiStepInjector:
             past_key_values=last_past_key_values,
             max_new_tokens=max_new_tokens,
             no_repeat_ngram_size=int(no_repeat_ngram_size),
+            repetition_penalty=float(self.cfg.repetition_penalty),
         )
         return txt, step_debugs
 
@@ -833,6 +859,7 @@ class MultiStepInjector:
         past_key_values: Any,
         max_new_tokens: int,
         no_repeat_ngram_size: int = 0,
+        repetition_penalty: float = 1.08,
     ) -> str:
         """
         Greedy decode that supports an *external prefix* cache.
@@ -957,7 +984,7 @@ class MultiStepInjector:
         seq0 = input_ids
         logits0 = out.logits[:, -1, :]
         # Mild penalty to prevent repeating the prompt/evidence tokens.
-        logits0 = _apply_repetition_penalty(logits0, seq0, penalty=1.08)
+        logits0 = _apply_repetition_penalty(logits0, seq0, penalty=float(repetition_penalty))
         logits0 = _ban_repeated_ngrams(logits0, seq0, int(no_repeat_ngram_size))
         next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
@@ -994,7 +1021,7 @@ class MultiStepInjector:
             past = out.past_key_values
             seq = torch.cat([input_ids] + generated, dim=1)
             logits = out.logits[:, -1, :]
-            logits = _apply_repetition_penalty(logits, seq, penalty=1.08)
+            logits = _apply_repetition_penalty(logits, seq, penalty=float(repetition_penalty))
             logits = _ban_repeated_ngrams(logits, seq, int(no_repeat_ngram_size))
             next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
