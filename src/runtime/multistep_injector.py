@@ -47,10 +47,8 @@ import numpy as np
 import torch
 
 from ..retriever import Retriever
-from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
+from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix, stack_ext_kv_items_by_layer
 from .schema_answerability import infer_slots_from_query
-
-import hashlib
 
 
 @dataclass(frozen=True)
@@ -100,11 +98,9 @@ class MultiStepConfig:
     # Decoding stability
     repetition_penalty: float = 1.08
 
-    # Schema KV-only prefix (non-text, non-reversible)
-    # Length of the injected KV prefix (NOT visible as tokens; affects attention only via cache prefix).
-    schema_kv_prefix_len: int = 32
-    # Scale of schema V vectors (smaller = weaker bias).
-    schema_kv_scale: float = 0.02
+    # Schema KV injection scale (applied to V only; <1.0 weakens bias, >1.0 strengthens).
+    # NOTE: Schema KV comes from kvbank_schema (precomputed K_ext/V_ext). No schema text is tokenized.
+    schema_kv_scale: float = 1.0
 
 
 @dataclass
@@ -320,61 +316,38 @@ class MultiStepInjector:
 
         return selected, texts, redundancy_hits, sel_dbg
 
-    @staticmethod
-    def _infer_kv_layout(model: torch.nn.Module) -> Tuple[int, int]:
-        """
-        Infer (num_kv_heads, head_dim) for building KV-only prefixes.
-        This must not depend on schema text.
-        """
-        cfg = getattr(model, "config", None)
-        if cfg is None:
-            raise ValueError("Model has no config; cannot infer KV layout.")
-        hidden = int(getattr(cfg, "hidden_size", 0) or 0)
-        n_heads = int(getattr(cfg, "num_attention_heads", 0) or 0)
-        n_kv = int(getattr(cfg, "num_key_value_heads", 0) or 0) or n_heads
-        if hidden <= 0 or n_heads <= 0 or n_kv <= 0:
-            raise ValueError(f"Invalid model config for KV layout: hidden={hidden} heads={n_heads} kv_heads={n_kv}")
-        head_dim = int(hidden // n_heads)
-        return int(n_kv), int(head_dim)
-
-    def _schema_kv_prefix_for_ids(
+    def _schema_kv_prefix_from_items(
         self,
         *,
-        model: torch.nn.Module,
-        schema_ids: List[str],
+        items: Sequence[Any],
         device: torch.device,
         dtype: torch.dtype,
     ) -> Dict[int, ExtKV]:
         """
-        Build a KV-only prefix for schema_ids without ever tokenizing schema text.
+        Build schema KV prefix from retrieved schema KVItems (kvbank_schema) WITHOUT tokenizing schema text.
 
-        Encoding rule: hash(schema_id, layer_id) -> deterministic pseudo-random K/V vectors
-        (non-reversible, non-language). This is an engineering placeholder for a future learned/offline table.
+        This is the "real" schema KV injection:
+        - Use stored K_ext/V_ext per block (multi-layer) and stack per injected layer.
+        - Optionally scale V by cfg.schema_kv_scale.
         """
-        if not schema_ids:
+        if not items:
             return {}
-        n_kv_heads, head_dim = self._infer_kv_layout(model)
-        L = max(1, int(self.cfg.schema_kv_prefix_len))
-        scale = float(self.cfg.schema_kv_scale)
-
-        # Aggregate multiple schema ids by averaging their KV contributions (still KV-only).
         ext_by_layer: Dict[int, ExtKV] = {}
         for li in self.cfg.inject_layers:
-            k_acc = torch.zeros((1, n_kv_heads, L, head_dim), device=device, dtype=torch.float32)
-            v_acc = torch.zeros((1, n_kv_heads, L, head_dim), device=device, dtype=torch.float32)
-            for sid in schema_ids:
-                seed_bytes = hashlib.sha256(f"{sid}||layer={int(li)}".encode("utf-8")).digest()[:8]
-                seed = int.from_bytes(seed_bytes, "little", signed=False) % (2**32)
-                rng = np.random.default_rng(seed)
-                k = rng.standard_normal(size=(1, n_kv_heads, L, head_dim), dtype=np.float32)
-                v = rng.standard_normal(size=(1, n_kv_heads, L, head_dim), dtype=np.float32)
-                k_acc += torch.from_numpy(k).to(device=device)
-                v_acc += torch.from_numpy(v).to(device=device)
-            k_acc /= float(len(schema_ids))
-            v_acc /= float(len(schema_ids))
-            # Scale V to act like a mild attention bias.
-            v_acc = v_acc * scale
-            ext_by_layer[int(li)] = ExtKV(K=k_acc.to(dtype=dtype), V=v_acc.to(dtype=dtype))
+            try:
+                ext = stack_ext_kv_items_by_layer(
+                    items=items,
+                    layer_id=int(li),
+                    batch_size=1,
+                    device=device,
+                    dtype=dtype,
+                )
+            except Exception:
+                continue
+            scale = float(getattr(self.cfg, "schema_kv_scale", 1.0))
+            if scale != 1.0:
+                ext = ExtKV(K=ext.K, V=ext.V * scale)
+            ext_by_layer[int(li)] = ext
         return ext_by_layer
 
     def run(
@@ -536,13 +509,13 @@ class MultiStepInjector:
 
             # ---- build prefix cache ----
             # Schema KV-only injection path (NO schema text tokens):
-            # - Select schema block ids (retrieval-side)
-            # - Build a KV-only prefix from schema ids (hash->embedding->K/V), non-reversible
-            # - Inject that prefix at specified layers
+            # - Use retrieved schema KVItems' stored K_ext/V_ext (kvbank_schema)
+            # - Stack them into a cache prefix per injected layer
+            # - Inject via past_key_values prefix
             dtype = next(model.parameters()).dtype
             schema_block_ids = [str(it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")) for it in selected]
             schema_block_ids = [x for x in schema_block_ids if x]
-            ext_by_layer = self._schema_kv_prefix_for_ids(model=model, schema_ids=schema_block_ids, device=device, dtype=dtype)
+            ext_by_layer = self._schema_kv_prefix_from_items(items=selected, device=device, dtype=dtype)
             if not ext_by_layer:
                 # No injection; proceed with base LLM behavior (no suppression).
                 step_debugs.append(
@@ -556,13 +529,14 @@ class MultiStepInjector:
                         redundancy_hits=int(redundancy_hits),
                         ext_attn_entropy=None,
                         retrieved_candidates=int(len(result.items)),
-                        note=f"no_kv_prefix_built selector={sel_dbg}",
+                        note=f"no_schema_kv_prefix_built selector={sel_dbg}",
                     )
                 )
                 break
 
             past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
-            injected_tokens_effective = int(self.cfg.schema_kv_prefix_len)
+            # prefix length is the ext_len of the stacked KV (token-invisible, cache-only)
+            injected_tokens_effective = int(next(iter(ext_by_layer.values())).K.shape[-2])
 
             # update total injected token accounting (used by stopping policy + safety cap)
             self.total_injected_tokens += int(injected_tokens_effective)
