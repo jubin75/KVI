@@ -379,6 +379,33 @@ class MultiStepInjector:
             if not schema_text:
                 raise RuntimeError("schema injection: empty schema_text after selection")
 
+            # Sanitize schema text to reduce placeholder-heavy degeneration.
+            # - Drop obvious placeholder fields like "N/A" / "unknown" / "TBD"
+            # - Drop meta-instruction phrases embedded inside schema blocks
+            import re
+
+            def _sanitize_schema(s: str) -> str:
+                s0 = (s or "").replace("\r", "\n")
+                # Remove inline meta-instruction parentheses commonly included by schema builders.
+                s0 = re.sub(r"\((do\s+not|DO\s+NOT)[^\)]{0,160}\)", "", s0, flags=re.IGNORECASE)
+                lines = []
+                for ln in s0.split("\n"):
+                    t = ln.strip()
+                    if not t:
+                        continue
+                    # Drop header-like meta lines.
+                    if re.search(r"confirmed\s+evidence\s+slots", t, flags=re.IGNORECASE):
+                        continue
+                    # Drop placeholder-value lines.
+                    if re.search(r":\s*(n/?a|none|null|unknown|tbd)\s*$", t, flags=re.IGNORECASE):
+                        continue
+                    lines.append(t)
+                return "\n".join(lines).strip()
+
+            schema_text = _sanitize_schema(schema_text)
+            if not schema_text:
+                raise RuntimeError("schema injection: empty schema_text after sanitize (all placeholder/meta)")
+
             dtype = next(model.parameters()).dtype
             schema_inputs = tokenizer(schema_text, return_tensors="pt").to(device)
             schema_ids = schema_inputs["input_ids"]

@@ -46,15 +46,40 @@ def _collapse_blank_lines(s: str, *, max_consecutive: int = 1) -> str:
 
 def _strip_chat_artifacts(s: str) -> str:
     """
-    Truncate if the model starts a new turn marker (generic chat transcripts).
-    This is intentionally generic and not model/disease/task-specific.
+    Remove common chat transcript artifacts (generic).
+
+    Goals:
+    - Preserve assistant answer content even if it is prefixed with "Assistant:"
+    - Drop user-turn echoes like "Human:" / "User:"
+    - If the model starts a new user turn mid-string, truncate at that point
     """
-    s = s or ""
-    # Common markers: "Human:", "User:", "Assistant:", "System:".
-    m = re.search(r"(\n\s*)?(Human|User|Assistant|System)\s*:\s*", s, flags=re.IGNORECASE)
-    if m:
-        s = s[: m.start()]
-    return s.strip()
+    s = _normalize_newlines(s or "").strip()
+    if not s:
+        return s
+
+    # 1) If a new *user* turn begins mid-string, truncate there.
+    # This catches degenerate outputs like "... answer ... Human: <next question>" even without newlines.
+    m_user = re.search(r"(Human|User)\s*:\s*", s, flags=re.IGNORECASE)
+    if m_user and m_user.start() > 0:
+        s = s[: m_user.start()].rstrip()
+
+    # 2) If content is line-based transcript, strip role prefixes instead of truncating.
+    out_lines: List[str] = []
+    role_re = re.compile(r"^\s*(Human|User|Assistant|System)\s*:\s*(.*)$", flags=re.IGNORECASE)
+    for ln in s.split("\n"):
+        m = role_re.match(ln)
+        if not m:
+            out_lines.append(ln.rstrip())
+            continue
+        role = (m.group(1) or "").lower()
+        rest = (m.group(2) or "").strip()
+        # Drop user turns; keep assistant/system content.
+        if role in {"human", "user"}:
+            continue
+        if rest:
+            out_lines.append(rest)
+    s2 = "\n".join(out_lines).strip()
+    return s2
 
 
 def _remove_fenced_code_blocks(s: str) -> str:

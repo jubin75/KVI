@@ -137,6 +137,11 @@ class TestWrapper(unittest.TestCase):
         out = postprocess_answer(raw, user_prompt=None)
         self.assertTrue(out.strip())
 
+    def test_postprocess_keeps_assistant_prefixed_content(self):
+        raw = "Assistant: 通过蜱叮咬是主要传播途径。\\nHuman: 你确定吗？\\nAssistant: 是的。"
+        out = postprocess_answer(raw, user_prompt=None)
+        self.assertIn("通过蜱叮咬是主要传播途径", out)
+
 
 if __name__ == "__main__":
     unittest.main()
