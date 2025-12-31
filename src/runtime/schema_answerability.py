@@ -191,7 +191,9 @@ def _extract_dynamic_slots(query: str) -> Set[str]:
 def infer_slots_from_query(query: str) -> Set[str]:
     """
     Infer required_slots from user query.
-    Strategy: dynamic extraction first, fallback to regex patterns.
+    Strategy: dynamic extraction PLUS fallback regex patterns (union).
+    Rationale: multi-intent questions may match only partially via question-word patterns
+    (e.g., "是什么？" can match pathogenesis while "传播/途径" should still be captured by fallback).
     Returns a set of slot identifiers (arbitrary, not limited to SCHEMA_SLOT_ENUM).
     """
     q = (query or "").strip()
@@ -199,9 +201,7 @@ def infer_slots_from_query(query: str) -> Set[str]:
         return set()
     # 1) Try dynamic extraction.
     slots = _extract_dynamic_slots(q)
-    if slots:
-        return slots
-    # 2) Fallback: regex patterns.
+    # 2) Always apply fallback: regex patterns (union, never early-return).
     for slot_id, pattern in _SLOT_PATTERNS_FALLBACK:
         if pattern.search(q):
             slots.add(slot_id)

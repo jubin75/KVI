@@ -863,7 +863,7 @@ class MultiStepInjector:
             """
             s = (slot or "").strip().lower()
             if lang == "zh":
-                return {
+                q0 = {
                     "transmission": "该疾病的主要传播途径是什么？",
                     "pathogenesis": "该疾病的发病机制是什么？",
                     "clinical_features": "该疾病的主要临床表现是什么？",
@@ -877,6 +877,8 @@ class MultiStepInjector:
                     "overview": "请简要概述该疾病。",
                     "mechanism": "该疾病的机制是什么？",
                 }.get(s, "请回答用户问题中相关方面。")
+                # Minimal language guard (no slot ids/field names).
+                return "请用中文回答：" + q0
             return {
                 "transmission": "What is the primary mode of transmission?",
                 "pathogenesis": "What is the pathogenesis?",
