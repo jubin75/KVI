@@ -120,15 +120,26 @@ _INSTRUCTION_LINE_RE = re.compile(
     r"("
     # CN prompt/instruction echoes
     r"请(用|以)?(中文|英文)?(回答|输出)|"
+    r"请基于|"
     r"回答要求|输出要求|格式要求|"
     r"不要(输出|复述|编造|杜撰)|"
-    r"根据(以上|下列|如下)|"
+    r"(根据|依据)(以上|上述|下列|如下)|"
     r"证据句|证据原文|逐字引用|"
     # EN prompt/instruction echoes
     r"^(\s*)?(answer\s+the\s+question|requirements|output\s+format)\b|"
     r"\bevidence\s*:|\bbased\s+on\s+the\s+provided\b|"
     r"\bdo\s+not\s+(repeat|output|include|hallucinate)\b"
     r")",
+    flags=re.IGNORECASE,
+)
+
+
+_RULE_LIKE_LINE_RE = re.compile(
+    r"^\s*(?:\d+\s*[)\]）】\.、]|[-*]\s*)\s*.+$"
+)
+
+_RULE_KEYWORDS_RE = re.compile(
+    r"(规则|遵循|要求|禁止|必须|请勿|不要|仅输出|只输出|不得|do\s+not|must|only\s+output|rule)",
     flags=re.IGNORECASE,
 )
 
@@ -148,6 +159,10 @@ def _should_drop_instruction_line(ln: str) -> bool:
         return True
     # If it matches instruction markers and is short-ish, it's likely an echo line.
     if _INSTRUCTION_LINE_RE.search(t) and len(t) <= 200:
+        return True
+    # Rule-like numbered/bulleted lines that contain imperative keywords are almost always template echoes.
+    # Keep conservative: only drop if BOTH looks like a rule item AND contains rule keywords.
+    if len(t) <= 220 and _RULE_LIKE_LINE_RE.match(t) and _RULE_KEYWORDS_RE.search(t):
         return True
     return False
 
@@ -229,6 +244,25 @@ def _dedupe_sentences_within_paragraph(p: str) -> str:
         return s
     out: List[str] = []
     seen: List[str] = []
+
+    def _threshold_for_sentence(sent: str, *, paragraph_len: int) -> float:
+        """
+        Adaptive near-duplicate threshold.
+        Rationale:
+        - Short factual medical sentences can be legitimately similar; use stricter threshold to avoid false removals.
+        - Long loop-y sentences often differ by minor typos/spaces; allow looser threshold there.
+        """
+        ls = len(sent)
+        if ls <= 24:
+            return 0.985
+        if ls <= 64:
+            return 0.97
+        if ls <= 140:
+            return 0.96
+        # Very long sentences in long paragraphs: allow looser to break degeneration loops.
+        if paragraph_len >= 240:
+            return 0.94
+        return 0.96
     for i in range(0, len(parts), 2):
         sent = (parts[i] or "").strip()
         delim = parts[i + 1] if i + 1 < len(parts) else ""
@@ -244,8 +278,8 @@ def _dedupe_sentences_within_paragraph(p: str) -> str:
                 if any(_norm_for_dedupe(prev) == ns for prev in seen[-32:]):
                     continue
             else:
-                # Longer sentences in longer paragraphs: allow near-identical dedupe.
-                if any(_near_identical(sent, prev) for prev in seen[-12:]):
+                thr = _threshold_for_sentence(sent, paragraph_len=len(s))
+                if any(_near_identical(sent, prev, threshold=thr) for prev in seen[-12:]):
                     continue
             seen.append(sent)
         out.append(sent + delim)

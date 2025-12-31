@@ -757,21 +757,11 @@ class MultiStepInjector:
                     # uncovered_slots: slots that were required but NOT answered by any selected schema.
                     uncovered_slots = set(req_slots) - answered_slots
                     uncovered_str = ", ".join(sorted(uncovered_slots)) if uncovered_slots else ""
-                    instr = (
-                        "请基于【证据句】回答，遵循以下规则：\n"
-                        "1) 每个语义槽只输出一次，不重复；\n"
-                        "2) 不要复述问题、提示或证据句原文；\n"
-                        "3) 不要输出指令性文字（如'请回答'、'依据'等）；\n"
-                        "4) 不要编造证据，仅使用提供的证据句；\n"
-                        "5) 禁止输出占位符/模板词（例如：'证据未提及'、'N/A'、'TBD'、'unknown'）；\n"
-                    )
+                    # Keep instructions as a single generalized sentence to minimize prompt-echo risk.
+                    # (Avoid long "do not output X/Y" lists which models tend to repeat.)
+                    instr = "请仅输出简洁的答案正文，并基于【证据句】作答；对无证据支持的内容请保持不确定性或省略。"
                     if uncovered_str:
-                        instr += (
-                            f"6) 对于无法回答的槽位（{uncovered_str}），只能各输出一次简短结论：'证据不足'；不要反复列出占位符。\n"
-                        )
-                    else:
-                        instr += "6) 若证据未覆盖某点：直接省略该点，不要输出任何占位符。\n"
-                    instr += "7) 回答简洁，不要输出过程性文字。"
+                        instr += f" 对于无法回答的槽位（{uncovered_str}），每个槽位最多输出一次“证据不足”。"
                 prompt_for_final = prompt
                 if evidence:
                     prompt_for_final += "\n\n【证据句（逐字引用，仅用于核对；不要复述）】\n" + evidence

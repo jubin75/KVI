@@ -142,6 +142,12 @@ class TestWrapper(unittest.TestCase):
         out = postprocess_answer(raw, user_prompt=None)
         self.assertIn("通过蜱叮咬是主要传播途径", out)
 
+    def test_postprocess_drops_rule_echo_lines(self):
+        raw = "依据上述规则，答案如下：\n\n1）每个语义槽只输出一次，不重复；\n6）若证据未覆盖某点：直接省略该点。\n\n结论：A。"
+        out = postprocess_answer(raw, user_prompt=None)
+        self.assertIn("结论：A", out)
+        self.assertNotIn("每个语义槽只输出一次", out)
+
 
 if __name__ == "__main__":
     unittest.main()
