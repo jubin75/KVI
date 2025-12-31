@@ -36,13 +36,13 @@ try:
     )
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
-    from external_kv_injection.src.runtime.postprocess import postprocess_answer  # type: ignore
+    from external_kv_injection.src.runtime.postprocess import postprocess_answer_units  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
     from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
-    from src.runtime.postprocess import postprocess_answer  # type: ignore
+    from src.runtime.postprocess import postprocess_answer_units  # type: ignore
 
 
 def main() -> None:
@@ -710,6 +710,51 @@ def main() -> None:
     model.to(device)
     model.eval()
 
+    def _postprocess_answer(text: str, user_prompt: str) -> str:
+        """
+        Backward-compatible wrapper: keep the old signature but run the new AnswerUnit pipeline.
+        Includes an optional evidence "retry" using the already-available grounding retriever.
+        """
+
+        def _evidence_lookup_fn(q: str) -> list[str]:
+            # Retrieve evidence-first using the same encoder as the pipeline.
+            try:
+                qv = query_embed_fn(q)
+            except Exception:
+                return []
+            try:
+                gr = retriever_grounding.search(qv, top_k=6, filters=None, query_text=q)
+            except Exception:
+                return []
+            out: list[str] = []
+            for it in (gr.items or [])[:6]:
+                # EvidenceFirstRetriever sets retrieval_source in meta.
+                src = (it.meta or {}).get("retrieval_source")
+                if src != "evidence":
+                    continue
+                bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                if not bid:
+                    continue
+                # block_text_by_id already includes evidence+raw+schema depending on allowlist build.
+                txt = block_text_by_id.get(str(bid)) if isinstance(block_text_by_id, dict) else None
+                if isinstance(txt, str) and txt.strip():
+                    # keep it short; postprocess module will bullet it
+                    out.append(re.sub(r"\s+", " ", txt).strip()[:320])
+                if len(out) >= 4:
+                    break
+            return out
+
+        fa = postprocess_answer_units(
+            text,
+            user_prompt=user_prompt,
+            question_intent={
+                "user_prompt": user_prompt,
+                "query_text": retrieval_query_text,
+                "evidence_lookup_fn": _evidence_lookup_fn,
+            },
+        )
+        return fa.text
+
     if (not bool(args.skip_baseline)) or bool(args.print_baseline):
         inputs0 = tok(model_prompt, return_tensors="pt").to(device)
         with torch.no_grad():
@@ -723,7 +768,7 @@ def main() -> None:
         print("=== Baseline (no injection) ===")
         # Print only newly generated tokens (exclude prompt) for easier A/B compare.
         in_len = int(inputs0["input_ids"].shape[1])
-        print(postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), user_prompt=raw_user_prompt))
+        print(_postprocess_answer(tok.decode(out0[0][in_len:], skip_special_tokens=True), raw_user_prompt))
 
     # Schema-only injection forwards schema texts and injects schema cache; min_kv_len_to_inject is not used
     # for schema selection. Keep the arg for backward compatibility, but set a safe default if omitted.
@@ -784,7 +829,7 @@ def main() -> None:
         for d in dbg:
             print(d)
     print("=== Answer ===")
-    print(postprocess_answer(answer, user_prompt=raw_user_prompt))
+    print(_postprocess_answer(answer, raw_user_prompt))
 
     # Optional: print selected block snippets for debugging retrieval quality.
     if args.blocks_jsonl or args.blocks_jsonl_evidence:

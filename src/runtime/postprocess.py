@@ -13,7 +13,7 @@ Design goals:
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 import re
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
 def _normalize_newlines(s: str) -> str:
@@ -409,5 +409,294 @@ def postprocess_answer(
         answered_slots=answered_slots,
         slot_to_section_title=slot_to_section_title,
     )
+
+
+# -----------------------------------------------------------------------------
+# AnswerUnit-based post-processing (minimal, dependency-free)
+#
+# This pipeline is designed to address:
+# - repeated answers (including repeated "insufficient evidence" fallbacks)
+# - degenerate / template / garbage outputs (e.g. '】】】】】')
+# - common medical intents where we should retry evidence lookup before failing
+#
+# IMPORTANT constraints:
+# - Does NOT change slot/schema/evidence data structures
+# - Does NOT introduce new deps
+# - Can be used behind an existing _postprocess_answer(text, user_prompt) wrapper
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AnswerUnit:
+    """
+    A small, local representation of an answer fragment.
+    This does NOT modify upstream structures; it is only for post-processing.
+    """
+
+    text: str
+    slot: Optional[str] = None
+    evidence_ids: Tuple[str, ...] = ()
+    is_fallback: bool = False
+    failure_reason: Optional[str] = None  # e.g. "slot_miss" | "evidence_missing" | "pdf_miss"
+
+
+@dataclass(frozen=True)
+class FinalAnswer:
+    text: str
+    failure_reason: Optional[str] = None
+    used_evidence: bool = False
+
+
+_FALLBACK_RE = re.compile(
+    r"("
+    r"现有证据不足|证据不足|缺乏证据|无法.*确定|无法.*提供|未找到.*证据|"
+    r"insufficient\s+evidence|no\s+evidence|not\s+enough\s+evidence|cannot\s+determine"
+    r")",
+    flags=re.IGNORECASE,
+)
+
+_TEMPLATE_GARBAGE_RE = re.compile(
+    r"("
+    r"【[^】]{0,32}】|"
+    r"\{\{[^}]{0,64}\}\}|"
+    r"\[INST\]|\[/INST\]|"
+    r"<\|[^|]{0,48}\|>"
+    r")"
+)
+
+
+def _unit_norm_key(u: AnswerUnit) -> Tuple[str, str]:
+    # normalized_text + slot is the dedupe key as required
+    return (_norm_for_dedupe(u.text), str(u.slot or ""))
+
+
+def _looks_like_garbage_text(s: str) -> bool:
+    t = (s or "").strip()
+    if not t:
+        return True
+    # Template residue
+    if _TEMPLATE_GARBAGE_RE.search(t):
+        # But don't drop if it's a long, contentful sentence with bracket usage; be conservative.
+        if len(t) <= 220:
+            return True
+    # Degenerate symbol-only lines
+    if _is_pure_punct_line(t):
+        return True
+    # Excessive repeated single symbols (e.g. 】】】】)
+    if re.search(r"([】\]）\)\}\>\-_=~\*#])\1{3,}", t):
+        return True
+    return False
+
+
+def _parse_answer_units_from_text(cleaned_text: str) -> List[AnswerUnit]:
+    """
+    Minimal parser:
+    - Split into paragraphs as units.
+    - Attempt to extract a lightweight "slot label" from a leading 'Label:' line.
+      This is NOT slot-specific; it's generic "prefix label" parsing.
+    - evidence_ids are left empty unless explicit ids are detected.
+    """
+    s = (cleaned_text or "").strip()
+    if not s:
+        return []
+    paras = _split_paragraphs(s)
+    units: List[AnswerUnit] = []
+    # Very lightweight: detect leading "Label:" if it is short.
+    label_re = re.compile(r"^\s*([^:：]{1,40})\s*[:：]\s*(.+)\s*$")
+    for p in paras:
+        p0 = p.strip()
+        slot = None
+        txt = p0
+        m = label_re.match(p0)
+        if m:
+            # treat the label as slot identifier (generic, not medical-specific)
+            slot = m.group(1).strip()
+            txt = m.group(2).strip()
+        is_fb = bool(_FALLBACK_RE.search(txt))
+        units.append(AnswerUnit(text=txt, slot=slot, evidence_ids=(), is_fallback=is_fb, failure_reason=None))
+    return units
+
+
+def normalize_answer_units(answer_units: Sequence[AnswerUnit]) -> List[AnswerUnit]:
+    """
+    职责：
+    - 去重语义等价回答（字符串 + slot + evidence_id）
+    - 合并多条“证据不足”类回答为 1 条
+    - 过滤空内容 / 异常 token（如 '】】】'）
+    """
+    units_in = list(answer_units or [])
+    out: List[AnswerUnit] = []
+    seen_keys: set[Tuple[str, str, Tuple[str, ...]]] = set()
+    fallback_seen_for_slot: set[str] = set()
+
+    for u in units_in:
+        txt = (u.text or "").strip()
+        if not txt:
+            continue
+        if _looks_like_garbage_text(txt):
+            continue
+
+        evid = tuple(str(x) for x in (u.evidence_ids or ()) if str(x).strip())
+        slot = str(u.slot) if u.slot is not None else ""
+        key = (_norm_for_dedupe(txt), slot, evid)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        is_fb = bool(u.is_fallback or _FALLBACK_RE.search(txt))
+        if is_fb:
+            # merge multiple fallback variants per slot into ONE
+            if slot in fallback_seen_for_slot:
+                continue
+            fallback_seen_for_slot.add(slot)
+            # normalize fallback surface form (keep minimal + stable)
+            fb_text = "现有证据不足以回答该问题。"
+            out.append(
+                AnswerUnit(
+                    text=fb_text,
+                    slot=u.slot,
+                    evidence_ids=evid,
+                    is_fallback=True,
+                    failure_reason=u.failure_reason or "evidence_missing",
+                )
+            )
+            continue
+
+        out.append(AnswerUnit(text=txt, slot=u.slot, evidence_ids=evid, is_fallback=False, failure_reason=None))
+    return out
+
+
+def validate_answer_structure(answer_units: Sequence[AnswerUnit]) -> List[AnswerUnit]:
+    """
+    职责：
+    - 校验回答是否包含可读自然语言
+    - 若检测到 prompt 崩坏 / 模板残留 / 乱码，丢弃该 unit
+    - 防止输出退化为【证据句】】】】类内容
+    """
+    units = list(answer_units or [])
+    out: List[AnswerUnit] = []
+    for u in units:
+        txt = (u.text or "").strip()
+        if not txt:
+            continue
+        if _looks_like_garbage_text(txt):
+            continue
+        # Must contain some language content (CJK or letters)
+        if not re.search(r"[A-Za-z\u4e00-\u9fff]", txt):
+            continue
+        # Drop if it's mostly template markers / instruction-y fragments
+        if _INSTRUCTION_LINE_RE.search(txt) and len(txt) <= 200:
+            continue
+        out.append(u)
+    return out
+
+
+def _infer_question_intent_slots(user_prompt: str) -> List[str]:
+    """
+    Minimal intent inference for common medical slots.
+    This does NOT change slot structures; it's only used for evidence policy decisions.
+    """
+    q = (user_prompt or "").strip().lower()
+    if not q:
+        return []
+    slots: List[str] = []
+    # Keep mapping small & stable; no disease-specific strings.
+    patterns: List[Tuple[str, re.Pattern]] = [
+        ("risk_factors", re.compile(r"(risk\s*factor|危险因素|风险因素|高危人群|易感人群)", re.I)),
+        ("complications", re.compile(r"(complicat\w*|并发症|后遗症)", re.I)),
+        ("prognosis", re.compile(r"(prognos\w*|预后|转归|死亡率|mortality|fatality)", re.I)),
+        ("treatment", re.compile(r"(treat\w*|治疗|用药|药物|antivir)", re.I)),
+        ("diagnosis", re.compile(r"(diagnos\w*|诊断|检测|pcr|elisa)", re.I)),
+        ("clinical_features", re.compile(r"(symptom|症状|表现|临床)", re.I)),
+        ("transmission", re.compile(r"(transmit|传播|途径|媒介|vector)", re.I)),
+        ("pathogenesis", re.compile(r"(pathogen|机制|发病机制|cytokine|炎症|immun)", re.I)),
+    ]
+    for slot, pat in patterns:
+        if pat.search(q):
+            slots.append(slot)
+    # de-dupe keep order
+    seen = set()
+    out = []
+    for s in slots:
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def enforce_evidence_policy(answer_units: Sequence[AnswerUnit], question_intent: Dict[str, Any]) -> FinalAnswer:
+    """
+    职责：
+    - 若问题属于常见医学 slot（如 risk_factors / complications / prognosis）
+      且 evidence 为空 → 回退到 evidence 层重新匹配
+    - 若仍无 evidence，只允许输出一次标准 fallback
+    - 明确区分：
+        - evidence 缺失
+        - slot 未命中
+        - PDF 中确实无相关信息
+    """
+    units = list(answer_units or [])
+    user_prompt = str((question_intent or {}).get("user_prompt") or "")
+    inferred_slots = (question_intent or {}).get("intent_slots")
+    if not isinstance(inferred_slots, list) or not inferred_slots:
+        inferred_slots = _infer_question_intent_slots(user_prompt)
+    common_medical = any(s in {"risk_factors", "complications", "prognosis"} for s in inferred_slots)
+
+    # Detect whether any unit has evidence ids (if caller provides them).
+    any_evidence = any(bool(u.evidence_ids) for u in units)
+    any_non_fallback = any(not u.is_fallback for u in units)
+
+    # If answer contains useful content, do not override.
+    if any_non_fallback:
+        txt = _join_paragraphs([u.text for u in units if u.text.strip()])
+        return FinalAnswer(text=txt, failure_reason=None, used_evidence=any_evidence)
+
+    # At this point, we only have fallbacks or nothing.
+    evidence_lookup_fn = (question_intent or {}).get("evidence_lookup_fn")
+    query_text = str((question_intent or {}).get("query_text") or user_prompt)
+
+    # If it's a common medical intent and we have a lookup fn, retry evidence.
+    if common_medical and callable(evidence_lookup_fn):
+        try:
+            ev_texts = evidence_lookup_fn(query_text)
+        except Exception:
+            ev_texts = []
+        ev_texts = [str(x).strip() for x in (ev_texts or []) if str(x).strip()]
+        if ev_texts:
+            # We cannot re-generate with LLM here; we can at least return evidence-backed minimal answer.
+            ev_block = "\n".join([f"- {t}" for t in ev_texts[:3]])
+            out = "基于检索到的证据：\n" + ev_block
+            return FinalAnswer(text=out.strip(), failure_reason=None, used_evidence=True)
+        # evidence retry still empty -> pdf miss (library has no relevant evidence)
+        return FinalAnswer(text="现有证据不足以回答该问题。", failure_reason="pdf_miss", used_evidence=False)
+
+    # If we cannot infer any intent slot, mark slot miss.
+    if not inferred_slots:
+        return FinalAnswer(text="现有证据不足以回答该问题。", failure_reason="slot_miss", used_evidence=False)
+    # Otherwise, we have an intent but no evidence + no retry path -> evidence missing.
+    return FinalAnswer(text="现有证据不足以回答该问题。", failure_reason="evidence_missing", used_evidence=False)
+
+
+def postprocess_answer_units(
+    raw_text: str,
+    user_prompt: str | None = None,
+    *,
+    question_intent: Optional[Dict[str, Any]] = None,
+) -> FinalAnswer:
+    """
+    Convenience wrapper:
+      raw_text -> generic_text_hygiene -> parse units -> normalize -> validate -> enforce policy
+    """
+    cleaned = generic_text_hygiene(raw_text, user_prompt=user_prompt)
+    units = _parse_answer_units_from_text(cleaned)
+    units = normalize_answer_units(units)
+    units = validate_answer_structure(units)
+    qi = dict(question_intent or {})
+    if user_prompt is not None and "user_prompt" not in qi:
+        qi["user_prompt"] = user_prompt
+    if "query_text" not in qi and user_prompt is not None:
+        qi["query_text"] = user_prompt
+    return enforce_evidence_policy(units, qi)
 
 

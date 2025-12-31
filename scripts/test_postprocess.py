@@ -20,10 +20,11 @@ try:
     from external_kv_injection.src.runtime.postprocess import (  # type: ignore
         generic_text_hygiene,
         postprocess_answer,
+        postprocess_answer_units,
         schema_aware_formatter,
     )
 except ModuleNotFoundError:
-    from src.runtime.postprocess import generic_text_hygiene, postprocess_answer, schema_aware_formatter  # type: ignore
+    from src.runtime.postprocess import generic_text_hygiene, postprocess_answer, postprocess_answer_units, schema_aware_formatter  # type: ignore
 
 
 class TestGenericTextHygiene(unittest.TestCase):
@@ -83,6 +84,26 @@ class TestWrapper(unittest.TestCase):
         raw = "Evidence:\nA is B.\nA is B."
         out = postprocess_answer(raw, user_prompt=None)
         self.assertLessEqual(out.count("A is B."), 1)
+
+    def test_units_pipeline_merges_fallbacks_and_marks_reason(self):
+        raw = "证据不足，无法确定。\n\n现有证据不足以回答该问题。\n\n】】】】】】\n"
+        fa = postprocess_answer_units(
+            raw,
+            user_prompt="风险因素是什么？",
+            question_intent={"intent_slots": ["risk_factors"], "evidence_lookup_fn": lambda q: []},
+        )
+        self.assertEqual(fa.text, "现有证据不足以回答该问题。")
+        self.assertEqual(fa.failure_reason, "pdf_miss")
+
+    def test_units_pipeline_retries_evidence_for_common_medical_intent(self):
+        raw = "现有证据不足以回答该问题。"
+        fa = postprocess_answer_units(
+            raw,
+            user_prompt="有哪些风险因素？",
+            question_intent={"intent_slots": ["risk_factors"], "evidence_lookup_fn": lambda q: ["Risk factor A.", "Risk factor B."]},
+        )
+        self.assertIn("基于检索到的证据", fa.text)
+        self.assertTrue(fa.used_evidence)
 
 
 if __name__ == "__main__":
