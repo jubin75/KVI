@@ -38,14 +38,12 @@ try:
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
     from external_kv_injection.src.runtime.postprocess import postprocess_answer  # type: ignore
-    from external_kv_injection.src.runtime.schema_answerability import infer_slots_from_query  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
     from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
     from src.runtime.postprocess import postprocess_answer  # type: ignore
-    from src.runtime.schema_answerability import infer_slots_from_query  # type: ignore
 
 
 def main() -> None:
@@ -757,13 +755,6 @@ def main() -> None:
         in_len = int(inputs0["input_ids"].shape[1])
         return tok.decode(out0[0][in_len:], skip_special_tokens=True)
 
-    def _infer_required_slots_for_mode() -> set[str]:
-        # Prefer explicit CLI override.
-        if str(args.schema_required_slots or "").strip():
-            return {s.strip() for s in str(args.schema_required_slots).split(",") if s.strip()}
-        # Otherwise infer from retrieval query (not model prompt) so it matches retrieval behavior.
-        return set(infer_slots_from_query(str(retrieval_query_text or raw_user_prompt)))
-
     _EVIDENCE_REQUEST_RE = re.compile(r"(基于证据|给出证据|证据句|引用|文献|出处|doi|citation|evidence)", re.I)
     _HIGH_RISK_RE = re.compile(
         r"(诊断|确诊|用药剂量|剂量|处方|用药方案|指南|规范|法律|法规|合规|regulation|legal)",
@@ -776,57 +767,57 @@ def main() -> None:
     _INTENT_EPI_RE = re.compile(r"(epidemiology|流行|发病率|发生率|分布|prevalence|incidence)", re.I)
     _INTENT_OVERVIEW_RE = re.compile(r"(overview|概述|介绍|是什么|定义|what is|简介)", re.I)
 
-    def _infer_intent(*, required_slots: set[str], user_prompt: str) -> str:
+    def _infer_intent(*, user_prompt: str) -> str:
         """
         Determine a coarse question intent (stable, minimal).
         This is used ONLY for AnswerMode decision, not for retrieval or slot/schema changes.
         """
-        rs = {str(s) for s in (required_slots or set()) if str(s).strip()}
         up = str(user_prompt or "")
         # Prefer slot-derived intent if available.
-        if "transmission" in rs or _INTENT_TRANSMISSION_RE.search(up):
+        if _INTENT_TRANSMISSION_RE.search(up):
             return "transmission"
-        if "pathogenesis" in rs or _INTENT_MECHANISM_RE.search(up):
+        if _INTENT_MECHANISM_RE.search(up):
             return "mechanism"
-        if "treatment" in rs or _INTENT_TREATMENT_RE.search(up):
+        if _INTENT_TREATMENT_RE.search(up):
             return "general_treatment"
-        if "epidemiology" in rs or _INTENT_EPI_RE.search(up):
+        if _INTENT_EPI_RE.search(up):
             return "epidemiology"
         if _INTENT_OVERVIEW_RE.search(up):
             return "overview"
         # Unknown intent (treat as not-answerable without evidence to be safe).
         return "unknown"
 
-    def _decide_answer_mode(*, required_slots: set[str], evidence_hit: bool, user_prompt: str) -> tuple[AnswerMode, dict]:
+    def _decide_answer_mode(*, has_grounding_evidence: bool, user_prompt: str) -> tuple[AnswerMode, dict]:
         """
         Decision rule (must be pre-injection):
-        - REFUSE can only be triggered by (question type + user instruction): requires_evidence && !evidence_hit
+        - REFUSE can only be triggered by (question type + user instruction):
+            evidence_required_by_policy && !has_grounding_evidence
         - If evidence missing but question is answerable, fall back to UNGROUNDED base LLM
         """
-        intent = _infer_intent(required_slots=required_slots, user_prompt=user_prompt)
+        intent = _infer_intent(user_prompt=user_prompt)
         question_answerable = intent in {"mechanism", "transmission", "general_treatment", "epidemiology", "overview"}
 
         # Patch 2: REFUSE only by "question type + user instruction"
-        wants_evidence = bool(_EVIDENCE_REQUEST_RE.search(user_prompt or ""))
+        user_requests_evidence = bool(_EVIDENCE_REQUEST_RE.search(user_prompt or ""))
         high_risk = bool(_HIGH_RISK_RE.search(user_prompt or ""))
-        requires_evidence = bool(wants_evidence or high_risk or (not question_answerable))
+        evidence_required_by_policy = bool(user_requests_evidence or high_risk or (not question_answerable))
 
-        if requires_evidence and not bool(evidence_hit):
+        if evidence_required_by_policy and not bool(has_grounding_evidence):
             return AnswerMode.REFUSE, {
                 "intent": intent,
                 "question_answerable": bool(question_answerable),
-                "requires_evidence": bool(requires_evidence),
-                "wants_evidence": bool(wants_evidence),
+                "evidence_required_by_policy": bool(evidence_required_by_policy),
+                "user_requests_evidence": bool(user_requests_evidence),
                 "high_risk": bool(high_risk),
             }
 
-        # If we can ground, do GROUNDED only when slots exist (schema is meaningful).
-        if required_slots and bool(evidence_hit):
+        # GROUNDED requires evidence hit.
+        if bool(has_grounding_evidence):
             return AnswerMode.GROUNDED, {
                 "intent": intent,
                 "question_answerable": bool(question_answerable),
-                "requires_evidence": bool(requires_evidence),
-                "wants_evidence": bool(wants_evidence),
+                "evidence_required_by_policy": bool(evidence_required_by_policy),
+                "user_requests_evidence": bool(user_requests_evidence),
                 "high_risk": bool(high_risk),
             }
 
@@ -834,8 +825,8 @@ def main() -> None:
         return AnswerMode.UNGROUNDED, {
             "intent": intent,
             "question_answerable": bool(question_answerable),
-            "requires_evidence": bool(requires_evidence),
-            "wants_evidence": bool(wants_evidence),
+            "evidence_required_by_policy": bool(evidence_required_by_policy),
+            "user_requests_evidence": bool(user_requests_evidence),
             "high_risk": bool(high_risk),
         }
 
@@ -887,10 +878,8 @@ def main() -> None:
     # ---------------------------
     # AnswerMode decision (MUST be BEFORE injection)
     # ---------------------------
-    required_slots_for_mode = _infer_required_slots_for_mode()
-
     # Evidence hit check: must be evidence-layer text we can actually bind (via block_text_by_id lookup).
-    evidence_hit = False
+    has_grounding_evidence = False
     try:
         qv = query_embed_fn(retrieval_query_text)
         ev_items, _ev_dbg = bank_evidence.search(qv, top_k=8, filters=None)
@@ -901,17 +890,14 @@ def main() -> None:
                     continue
                 t = block_text_by_id.get(str(bid))
                 if isinstance(t, str) and t.strip() and re.search(r"[A-Za-z\u4e00-\u9fff]", t) and len(t.strip()) >= 16:
-                    evidence_hit = True
+                    has_grounding_evidence = True
                     break
     except Exception:
-        evidence_hit = False
+        has_grounding_evidence = False
 
-    mode, mode_dbg = _decide_answer_mode(
-        required_slots=required_slots_for_mode, evidence_hit=bool(evidence_hit), user_prompt=raw_user_prompt
-    )
+    mode, mode_dbg = _decide_answer_mode(has_grounding_evidence=bool(has_grounding_evidence), user_prompt=raw_user_prompt)
     print(
-        f"[mode] AnswerMode={mode} required_slots={sorted(required_slots_for_mode)} "
-        f"evidence_hit={bool(evidence_hit)} mode_dbg={mode_dbg}",
+        f"[mode] AnswerMode={mode} has_grounding_evidence={bool(has_grounding_evidence)} mode_dbg={mode_dbg}",
         flush=True,
     )
 

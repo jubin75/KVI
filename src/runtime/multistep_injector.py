@@ -23,7 +23,7 @@ import torch
 
 from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix
-from .schema_answerability import SCHEMA_SLOT_ENUM, SchemaAnswerabilityConfig, choose_answerable_schema, infer_slots_from_query
+from .schema_answerability import SchemaAnswerabilityConfig, choose_answerable_schema, infer_slots_from_query
 
 
 @dataclass(frozen=True)
@@ -218,16 +218,15 @@ class MultiStepInjector:
             # Enforce the new contract: schema KV is the ONLY KV allowed to constrain generation.
             raise ValueError("This runtime enforces schema-only injection. Pass use_struct_slots=True.")
 
-        # Track semantic progress across steps (slot-based).
+        # Slot signals are side-channel only (pre-generation):
+        # - used for schema/evidence selection & logging
+        # - MUST NOT influence decoding, stop rules, or prompt contracts
         answered_slots: Set[str] = set()
-        # Dynamic required_slots: if not explicitly provided, infer from user query.
+        # Required slots are used ONLY to help schema selection (pre-generation), never for prompt enforcement.
         if self.cfg.schema_required_slots:
-            req_slots = set(str(s) for s in self.cfg.schema_required_slots if str(s))
+            req_slots = {str(s) for s in self.cfg.schema_required_slots if str(s).strip()}
         else:
             req_slots = infer_slots_from_query(str(query_text or prompt))
-            if not req_slots:
-                # Fallback: use all predefined slots (backward compat).
-                req_slots = set(SCHEMA_SLOT_ENUM)
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -288,8 +287,8 @@ class MultiStepInjector:
                 required_slots=req_slots,
             )
 
-            # Stop-rule (inline, minimal):
-            # 1) No selectable schema remains for uncovered slots.
+            # Stop-rule (slot-agnostic):
+            # 1) No selectable schema remains (retrieval exhausted / allowlist filtered / de-dupe).
             if not selected:
                 step_debugs.append(
                     StepDebug(
@@ -302,30 +301,13 @@ class MultiStepInjector:
                         redundancy_hits=int(redundancy_hits),
                         ext_attn_entropy=None,
                         retrieved_candidates=int(len(result.items)),
-                        note=f"stop_reason=no_selectable_schema_for_uncovered_slots selector={sel_dbg}",
+                        note=f"stop_reason=no_selectable_schema selector={sel_dbg}",
                     )
                 )
                 break
 
             newly_answered = set(sel_dbg.get("newly_answered_slots") or [])
-            # 2) Newly selected schema does NOT introduce new slots.
-            if not newly_answered:
-                step_debugs.append(
-                    StepDebug(
-                        step=step,
-                        selected_block_ids=[str(it.meta.get("block_id") or it.meta.get("chunk_id")) for it in selected],
-                        injected_tokens=0,
-                        total_injected_tokens=self.total_injected_tokens,
-                        logit_delta=0.0,
-                        hidden_delta=0.0,
-                        redundancy_hits=int(redundancy_hits),
-                        ext_attn_entropy=None,
-                        retrieved_candidates=int(len(result.items)),
-                        note=f"stop_reason=no_new_slots selector={sel_dbg}",
-                    )
-                )
-                break
-            # 3) redundancy_hits > 0
+            # 2) redundancy_hits > 0 (de-dupe/empty-text indicates we're circling already-used blocks)
             if int(redundancy_hits) > 0:
                 step_debugs.append(
                     StepDebug(
@@ -343,7 +325,7 @@ class MultiStepInjector:
                 )
                 break
 
-            # Commit semantic progress for this step.
+            # Commit slot signals for logging only (side-channel).
             answered_slots |= newly_answered
 
             if not selected:
@@ -620,7 +602,11 @@ class MultiStepInjector:
             prev_logits = logits
             prev_hidden = hidden
 
-            # stopping policy: (marginal gain下降 + 冗余/安全上限) 至少两个信号
+            # stopping policy (slot-agnostic): require >=2 signals among
+            # - marginal gain small (logit+hidden deltas)
+            # - redundancy observed
+            # - safety caps (max_total_tokens)
+            # - optional attention convergence
             signals = 0
             if logit_delta < self.cfg.min_logit_delta and hidden_delta < self.cfg.min_hidden_delta:
                 signals += 1  # marginal gain small
@@ -745,29 +731,16 @@ class MultiStepInjector:
                 raw_texts = []
 
             evidence = _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None) if evidence_texts else ""
+            # IMPORTANT: generation prompt must contain ONLY user question + selected evidence text.
+            # raw_ctx is kept for offline logging only; it MUST NOT be appended to the prompt.
             raw_ctx = _extract_evidence(raw_texts, q=str(query_text or ""), keywords=None) if raw_texts else ""
 
             # Evidence is mandatory to retrieve; if evidence quotes are empty, we still provide fallback context.
             if not evidence and not raw_ctx:
                 print("[grounding] no evidence/raw texts found; proceeding without appended grounding.", flush=True)
-            if evidence or raw_ctx:
-                instr = (grounding_instructions or "").strip()
-                if not instr:
-                    # Generation contract: slot-level rendering exactly once, clean output.
-                    # uncovered_slots: slots that were required but NOT answered by any selected schema.
-                    uncovered_slots = set(req_slots) - answered_slots
-                    uncovered_str = ", ".join(sorted(uncovered_slots)) if uncovered_slots else ""
-                    # Keep instructions as a single generalized sentence to minimize prompt-echo risk.
-                    # (Avoid long "do not output X/Y" lists which models tend to repeat.)
-                    instr = "请仅输出简洁的答案正文，并基于【证据句】作答；对无证据支持的内容请保持不确定性或省略。"
-                    if uncovered_str:
-                        instr += f" 对于无法回答的槽位（{uncovered_str}），每个槽位最多输出一次“证据不足”。"
-                prompt_for_final = prompt
-                if evidence:
-                    prompt_for_final += "\n\n【证据句（逐字引用，仅用于核对；不要复述）】\n" + evidence
-                if raw_ctx and not evidence:
-                    prompt_for_final += "\n\n【回退上下文（raw，仅用于补充背景；不要当作已确认事实）】\n" + raw_ctx
-                prompt_for_final += "\n\n【回答要求】\n" + instr
+            if evidence:
+                # Prompt = user question + evidence text only (no labels, no slot language, no instructions).
+                prompt_for_final = prompt + "\n\n" + evidence
 
         # final generation using last injected state: simplest approach is do generate without further injection
         # NOTE: do NOT use `model.generate(past_key_values=...)` here; HF generation will treat
