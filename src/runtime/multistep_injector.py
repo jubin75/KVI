@@ -980,9 +980,38 @@ class MultiStepInjector:
                         parts: List[str] = []
                         # Generate ONLY for covered slots (each as a separate generation call).
                         if covered:
+                            # Cap per-slot length to avoid long looping paraphrases.
                             per_slot_tokens = max(32, int(max_new_tokens // max(1, len(covered))))
+                            per_slot_tokens = min(int(per_slot_tokens), 96)
+
+                            def _has_cjk(s: str) -> bool:
+                                return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
+
+                            def _shorten_answer(s: str) -> str:
+                                # Keep 1–2 non-duplicate sentences.
+                                s0 = (s or "").strip()
+                                if not s0:
+                                    return ""
+                                sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
+                                out_sents: List[str] = []
+                                seen_norm: set[str] = set()
+                                for x in sents:
+                                    nx = re.sub(r"\s+", "", x).lower()
+                                    if nx in seen_norm:
+                                        continue
+                                    seen_norm.add(nx)
+                                    out_sents.append(x)
+                                    if len(out_sents) >= 2:
+                                        break
+                                return " ".join(out_sents).strip()
+
                             for s in covered:
                                 q_slot = _slot_question(s, lang=lang)
+                                # Minimal language guard (no slot ids/field names); evidence remains unmodified.
+                                if lang == "zh":
+                                    q_slot = "请用中文简要回答（1-2句，不要重复）：" + q_slot
+                                else:
+                                    q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
                                 p_slot = q_slot + "\n\n" + evidence
                                 ans_slot = self._greedy_generate_with_past_prefix(
                                     model=model,
@@ -994,6 +1023,20 @@ class MultiStepInjector:
                                     no_repeat_ngram_size=int(no_repeat_ngram_size),
                                     repetition_penalty=float(self.cfg.repetition_penalty),
                                 ).strip()
+                                # One deterministic retry if output language mismatches (evidence may be EN-heavy).
+                                if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
+                                    p_retry = "请用中文回答（不要输出英文）：" + "\n" + p_slot
+                                    ans_slot = self._greedy_generate_with_past_prefix(
+                                        model=model,
+                                        tokenizer=tokenizer,
+                                        prompt=p_retry,
+                                        device=device,
+                                        past_key_values=last_past_key_values,
+                                        max_new_tokens=min(64, int(per_slot_tokens)),
+                                        no_repeat_ngram_size=int(no_repeat_ngram_size),
+                                        repetition_penalty=max(1.10, float(self.cfg.repetition_penalty)),
+                                    ).strip()
+                                ans_slot = _shorten_answer(ans_slot)
                                 if ans_slot:
                                     title = _slot_title(s, lang=lang)
                                     parts.append(f"{title}：{ans_slot}" if lang == "zh" else f"{title}: {ans_slot}")
