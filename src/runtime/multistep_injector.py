@@ -112,6 +112,12 @@ class MultiStepConfig:
     enable_speculative_layer: bool = False
     layer1_max_new_tokens: int = 256
     layer2_max_new_tokens: int = 192
+    # Deterministic layer compression (do not rely on prompt verbosity).
+    # These are hard caps applied in code for L1/L2 to prevent redundancy/truncation.
+    l1_max_sentences: int = 3
+    l1_max_tokens: int = 80
+    l2_max_sentences: int = 3
+    l2_max_tokens: int = 100
 
     # Schema KV injection scale (applied to V only; <1.0 weakens bias, >1.0 strengthens).
     # NOTE: Schema KV comes from kvbank_schema (precomputed K_ext/V_ext). No schema text is tokenized.
@@ -1154,70 +1160,43 @@ class MultiStepInjector:
                             h0, h1, h2 = _layer_headings(lang=lang)
                             layer0 = "\n".join(parts).strip()
 
-                            # Layer 1: Domain Prior (textbook-level). Uses base model knowledge only.
-                            # IMPORTANT: do NOT pretend evidence; do NOT introduce novel/speculative claims.
-                            if lang == "zh":
-                                supported_titles = [str(_slot_title(x, lang=lang)) for x in covered]
-                                unsupported_titles = [str(_slot_title(x, lang=lang)) for x in uncovered]
-                                l0_guard = (
-                                    "【边界约束（不要在输出中复述本段）】\n"
-                                    f"- 证据层已覆盖的方面：{('、'.join(supported_titles) if supported_titles else '无')}\n"
-                                    f"- 证据层暂无支持的方面：{('、'.join(unsupported_titles) if unsupported_titles else '无')}\n"
-                                )
-                                p1 = (
-                                    "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识，"
-                                    "给出完整、自然、接近 base LLM 的解释性回答。\n"
-                                    "约束：\n"
-                                    "- 只输出中文\n"
-                                    "- 不引用、不复述、不扩写证据层（L0）的具体表述（包括不复述其句子/措辞）\n"
-                                    "- 不编造具体实验数据、论文结论或精确数值\n"
-                                    "- 仅使用医学界长期共识（教科书级事实）\n"
-                                    "- 不输出推测性、假说性或前沿未证实内容（这些留给 L2）\n"
-                                    "- 除非用户问题明确要求，否则避免给出具体物种/学名/蜱种名称；更不要编造中文俗名（如必须提及，保留拉丁学名/英文名原样）\n"
-                                    "- 输出为要点列表（每条以“- ”开头），尽量覆盖用户问到的方面；避免重复\n"
-                                    "\n\n"
-                                    + l0_guard
-                                    + "\n用户问题：\n"
-                                    + str(query_text or prompt)
-                                    + "\n\n请直接输出 L1 内容本身（不要包含标题）："
-                                )
-                            else:
-                                supported_titles = [str(_slot_title(x, lang=lang)) for x in covered]
-                                unsupported_titles = [str(_slot_title(x, lang=lang)) for x in uncovered]
-                                l0_guard = (
-                                    "[Boundary constraints (do NOT repeat this block in output)]\n"
-                                    f"- Evidence-covered aspects: {(', '.join(supported_titles) if supported_titles else 'none')}\n"
-                                    f"- Evidence-unsupported aspects: {(', '.join(unsupported_titles) if unsupported_titles else 'none')}\n"
-                                )
-                                p1 = (
-                                    "You are a textbook-style medical assistant. Provide a domain-prior explanation "
-                                    "based on long-standing consensus knowledge only.\n"
-                                    "Constraints:\n"
-                                    "- Do not quote or restate any evidence-layer wording\n"
-                                    "- Do not invent experimental results, paper findings, or precise numbers\n"
-                                    "- No speculative or frontier hypotheses (reserve for L2)\n"
-                                    "- Output as bullet points (each starts with '- '), avoid repetition\n"
-                                    "\n\nUser question:\n"
-                                    + str(query_text or prompt)
-                                    + "\n\n"
-                                    + l0_guard
-                                    + "\n\nOutput L1 content only (no headings):"
-                                )
-                            layer1_raw = self._greedy_generate_with_past_prefix(
-                                model=model,
-                                tokenizer=tokenizer,
-                                prompt=p1,
-                                device=device,
-                                past_key_values=None,  # base LLM (no injection) for domain prior
-                                max_new_tokens=int(getattr(self.cfg, "layer1_max_new_tokens", 256)),
-                                no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
-                                repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
-                            ).strip()
-                            layer1 = layer1_raw.strip()
-                            # Ensure bullet formatting (best-effort) even if the model doesn't comply perfectly.
-                            if layer1 and not re.search(r"^\s*-\s+", layer1):
-                                layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
-                            # Deterministic bullet de-dupe to avoid repeated lines.
+                            # -------------------------
+                            # slot_epistemic_state (NOT in prompt)
+                            # -------------------------
+                            slot_epistemic_state: Dict[str, Dict[str, Any]] = {}
+                            for s in sorted(required_slots):
+                                ev = bool(s in set(covered))
+                                slot_epistemic_state[str(s)] = {
+                                    "evidence": ev,
+                                    "allowed_certainty": ("high" if ev else "low"),
+                                }
+
+                            def _approx_token_len(s: str, *, lang: str) -> int:
+                                # deterministic, cheap proxy
+                                if not s:
+                                    return 0
+                                if lang == "zh":
+                                    return len(re.findall(r"[\u4e00-\u9fff]", s)) + max(0, len(s) // 12)
+                                return len(re.findall(r"\w+", s))
+
+                            def _compress_text(s: str, *, lang: str, max_sentences: int, max_tokens: int) -> str:
+                                t = (s or "").strip()
+                                if not t:
+                                    return ""
+                                # split into sentences
+                                sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", t) if x.strip()]
+                                out: List[str] = []
+                                tok = 0
+                                for sent in sents:
+                                    if len(out) >= int(max_sentences):
+                                        break
+                                    add = _approx_token_len(sent, lang=lang)
+                                    if out and (tok + add) > int(max_tokens):
+                                        break
+                                    out.append(sent)
+                                    tok += add
+                                return " ".join(out).strip()
+
                             def _dedupe_bullets(s: str, *, max_items: int = 12) -> str:
                                 lines = [ln.rstrip() for ln in (s or "").splitlines() if ln.strip()]
                                 out: List[str] = []
@@ -1235,47 +1214,173 @@ class MultiStepInjector:
                                         break
                                 return "\n".join(out).strip()
 
-                            layer1 = _dedupe_bullets(layer1, max_items=12)
+                            # High-risk mechanism entities we forbid when allowed_certainty is low (L1+L2).
+                            _MECH_ENTITY_RE = re.compile(
+                                r"("
+                                r"receptor|受体|pathway|signaling|signal\s+pathway|通路|信号通路|"
+                                r"NF-?κB|JAK\s*/?\s*STAT|MAPK|TLR\d*|RIG-?I|MAVS|"
+                                r"interferon|IFN|ISG|IL-\d+|TNF|chemokine|cytokine|细胞因子|趋化因子|干扰素|"
+                                r"MHC|HLA|endocyt|内吞|"
+                                r")",
+                                re.IGNORECASE,
+                            )
+                            _LATIN_BINOMIAL_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[a-z][a-z0-9\-]{2,})\b")
+                            _UNCERTAINTY_RE_ZH = re.compile(r"(推测|可能|或许|尚未|尚不|不确定|仍不清楚|一般认为|通常认为|通常|一般|多见|往往)")
+
+                            # -------------------------
+                            # L1 generation (per-slot, governed by slot_epistemic_state)
+                            # -------------------------
+                            l1_lines: List[str] = []
+                            for s in sorted(required_slots):
+                                st = slot_epistemic_state.get(str(s), {})
+                                allowed = str(st.get("allowed_certainty") or "low")
+                                title = _slot_title(str(s), lang=lang)
+                                if lang == "zh":
+                                    if allowed == "low":
+                                        p1s = (
+                                            "用中文输出该方面的【领域共识】要点（1-2句），只描述常见现象与总体认识。"
+                                            "不要写具体分子机制/受体/信号通路/细节枚举；不要写具体数值或论文结论；不要推测。"
+                                            f"\n\n方面：{title}\n用户问题：{str(query_text or prompt)}\n\n只输出内容本身："
+                                        )
+                                    else:
+                                        p1s = (
+                                            "用中文输出该方面的【领域共识】要点（2-3句），教科书级总结即可。"
+                                            "不要写具体数值或论文结论；不要推测。"
+                                            f"\n\n方面：{title}\n用户问题：{str(query_text or prompt)}\n\n只输出内容本身："
+                                        )
+                                else:
+                                    if allowed == "low":
+                                        p1s = (
+                                            "Write 1-2 sentences of domain-prior consensus for this aspect. "
+                                            "No receptors/pathways/mechanistic enumerations. No numbers. No speculation.\n\n"
+                                            f"Aspect: {title}\nUser question: {str(query_text or prompt)}\n\nOutput text only:"
+                                        )
+                                    else:
+                                        p1s = (
+                                            "Write 2-3 sentences of textbook-level domain-prior consensus for this aspect. "
+                                            "No numbers. No speculation.\n\n"
+                                            f"Aspect: {title}\nUser question: {str(query_text or prompt)}\n\nOutput text only:"
+                                        )
+
+                                raw = self._greedy_generate_with_past_prefix(
+                                    model=model,
+                                    tokenizer=tokenizer,
+                                    prompt=p1s,
+                                    device=device,
+                                    past_key_values=None,
+                                    max_new_tokens=min(int(getattr(self.cfg, "layer1_max_new_tokens", 256)), 128),
+                                    no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                                    repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                                ).strip()
+                                txt = raw.strip()
+                                # deterministic filtering for low-certainty: strip risky entities and enforce non-deterministic tone
+                                if allowed == "low":
+                                    # remove mechanistic-entity sentences
+                                    sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", txt) if x.strip()]
+                                    kept: List[str] = []
+                                    for sent in sents:
+                                        if _MECH_ENTITY_RE.search(sent):
+                                            continue
+                                        if _LATIN_BINOMIAL_RE.search(sent):
+                                            continue
+                                        kept.append(sent)
+                                    txt = " ".join(kept).strip()
+                                    if lang == "zh" and txt and not _UNCERTAINTY_RE_ZH.search(txt):
+                                        txt = "通常认为，" + txt
+                                # compress hard
+                                txt = _compress_text(
+                                    txt,
+                                    lang=lang,
+                                    max_sentences=int(getattr(self.cfg, "l1_max_sentences", 3)),
+                                    max_tokens=int(getattr(self.cfg, "l1_max_tokens", 80)),
+                                )
+                                if txt:
+                                    l1_lines.append(f"- {title}：{txt}" if lang == "zh" else f"- {title}: {txt}")
+                                else:
+                                    # safe minimal fallback
+                                    if lang == "zh":
+                                        l1_lines.append(f"- {title}：一般可从临床现象与常识性医学认识进行理解，但缺少本库证据支撑具体细节。")
+                                    else:
+                                        l1_lines.append(f"- {title}: A conservative, textbook-level description is possible, but specific details are not supported by the current evidence set.")
+
+                            layer1 = _dedupe_bullets("\n".join(l1_lines).strip(), max_items=12)
+                            # absolute compression: ≤3 sentences total (across bullets) + ≤80 tokens
+                            layer1 = _compress_text(
+                                layer1,
+                                lang=lang,
+                                max_sentences=int(getattr(self.cfg, "l1_max_sentences", 3)),
+                                max_tokens=int(getattr(self.cfg, "l1_max_tokens", 80)),
+                            )
+                            if layer1 and not re.search(r"^\s*-\s+", layer1):
+                                layer1 = "- " + layer1.strip()
 
                             out_sections = [h0, layer0, "", h1, layer1, "", h2]
 
                             # Layer 2: Speculative/Open (optional)
                             if bool(getattr(self.cfg, "enable_speculative_layer", False)):
-                                if lang == "zh":
-                                    p2 = (
-                                        "你将补充【推测与研究进展】部分。"
-                                        "要求：只输出中文；必须使用不确定性措辞（例如“可能”“尚在研究中”）；"
-                                        "必须显式标注为推测；不要把推测伪装成证据。"
-                                        "不得回写或覆盖【证据支持的结论】与【领域共识解释】。"
-                                        "\n\n用户问题：\n"
-                                        + str(query_text or prompt)
-                                        + "\n\n证据支持的结论（供参考）：\n"
-                                        + layer0
-                                        + "\n\n请用要点列表输出（每条以“- ”开头）："
+                                # L2 is allowed by default only when any slot has low certainty.
+                                any_low = any((slot_epistemic_state[s]["allowed_certainty"] == "low") for s in slot_epistemic_state)
+                                if any_low:
+                                    l2_lines: List[str] = []
+                                    for s in sorted(required_slots):
+                                        st = slot_epistemic_state.get(str(s), {})
+                                        if str(st.get("allowed_certainty") or "low") != "low":
+                                            continue
+                                        title = _slot_title(str(s), lang=lang)
+                                        if lang == "zh":
+                                            p2s = (
+                                                "针对该方面给出1-2句解释性推测补充。"
+                                                "必须包含不确定性措辞（如“推测/可能/尚不清楚/仍待研究”）。"
+                                                "禁止具体分子机制、受体、信号通路、具体实验结论或数值。"
+                                                "\n\n方面："
+                                                + str(title)
+                                                + "\n用户问题："
+                                                + str(query_text or prompt)
+                                                + "\n\n只输出内容本身："
+                                            )
+                                        else:
+                                            p2s = (
+                                                "Provide 1-2 sentences of speculative/reasoned addendum for this aspect. "
+                                                "Must include uncertainty markers (may/might/unclear/under investigation). "
+                                                "No receptors/pathways/molecular entities, no numbers.\n\n"
+                                                f"Aspect: {title}\nUser question: {str(query_text or prompt)}\n\nOutput text only:"
+                                            )
+                                        raw = self._greedy_generate_with_past_prefix(
+                                            model=model,
+                                            tokenizer=tokenizer,
+                                            prompt=p2s,
+                                            device=device,
+                                            past_key_values=None,
+                                            max_new_tokens=min(int(getattr(self.cfg, "layer2_max_new_tokens", 192)), 96),
+                                            no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                                            repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                                        ).strip()
+                                        txt = raw.strip()
+                                        # Hard rules: must contain uncertainty markers; must not contain mech entities / latin binomial
+                                        if lang == "zh":
+                                            ok_unc = bool(_UNCERTAINTY_RE_ZH.search(txt))
+                                        else:
+                                            ok_unc = bool(re.search(r"(may|might|unclear|under\s+investigation|not\s+established)", txt, re.I))
+                                        if (not ok_unc) or _MECH_ENTITY_RE.search(txt) or _LATIN_BINOMIAL_RE.search(txt):
+                                            continue
+                                        txt = _compress_text(
+                                            txt,
+                                            lang=lang,
+                                            max_sentences=int(getattr(self.cfg, "l2_max_sentences", 3)),
+                                            max_tokens=int(getattr(self.cfg, "l2_max_tokens", 100)),
+                                        )
+                                        if txt:
+                                            l2_lines.append(f"- {title}：{txt}" if lang == "zh" else f"- {title}: {txt}")
+                                    layer2 = _dedupe_bullets("\n".join(l2_lines).strip(), max_items=8)
+                                    layer2 = _compress_text(
+                                        layer2,
+                                        lang=lang,
+                                        max_sentences=int(getattr(self.cfg, "l2_max_sentences", 3)),
+                                        max_tokens=int(getattr(self.cfg, "l2_max_tokens", 100)),
                                     )
+                                    out_sections.append(layer2 if layer2.strip() else ("- （推测层内容被规则过滤/暂无合规补充）" if lang == "zh" else "- (Speculative content filtered / none compliant.)"))
                                 else:
-                                    p2 = (
-                                        "Add a speculative/open section. Use uncertainty wording (e.g., may, might, under investigation) "
-                                        "and clearly label it as speculative. Do NOT present speculation as evidence.\n\nUser question:\n"
-                                        + str(query_text or prompt)
-                                        + "\n\nEvidence-backed conclusions:\n"
-                                        + layer0
-                                        + "\n\nOutput as bullet points (each starts with '- '):"
-                                    )
-                                layer2_raw = self._greedy_generate_with_past_prefix(
-                                    model=model,
-                                    tokenizer=tokenizer,
-                                    prompt=p2,
-                                    device=device,
-                                    past_key_values=None,
-                                    max_new_tokens=int(getattr(self.cfg, "layer2_max_new_tokens", 192)),
-                                    no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
-                                    repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
-                                ).strip()
-                                layer2 = layer2_raw.strip()
-                                if layer2 and not re.search(r"^\s*-\s+", layer2):
-                                    layer2 = "- " + layer2.lstrip("•").lstrip("-").strip()
-                                out_sections.append(layer2 if layer2 else ("- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)"))
+                                    out_sections.append("- （本次无需推测性补充）" if lang == "zh" else "- (No speculative addendum needed.)")
                             else:
                                 # L2 exists but is intentionally empty unless enabled.
                                 out_sections.append("- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)")
