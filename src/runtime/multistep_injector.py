@@ -104,6 +104,15 @@ class MultiStepConfig:
     # and do not call the model to elaborate those aspects.
     enable_evidence_slot_gating: bool = True
 
+    # Three knowledge layers output (docs/74_three_knowledge_layers.md)
+    # - Layer 0: Evidence-Bound (slot-gated, no expansion)
+    # - Layer 1: Domain Prior (textbook-level explanation; does NOT require evidence coverage)
+    # - Layer 2: Speculative/Open (optional; clearly marked; uncertainty wording)
+    enable_three_knowledge_layers: bool = True
+    enable_speculative_layer: bool = False
+    layer1_max_new_tokens: int = 256
+    layer2_max_new_tokens: int = 192
+
     # Schema KV injection scale (applied to V only; <1.0 weakens bias, >1.0 strengthens).
     # NOTE: Schema KV comes from kvbank_schema (precomputed K_ext/V_ext). No schema text is tokenized.
     schema_kv_scale: float = 1.0
@@ -911,14 +920,19 @@ class MultiStepInjector:
                 }.get(s, s)
             return s
 
+        def _layer_headings(*, lang: str) -> tuple[str, str, str]:
+            if lang == "zh":
+                return "【证据支持的结论】", "【领域共识解释】", "【推测与研究进展（可选）】"
+            return "[Evidence-backed conclusions]", "[Domain-prior explanation]", "[Speculative / open (optional)]"
+
         def _slot_uncertainty(slot: str, *, lang: str) -> str:
             s = (slot or "").strip().lower()
             if lang == "zh":
                 # Fixed uncertainty templates (no mechanistic steps).
                 return {
-                    "pathogenesis": "具体发病机制尚不明确。",
-                    "mechanism": "具体机制尚不明确。",
-                }.get(s, "该方面证据不足，无法确定。")
+                    "pathogenesis": "暂无证据支持（具体发病机制尚不明确）。",
+                    "mechanism": "暂无证据支持（具体机制尚不明确）。",
+                }.get(s, "暂无证据支持，无法确定。")
             return {
                 "pathogenesis": "The specific pathogenesis is not well established based on the provided evidence.",
                 "mechanism": "The specific mechanism is not well established based on the provided evidence.",
@@ -962,158 +976,254 @@ class MultiStepInjector:
             # Evidence is mandatory to retrieve; if evidence quotes are empty, we still provide fallback context.
             if not evidence and not raw_ctx:
                 print("[grounding] no evidence/raw texts found; proceeding without appended grounding.", flush=True)
-            if evidence:
-                if bool(self.cfg.enable_evidence_slot_gating):
-                    # Scheme A: evidence-aware slot gating (pre-generation guard).
-                    # - required_slots from user question
-                    # - evidence_covered_slots from selected evidence text
-                    qtxt = str(query_text or prompt)
-                    required_slots = set(infer_slots_from_query(qtxt))
-                    evidence_covered_slots = set(infer_slots_from_query(str(evidence)))
-                    if required_slots:
-                        lang = _lang_of_query(qtxt)
-                        covered = [s for s in sorted(required_slots) if s in evidence_covered_slots]
-                        uncovered = [s for s in sorted(required_slots) if s not in evidence_covered_slots]
+            if bool(self.cfg.enable_evidence_slot_gating):
+                # Scheme A: evidence-aware slot gating (pre-generation guard).
+                # - required_slots from user question
+                # - evidence_covered_slots from selected evidence text (may be empty)
+                qtxt = str(query_text or prompt)
+                required_slots = set(infer_slots_from_query(qtxt))
+                evidence_covered_slots = set(infer_slots_from_query(str(evidence or "")))
+                if required_slots:
+                    lang = _lang_of_query(qtxt)
+                    covered = [s for s in sorted(required_slots) if s in evidence_covered_slots]
+                    uncovered = [s for s in sorted(required_slots) if s not in evidence_covered_slots]
 
-                        parts: List[str] = []
-                        # Generate ONLY for covered slots (each as a separate generation call).
-                        if covered:
-                            # Cap per-slot length to avoid long looping paraphrases.
-                            per_slot_tokens = max(32, int(max_new_tokens // max(1, len(covered))))
-                            per_slot_tokens = min(int(per_slot_tokens), 96)
+                    parts: List[str] = []
+                    # Generate ONLY for covered slots (each as a separate generation call).
+                    if covered and str(evidence or "").strip():
+                        # Cap per-slot length to avoid long looping paraphrases.
+                        per_slot_tokens = max(32, int(max_new_tokens // max(1, len(covered))))
+                        per_slot_tokens = min(int(per_slot_tokens), 96)
 
-                            def _has_cjk(s: str) -> bool:
-                                return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
+                        def _has_cjk(s: str) -> bool:
+                            return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
 
-                            def _shorten_answer(s: str, *, lang: str) -> str:
-                                # Keep 1–2 non-duplicate sentences.
-                                s0 = (s or "").strip()
-                                if not s0:
-                                    return ""
-                                # Strip leading instruction-echo fragments like "(不重复)(不超过20字)".
-                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(不重复|不超过|简要|一句话|20字|1-2|1–2)[^\)\）]{0,24}[\)\）]\s*", "", s0)
-                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
-                                # Strip leading "rewrite suggestion" like "(简化为：...)" / "(改写为：...)".
-                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,80}(简化为|改写为|总结为|可简化为)\s*[:：][^\)\）]{0,160}[\)\）]\s*", "", s0)
-                                # Strip leading "N sentences" meta like "(3句，但只需前两句即可)" plus trailing punctuation spam.
-                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,120}(句|sentenc|前两句|前2句|只需|即可)[^\)\）]{0,120}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
-                                s0 = re.sub(r"^\s*[:：]{2,}\s*", "", s0)
-                                # Normalize repeated colons in-line.
-                                s0 = re.sub(r"[:：]{2,}", "：" if lang == "zh" else ":", s0)
-                                # Strip language directive echoes (ZH + translated EN).
-                                s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
-                                s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
-                                sents_all = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
-                                # For Chinese outputs:
-                                # - If we already have any CJK sentences, drop non-CJK to prevent EN evidence leakage.
-                                # - If we have no CJK at all, keep sentences (rewrite fallback will handle it).
-                                if lang == "zh":
-                                    if any(_has_cjk(x) for x in sents_all):
-                                        sents = [x for x in sents_all if _has_cjk(x)]
-                                    else:
-                                        sents = sents_all
+                        def _shorten_answer(s: str, *, lang: str) -> str:
+                            # Keep 1–2 non-duplicate sentences.
+                            s0 = (s or "").strip()
+                            if not s0:
+                                return ""
+                            # Strip leading instruction-echo fragments like "(不重复)(不超过20字)".
+                            s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(不重复|不超过|简要|一句话|20字|1-2|1–2)[^\)\）]{0,24}[\)\）]\s*", "", s0)
+                            s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
+                            # Strip leading "rewrite suggestion" like "(简化为：...)" / "(改写为：...)".
+                            s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,80}(简化为|改写为|总结为|可简化为)\s*[:：][^\)\）]{0,160}[\)\）]\s*", "", s0)
+                            # Strip leading "N sentences" meta like "(3句，但只需前两句即可)" plus trailing punctuation spam.
+                            s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,120}(句|sentenc|前两句|前2句|只需|即可)[^\)\）]{0,120}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
+                            s0 = re.sub(r"^\s*[:：]{2,}\s*", "", s0)
+                            # Normalize repeated colons in-line.
+                            s0 = re.sub(r"[:：]{2,}", "：" if lang == "zh" else ":", s0)
+                            # Strip language directive echoes (ZH + translated EN).
+                            s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
+                            s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
+                            # Strip leading markdown bullets.
+                            s0 = re.sub(r"^\s*[-\*\u2022]\s+", "", s0)
+                            # In ZH mode, avoid guessing Chinese common names for Latin species:
+                            # drop CJK parenthetical after a Latin binomial (e.g., "Haemaphysalis longicornis (璃眼蜱)").
+                            if lang == "zh":
+                                s0 = re.sub(
+                                    r"(\b[A-Z][a-z]+(?:\s+[a-z][a-z0-9\-]{2,})\b)\s*[\(\（][^\)\）]*[\u4e00-\u9fff][^\)\）]*[\)\）]",
+                                    r"\1",
+                                    s0,
+                                )
+                            sents_all = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
+                            # For Chinese outputs:
+                            # - If we already have any CJK sentences, drop non-CJK to prevent EN evidence leakage.
+                            # - If we have no CJK at all, keep sentences (rewrite fallback will handle it).
+                            if lang == "zh":
+                                if any(_has_cjk(x) for x in sents_all):
+                                    sents = [x for x in sents_all if _has_cjk(x)]
                                 else:
                                     sents = sents_all
-                                out_sents: List[str] = []
-                                seen_norm: set[str] = set()
-                                for x in sents:
-                                    # Normalize aggressively for de-dupe (handles hidden spaces/punct variations).
-                                    nx = x
-                                    nx = re.sub(r"\s+", "", nx)
-                                    nx = re.sub(r"[，,。\.；;：:！!？?\(\)\（\）\[\]\{\}<>\"'“”‘’\-—_]", "", nx)
-                                    nx = nx.lower()
-                                    if nx in seen_norm:
-                                        continue
-                                    seen_norm.add(nx)
-                                    out_sents.append(x)
-                                    if len(out_sents) >= 2:
-                                        break
-                                return " ".join(out_sents).strip()
+                            else:
+                                sents = sents_all
+                            out_sents: List[str] = []
+                            seen_norm: set[str] = set()
+                            for x in sents:
+                                # Normalize aggressively for de-dupe (handles hidden spaces/punct variations).
+                                nx = x
+                                nx = re.sub(r"\s+", "", nx)
+                                nx = re.sub(r"[，,。\.；;：:！!？?\(\)\（\）\[\]\{\}<>\"'“”‘’\-—_]", "", nx)
+                                nx = nx.lower()
+                                if nx in seen_norm:
+                                    continue
+                                seen_norm.add(nx)
+                                out_sents.append(x)
+                                if len(out_sents) >= 2:
+                                    break
+                            return " ".join(out_sents).strip()
 
-                            for s in covered:
-                                q_plain = _slot_question(s, lang=lang).strip()
-                                q_slot = q_plain
-                                # Covered-slot generation: keep prompt minimal (avoid instruction-echo degradation).
-                                # Cross-lingual policy: we do NOT translate evidence text; we may summarize its meaning in target language.
-                                p_slot = q_slot + "\n\n" + evidence
+                        for s in covered:
+                            q_plain = _slot_question(s, lang=lang).strip()
+                            q_slot = q_plain
+                            # Covered-slot generation: keep prompt minimal (avoid instruction-echo degradation).
+                            # Cross-lingual policy: we do NOT translate evidence text; we may summarize its meaning in target language.
+                            p_slot = q_slot + "\n\n" + evidence
+                            ans_slot = self._greedy_generate_with_past_prefix(
+                                model=model,
+                                tokenizer=tokenizer,
+                                prompt=p_slot,
+                                device=device,
+                                past_key_values=last_past_key_values,
+                                max_new_tokens=int(per_slot_tokens),
+                                no_repeat_ngram_size=int(no_repeat_ngram_size),
+                                repetition_penalty=float(self.cfg.repetition_penalty),
+                            ).strip()
+                            # Remove question echo if present.
+                            if q_plain:
+                                ans_slot = ans_slot.replace(q_plain, " ").strip()
+                            # One deterministic retry if output language mismatches (evidence may be EN-heavy).
+                            if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
+                                # Instead of forcing during first-pass generation, do a rewrite-style summary into Chinese.
+                                # Evidence text is included verbatim (unchanged); output must be Chinese only.
+                                p_retry = (
+                                    "根据以下证据，用中文给出一句结论回答问题。"
+                                    "不要翻译/改写证据原文，不要输出英文，不要复述问题。"
+                                    "不要给拉丁学名/英文名编造中文俗名；如需提及，请保留原学名/英文名。"
+                                    "\n\n问题："
+                                    + q_plain
+                                    + "\n\n证据：\n"
+                                    + evidence
+                                )
                                 ans_slot = self._greedy_generate_with_past_prefix(
                                     model=model,
                                     tokenizer=tokenizer,
-                                    prompt=p_slot,
+                                    prompt=p_retry,
                                     device=device,
                                     past_key_values=last_past_key_values,
-                                    max_new_tokens=int(per_slot_tokens),
+                                    max_new_tokens=min(64, int(per_slot_tokens)),
                                     no_repeat_ngram_size=int(no_repeat_ngram_size),
-                                    repetition_penalty=float(self.cfg.repetition_penalty),
+                                    repetition_penalty=max(1.10, float(self.cfg.repetition_penalty)),
                                 ).strip()
-                                # Remove question echo if present.
                                 if q_plain:
                                     ans_slot = ans_slot.replace(q_plain, " ").strip()
-                                # One deterministic retry if output language mismatches (evidence may be EN-heavy).
-                                if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
-                                    # Instead of forcing during first-pass generation, do a rewrite-style summary into Chinese.
-                                    # Evidence text is included verbatim (unchanged); output must be Chinese only.
-                                    p_retry = (
-                                        "根据以下证据，用中文给出一句结论回答问题。"
-                                        "不要翻译/改写证据原文，不要输出英文，不要复述问题。"
-                                        "\n\n问题："
-                                        + q_plain
-                                        + "\n\n证据：\n"
-                                        + evidence
-                                    )
-                                    ans_slot = self._greedy_generate_with_past_prefix(
-                                        model=model,
-                                        tokenizer=tokenizer,
-                                        prompt=p_retry,
-                                        device=device,
-                                        past_key_values=last_past_key_values,
-                                        max_new_tokens=min(64, int(per_slot_tokens)),
-                                        no_repeat_ngram_size=int(no_repeat_ngram_size),
-                                        repetition_penalty=max(1.10, float(self.cfg.repetition_penalty)),
-                                    ).strip()
-                                    if q_plain:
-                                        ans_slot = ans_slot.replace(q_plain, " ").strip()
-                                # Final very-strong retry (still deterministic) if we are not in Chinese yet.
-                                if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
-                                    p_retry2 = (
-                                        "只输出中文答案（一句话）。不要输出英文。不要复述问题。"
-                                        "\n\n问题："
-                                        + q_plain
-                                        + "\n\n证据：\n"
-                                        + evidence
-                                    )
-                                    ans_slot = self._greedy_generate_with_past_prefix(
-                                        model=model,
-                                        tokenizer=tokenizer,
-                                        prompt=p_retry2,
-                                        device=device,
-                                        past_key_values=last_past_key_values,
-                                        max_new_tokens=48,
-                                        no_repeat_ngram_size=int(no_repeat_ngram_size),
-                                        repetition_penalty=max(1.12, float(self.cfg.repetition_penalty)),
-                                    ).strip()
-                                    if q_plain:
-                                        ans_slot = ans_slot.replace(q_plain, " ").strip()
-                                ans_slot = _shorten_answer(ans_slot, lang=lang)
-                                # If still no Chinese, fall back to a minimal template (keeps policy: no hallucinated detail).
-                                if lang == "zh" and (not ans_slot or not _has_cjk(ans_slot)):
-                                    ev_l = (evidence or "").lower()
-                                    if s.strip().lower() == "transmission" and ("tick" in ev_l or "蜱" in evidence):
-                                        ans_slot = "主要通过蜱叮咬传播。"
-                                    else:
-                                        ans_slot = "该方面证据不足，无法确定。"
-                                if ans_slot:
-                                    title = _slot_title(s, lang=lang)
-                                    parts.append(f"{title}：{ans_slot}" if lang == "zh" else f"{title}: {ans_slot}")
+                            # Final very-strong retry (still deterministic) if we are not in Chinese yet.
+                            if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
+                                p_retry2 = (
+                                    "只输出中文答案（一句话）。不要输出英文。不要复述问题。"
+                                    "不要给拉丁学名/英文名编造中文俗名；如需提及，请保留原学名/英文名。"
+                                    "\n\n问题："
+                                    + q_plain
+                                    + "\n\n证据：\n"
+                                    + evidence
+                                )
+                                ans_slot = self._greedy_generate_with_past_prefix(
+                                    model=model,
+                                    tokenizer=tokenizer,
+                                    prompt=p_retry2,
+                                    device=device,
+                                    past_key_values=last_past_key_values,
+                                    max_new_tokens=48,
+                                    no_repeat_ngram_size=int(no_repeat_ngram_size),
+                                    repetition_penalty=max(1.12, float(self.cfg.repetition_penalty)),
+                                ).strip()
+                                if q_plain:
+                                    ans_slot = ans_slot.replace(q_plain, " ").strip()
+                            ans_slot = _shorten_answer(ans_slot, lang=lang)
+                            # If still no Chinese, fall back to a minimal template (keeps policy: no hallucinated detail).
+                            if lang == "zh" and (not ans_slot or not _has_cjk(ans_slot)):
+                                ev_l = (evidence or "").lower()
+                                if s.strip().lower() == "transmission" and ("tick" in ev_l or "蜱" in evidence):
+                                    ans_slot = "主要通过蜱叮咬传播。"
+                                else:
+                                    ans_slot = "该方面证据不足，无法确定。"
+                            if ans_slot:
+                                title = _slot_title(s, lang=lang)
+                                # Layer 0 statement only (evidence-bound conclusion).
+                                parts.append(f"- {title}：{ans_slot}" if lang == "zh" else f"- {title}: {ans_slot}")
 
-                        # For uncovered required slots, emit fixed uncertainty templates only.
-                        for s in uncovered:
-                            title = _slot_title(s, lang=lang)
-                            tmpl = _slot_uncertainty(s, lang=lang)
-                            parts.append(f"{title}：{tmpl}" if lang == "zh" else f"{title}: {tmpl}")
+                    # For uncovered required slots, emit fixed uncertainty templates only.
+                    for s in uncovered:
+                        title = _slot_title(s, lang=lang)
+                        tmpl = _slot_uncertainty(s, lang=lang)
+                        parts.append(f"- {title}：{tmpl}" if lang == "zh" else f"- {title}: {tmpl}")
 
-                        if parts:
-                            return "\n".join(parts).strip(), step_debugs
+                    if parts:
+                        # ---- Three knowledge layers (L0 slot-gated; L1/L2 do NOT use slot gating) ----
+                        if bool(self.cfg.enable_three_knowledge_layers):
+                            h0, h1, h2 = _layer_headings(lang=lang)
+                            layer0 = "\n".join(parts).strip()
+
+                            # Layer 1: Domain Prior (textbook-level). Uses base model knowledge only.
+                            # IMPORTANT: do NOT pretend evidence; do NOT introduce novel/speculative claims.
+                            if lang == "zh":
+                                p1 = (
+                                    "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识，"
+                                    "对用户问题给出【领域共识解释】。"
+                                    "要求：只输出中文；不引用或复述证据原文；"
+                                    "除非【证据支持的结论】明确提及，否则不要给出具体蜱种/学名/物种名称；"
+                                    "不要编造具体物种中文俗名（如需提及拉丁学名/英文名，请原样保留）；"
+                                    "不要给出最新假说/研究争议；避免具体数值与未经证据支持的细节。"
+                                    "\n\n用户问题：\n"
+                                    + str(query_text or prompt)
+                                    + "\n\n证据支持的结论（仅供对齐，不要当作证据引用）：\n"
+                                    + layer0
+                                    + "\n\n请输出领域共识解释正文："
+                                )
+                            else:
+                                p1 = (
+                                    "You are a textbook-style medical assistant. Provide a domain-prior explanation "
+                                    "based on long-standing consensus knowledge only. "
+                                    "Do NOT quote evidence. Do NOT add speculative or controversial claims. "
+                                    "Do NOT name specific species/taxa unless explicitly mentioned in the evidence-backed conclusions."
+                                    "\n\nUser question:\n"
+                                    + str(query_text or prompt)
+                                    + "\n\nEvidence-backed conclusions (for alignment only, do not cite):\n"
+                                    + layer0
+                                    + "\n\nOutput the domain-prior explanation text:"
+                                )
+                            layer1_raw = self._greedy_generate_with_past_prefix(
+                                model=model,
+                                tokenizer=tokenizer,
+                                prompt=p1,
+                                device=device,
+                                past_key_values=None,  # base LLM (no injection) for domain prior
+                                max_new_tokens=int(getattr(self.cfg, "layer1_max_new_tokens", 256)),
+                                no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                                repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                            ).strip()
+                            layer1 = layer1_raw.strip()
+
+                            out_sections = [h0, layer0, "", h1, layer1]
+
+                            # Layer 2: Speculative/Open (optional)
+                            if bool(getattr(self.cfg, "enable_speculative_layer", False)):
+                                if lang == "zh":
+                                    p2 = (
+                                        "你将补充【推测与研究进展】部分。"
+                                        "要求：只输出中文；必须使用不确定性措辞（例如“可能”“尚在研究中”）；"
+                                        "必须显式标注为推测；不要把推测伪装成证据。"
+                                        "\n\n用户问题：\n"
+                                        + str(query_text or prompt)
+                                        + "\n\n证据支持的结论（供参考）：\n"
+                                        + layer0
+                                        + "\n\n请输出推测与研究进展正文："
+                                    )
+                                else:
+                                    p2 = (
+                                        "Add a speculative/open section. Use uncertainty wording (e.g., may, might, under investigation) "
+                                        "and clearly label it as speculative. Do NOT present speculation as evidence.\n\nUser question:\n"
+                                        + str(query_text or prompt)
+                                        + "\n\nEvidence-backed conclusions:\n"
+                                        + layer0
+                                        + "\n\nOutput speculative/open text:"
+                                    )
+                                layer2_raw = self._greedy_generate_with_past_prefix(
+                                    model=model,
+                                    tokenizer=tokenizer,
+                                    prompt=p2,
+                                    device=device,
+                                    past_key_values=None,
+                                    max_new_tokens=int(getattr(self.cfg, "layer2_max_new_tokens", 192)),
+                                    no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                                    repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                                ).strip()
+                                out_sections.extend(["", h2, layer2_raw.strip()])
+
+                            return "\n".join([x for x in out_sections if x is not None]).strip(), step_debugs
+
+                        # Legacy: return just Layer 0 statements.
+                        return "\n".join(parts).strip(), step_debugs
 
                 # Default: Prompt = user question + evidence text only.
                 prompt_for_final = prompt + "\n\n" + evidence

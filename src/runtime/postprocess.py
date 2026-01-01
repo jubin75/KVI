@@ -568,6 +568,17 @@ def _looks_like_garbage_text(s: str) -> bool:
     t = (s or "").strip()
     if not t:
         return True
+    # Allow bracketed section headings used by the runtime (three knowledge layers).
+    # These are intentional structure markers, not "template residue".
+    if t in {
+        "【证据支持的结论】",
+        "【领域共识解释】",
+        "【推测与研究进展（可选）】",
+        "[Evidence-backed conclusions]",
+        "[Domain-prior explanation]",
+        "[Speculative / open (optional)]",
+    }:
+        return False
     # Template residue
     if _TEMPLATE_GARBAGE_RE.search(t):
         # But don't drop if it's a long, contentful sentence with bracket usage; be conservative.
