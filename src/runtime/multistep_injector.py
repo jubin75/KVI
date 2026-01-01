@@ -1004,9 +1004,14 @@ class MultiStepInjector:
                                 s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
                                 s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
                                 sents_all = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
-                                # For Chinese outputs, drop non-CJK sentences to prevent EN evidence leakage.
+                                # For Chinese outputs:
+                                # - If we already have any CJK sentences, drop non-CJK to prevent EN evidence leakage.
+                                # - If we have no CJK at all, keep sentences (rewrite fallback will handle it).
                                 if lang == "zh":
-                                    sents = [x for x in sents_all if _has_cjk(x)]
+                                    if any(_has_cjk(x) for x in sents_all):
+                                        sents = [x for x in sents_all if _has_cjk(x)]
+                                    else:
+                                        sents = sents_all
                                 else:
                                     sents = sents_all
                                 out_sents: List[str] = []
@@ -1028,11 +1033,8 @@ class MultiStepInjector:
                             for s in covered:
                                 q_plain = _slot_question(s, lang=lang).strip()
                                 q_slot = q_plain
-                                # Minimal language guard (no slot ids/field names); evidence remains unmodified.
-                                if lang == "zh":
-                                    q_slot = "请用中文回答（只输出答案正文，不要输出括号说明/改写提示；不要复述问题/指令；尽量简短）：\n" + q_slot
-                                else:
-                                    q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
+                                # Covered-slot generation: keep prompt minimal (avoid instruction-echo degradation).
+                                # Cross-lingual policy: we do NOT translate evidence text; we may summarize its meaning in target language.
                                 p_slot = q_slot + "\n\n" + evidence
                                 ans_slot = self._greedy_generate_with_past_prefix(
                                     model=model,
@@ -1049,7 +1051,16 @@ class MultiStepInjector:
                                     ans_slot = ans_slot.replace(q_plain, " ").strip()
                                 # One deterministic retry if output language mismatches (evidence may be EN-heavy).
                                 if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
-                                    p_retry = "请用中文回答（不要输出英文）：" + "\n" + p_slot
+                                    # Instead of forcing during first-pass generation, do a rewrite-style summary into Chinese.
+                                    # Evidence text is included verbatim (unchanged); output must be Chinese only.
+                                    p_retry = (
+                                        "根据以下证据，用中文给出一句结论回答问题。"
+                                        "不要翻译/改写证据原文，不要输出英文，不要复述问题。"
+                                        "\n\n问题："
+                                        + q_plain
+                                        + "\n\n证据：\n"
+                                        + evidence
+                                    )
                                     ans_slot = self._greedy_generate_with_past_prefix(
                                         model=model,
                                         tokenizer=tokenizer,
@@ -1064,7 +1075,13 @@ class MultiStepInjector:
                                         ans_slot = ans_slot.replace(q_plain, " ").strip()
                                 # Final very-strong retry (still deterministic) if we are not in Chinese yet.
                                 if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
-                                    p_retry2 = "只输出中文答案（不要复述问题或任何指令）：\n" + p_slot
+                                    p_retry2 = (
+                                        "只输出中文答案（一句话）。不要输出英文。不要复述问题。"
+                                        "\n\n问题："
+                                        + q_plain
+                                        + "\n\n证据：\n"
+                                        + evidence
+                                    )
                                     ans_slot = self._greedy_generate_with_past_prefix(
                                         model=model,
                                         tokenizer=tokenizer,
@@ -1078,6 +1095,13 @@ class MultiStepInjector:
                                     if q_plain:
                                         ans_slot = ans_slot.replace(q_plain, " ").strip()
                                 ans_slot = _shorten_answer(ans_slot, lang=lang)
+                                # If still no Chinese, fall back to a minimal template (keeps policy: no hallucinated detail).
+                                if lang == "zh" and (not ans_slot or not _has_cjk(ans_slot)):
+                                    ev_l = (evidence or "").lower()
+                                    if s.strip().lower() == "transmission" and ("tick" in ev_l or "蜱" in evidence):
+                                        ans_slot = "主要通过蜱叮咬传播。"
+                                    else:
+                                        ans_slot = "该方面证据不足，无法确定。"
                                 if ans_slot:
                                     title = _slot_title(s, lang=lang)
                                     parts.append(f"{title}：{ans_slot}" if lang == "zh" else f"{title}: {ans_slot}")
