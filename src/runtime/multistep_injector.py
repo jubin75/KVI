@@ -863,7 +863,7 @@ class MultiStepInjector:
             """
             s = (slot or "").strip().lower()
             if lang == "zh":
-                q0 = {
+                return {
                     "transmission": "该疾病的主要传播途径是什么？",
                     "pathogenesis": "该疾病的发病机制是什么？",
                     "clinical_features": "该疾病的主要临床表现是什么？",
@@ -877,8 +877,6 @@ class MultiStepInjector:
                     "overview": "请简要概述该疾病。",
                     "mechanism": "该疾病的机制是什么？",
                 }.get(s, "请回答用户问题中相关方面。")
-                # Minimal language guard (no slot ids/field names).
-                return "请用中文回答：" + q0
             return {
                 "transmission": "What is the primary mode of transmission?",
                 "pathogenesis": "What is the pathogenesis?",
@@ -995,6 +993,9 @@ class MultiStepInjector:
                                 # Strip leading instruction-echo fragments like "(不重复)(不超过20字)".
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(不重复|不超过|简要|一句话|20字|1-2|1–2)[^\)\）]{0,24}[\)\）]\s*", "", s0)
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
+                                # Strip language directive echoes (ZH + translated EN).
+                                s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
+                                s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
                                 sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
                                 out_sents: List[str] = []
                                 seen_norm: set[str] = set()
@@ -1013,10 +1014,11 @@ class MultiStepInjector:
                                 return " ".join(out_sents).strip()
 
                             for s in covered:
-                                q_slot = _slot_question(s, lang=lang)
+                                q_plain = _slot_question(s, lang=lang).strip()
+                                q_slot = q_plain
                                 # Minimal language guard (no slot ids/field names); evidence remains unmodified.
                                 if lang == "zh":
-                                    q_slot = "请用中文回答：" + q_slot
+                                    q_slot = "请用中文回答（不要复述问题/指令，只给结论，1-2句）：\n" + q_slot
                                 else:
                                     q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
                                 p_slot = q_slot + "\n\n" + evidence
@@ -1030,6 +1032,9 @@ class MultiStepInjector:
                                     no_repeat_ngram_size=int(no_repeat_ngram_size),
                                     repetition_penalty=float(self.cfg.repetition_penalty),
                                 ).strip()
+                                # Remove question echo if present.
+                                if q_plain:
+                                    ans_slot = ans_slot.replace(q_plain, " ").strip()
                                 # One deterministic retry if output language mismatches (evidence may be EN-heavy).
                                 if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
                                     p_retry = "请用中文回答（不要输出英文）：" + "\n" + p_slot
@@ -1043,6 +1048,23 @@ class MultiStepInjector:
                                         no_repeat_ngram_size=int(no_repeat_ngram_size),
                                         repetition_penalty=max(1.10, float(self.cfg.repetition_penalty)),
                                     ).strip()
+                                    if q_plain:
+                                        ans_slot = ans_slot.replace(q_plain, " ").strip()
+                                # Final very-strong retry (still deterministic) if we are not in Chinese yet.
+                                if lang == "zh" and ans_slot and (not _has_cjk(ans_slot)):
+                                    p_retry2 = "只输出中文答案（不要复述问题或任何指令）：\n" + p_slot
+                                    ans_slot = self._greedy_generate_with_past_prefix(
+                                        model=model,
+                                        tokenizer=tokenizer,
+                                        prompt=p_retry2,
+                                        device=device,
+                                        past_key_values=last_past_key_values,
+                                        max_new_tokens=48,
+                                        no_repeat_ngram_size=int(no_repeat_ngram_size),
+                                        repetition_penalty=max(1.12, float(self.cfg.repetition_penalty)),
+                                    ).strip()
+                                    if q_plain:
+                                        ans_slot = ans_slot.replace(q_plain, " ").strip()
                                 ans_slot = _shorten_answer(ans_slot)
                                 if ans_slot:
                                     title = _slot_title(s, lang=lang)
