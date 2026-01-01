@@ -985,7 +985,7 @@ class MultiStepInjector:
                             def _has_cjk(s: str) -> bool:
                                 return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
 
-                            def _shorten_answer(s: str) -> str:
+                            def _shorten_answer(s: str, *, lang: str) -> str:
                                 # Keep 1–2 non-duplicate sentences.
                                 s0 = (s or "").strip()
                                 if not s0:
@@ -995,10 +995,20 @@ class MultiStepInjector:
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
                                 # Strip leading "rewrite suggestion" like "(简化为：...)" / "(改写为：...)".
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,80}(简化为|改写为|总结为|可简化为)\s*[:：][^\)\）]{0,160}[\)\）]\s*", "", s0)
+                                # Strip leading "N sentences" meta like "(3句，但只需前两句即可)" plus trailing punctuation spam.
+                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,120}(句|sentenc|前两句|前2句|只需|即可)[^\)\）]{0,120}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
+                                s0 = re.sub(r"^\s*[:：]{2,}\s*", "", s0)
+                                # Normalize repeated colons in-line.
+                                s0 = re.sub(r"[:：]{2,}", "：" if lang == "zh" else ":", s0)
                                 # Strip language directive echoes (ZH + translated EN).
                                 s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
                                 s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
-                                sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
+                                sents_all = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", s0) if x.strip()]
+                                # For Chinese outputs, drop non-CJK sentences to prevent EN evidence leakage.
+                                if lang == "zh":
+                                    sents = [x for x in sents_all if _has_cjk(x)]
+                                else:
+                                    sents = sents_all
                                 out_sents: List[str] = []
                                 seen_norm: set[str] = set()
                                 for x in sents:
@@ -1020,7 +1030,7 @@ class MultiStepInjector:
                                 q_slot = q_plain
                                 # Minimal language guard (no slot ids/field names); evidence remains unmodified.
                                 if lang == "zh":
-                                    q_slot = "请用中文回答（只输出答案正文，不要输出括号说明/改写提示；不要复述问题/指令；1-2句）：\n" + q_slot
+                                    q_slot = "请用中文回答（只输出答案正文，不要输出括号说明/改写提示；不要复述问题/指令；尽量简短）：\n" + q_slot
                                 else:
                                     q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
                                 p_slot = q_slot + "\n\n" + evidence
@@ -1067,7 +1077,7 @@ class MultiStepInjector:
                                     ).strip()
                                     if q_plain:
                                         ans_slot = ans_slot.replace(q_plain, " ").strip()
-                                ans_slot = _shorten_answer(ans_slot)
+                                ans_slot = _shorten_answer(ans_slot, lang=lang)
                                 if ans_slot:
                                     title = _slot_title(s, lang=lang)
                                     parts.append(f"{title}：{ans_slot}" if lang == "zh" else f"{title}: {ans_slot}")
