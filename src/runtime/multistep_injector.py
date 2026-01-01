@@ -1157,32 +1157,51 @@ class MultiStepInjector:
                             # Layer 1: Domain Prior (textbook-level). Uses base model knowledge only.
                             # IMPORTANT: do NOT pretend evidence; do NOT introduce novel/speculative claims.
                             if lang == "zh":
+                                supported_titles = [str(_slot_title(x, lang=lang)) for x in covered]
+                                unsupported_titles = [str(_slot_title(x, lang=lang)) for x in uncovered]
+                                l0_guard = (
+                                    "【边界约束（不要在输出中复述本段）】\n"
+                                    f"- 证据层已覆盖的方面：{('、'.join(supported_titles) if supported_titles else '无')}\n"
+                                    f"- 证据层暂无支持的方面：{('、'.join(unsupported_titles) if unsupported_titles else '无')}\n"
+                                )
                                 p1 = (
                                     "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识，"
-                                        "对用户问题给出【领域共识解释】。"
-                                    "要求：只输出中文；不引用或复述证据原文；"
-                                    "除非【证据支持的结论】明确提及，否则不要给出具体蜱种/学名/物种名称；"
-                                    "不要编造具体物种中文俗名（如需提及拉丁学名/英文名，请原样保留）；"
-                                        "不要给出最新研究/假说/研究争议；避免具体数值与未经证据支持的细节。"
-                                        "不得与【证据支持的结论】冲突；若不确定请保持保守、以证据结论为准。"
-                                    "\n\n用户问题：\n"
+                                    "给出完整、自然、接近 base LLM 的解释性回答。\n"
+                                    "约束：\n"
+                                    "- 只输出中文\n"
+                                    "- 不引用、不复述、不扩写证据层（L0）的具体表述（包括不复述其句子/措辞）\n"
+                                    "- 不编造具体实验数据、论文结论或精确数值\n"
+                                    "- 仅使用医学界长期共识（教科书级事实）\n"
+                                    "- 不输出推测性、假说性或前沿未证实内容（这些留给 L2）\n"
+                                    "- 除非用户问题明确要求，否则避免给出具体物种/学名/蜱种名称；更不要编造中文俗名（如必须提及，保留拉丁学名/英文名原样）\n"
+                                    "- 输出为要点列表（每条以“- ”开头），尽量覆盖用户问到的方面；避免重复\n"
+                                    "\n\n"
+                                    + l0_guard
+                                    + "\n用户问题：\n"
                                     + str(query_text or prompt)
-                                    + "\n\n证据支持的结论（仅供对齐，不要当作证据引用）：\n"
-                                    + layer0
-                                    + "\n\n请用要点列表输出（每条以“- ”开头）："
+                                    + "\n\n请直接输出 L1 内容本身（不要包含标题）："
                                 )
                             else:
+                                supported_titles = [str(_slot_title(x, lang=lang)) for x in covered]
+                                unsupported_titles = [str(_slot_title(x, lang=lang)) for x in uncovered]
+                                l0_guard = (
+                                    "[Boundary constraints (do NOT repeat this block in output)]\n"
+                                    f"- Evidence-covered aspects: {(', '.join(supported_titles) if supported_titles else 'none')}\n"
+                                    f"- Evidence-unsupported aspects: {(', '.join(unsupported_titles) if unsupported_titles else 'none')}\n"
+                                )
                                 p1 = (
                                     "You are a textbook-style medical assistant. Provide a domain-prior explanation "
-                                    "based on long-standing consensus knowledge only. "
-                                    "Do NOT quote evidence. Do NOT add speculative or controversial claims. "
-                                    "Do NOT name specific species/taxa unless explicitly mentioned in the evidence-backed conclusions."
-                                    " Do NOT contradict the evidence-backed conclusions; if unsure, defer to them."
+                                    "based on long-standing consensus knowledge only.\n"
+                                    "Constraints:\n"
+                                    "- Do not quote or restate any evidence-layer wording\n"
+                                    "- Do not invent experimental results, paper findings, or precise numbers\n"
+                                    "- No speculative or frontier hypotheses (reserve for L2)\n"
+                                    "- Output as bullet points (each starts with '- '), avoid repetition\n"
                                     "\n\nUser question:\n"
                                     + str(query_text or prompt)
-                                    + "\n\nEvidence-backed conclusions (for alignment only, do not cite):\n"
-                                    + layer0
-                                    + "\n\nOutput as bullet points (each starts with '- '):"
+                                    + "\n\n"
+                                    + l0_guard
+                                    + "\n\nOutput L1 content only (no headings):"
                                 )
                             layer1_raw = self._greedy_generate_with_past_prefix(
                                 model=model,
@@ -1198,6 +1217,25 @@ class MultiStepInjector:
                             # Ensure bullet formatting (best-effort) even if the model doesn't comply perfectly.
                             if layer1 and not re.search(r"^\s*-\s+", layer1):
                                 layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
+                            # Deterministic bullet de-dupe to avoid repeated lines.
+                            def _dedupe_bullets(s: str, *, max_items: int = 12) -> str:
+                                lines = [ln.rstrip() for ln in (s or "").splitlines() if ln.strip()]
+                                out: List[str] = []
+                                seen: set[str] = set()
+                                for ln in lines:
+                                    m = re.match(r"^\s*-\s*(.+)$", ln)
+                                    body = (m.group(1) if m else ln).strip()
+                                    key = re.sub(r"\s+", "", body).lower()
+                                    key = re.sub(r"[，,。\.；;：:！!？?\(\)\（\）\[\]\{\}<>\"'“”‘’\-—_]", "", key)
+                                    if not key or key in seen:
+                                        continue
+                                    seen.add(key)
+                                    out.append(f"- {body}")
+                                    if len(out) >= int(max_items):
+                                        break
+                                return "\n".join(out).strip()
+
+                            layer1 = _dedupe_bullets(layer1, max_items=12)
 
                             out_sections = [h0, layer0, "", h1, layer1, "", h2]
 
