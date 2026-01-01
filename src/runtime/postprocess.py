@@ -579,6 +579,9 @@ def _looks_like_garbage_text(s: str) -> bool:
         "[Speculative / open (optional)]",
     }:
         return False
+    # Allow strict markdown headings for three-layer output.
+    if t.startswith("### L0") or t.startswith("### L1") or t.startswith("### L2"):
+        return False
     # Template residue
     if _TEMPLATE_GARBAGE_RE.search(t):
         # But don't drop if it's a long, contentful sentence with bracket usage; be conservative.

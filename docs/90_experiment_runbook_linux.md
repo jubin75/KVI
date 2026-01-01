@@ -494,6 +494,9 @@ python -u scripts/run_multistep_inject_demo.py \
   --use_struct_slots \
   --ground_with_selected_text \
   --no_repeat_ngram_size 12 \
+  --enable_layer2 \
+  --layer1_max_new_tokens 256 \
+  --layer2_max_new_tokens 192 \
   --max_new_tokens 256 \
   --debug_print_candidates 10
 ```
@@ -503,6 +506,18 @@ python -u scripts/run_multistep_inject_demo.py \
 - StepDebug.note 应包含 `schema_selector=...`（slot 覆盖信息）
 - 若选中 schema 不引入新 slot → 停止（`stop_reason=no_new_slots`）
 - 答案末尾只会 append `【证据句】/【回退上下文（raw）】`，**schema text 不会出现在 prompt**
+
+三层知识输出（强制格式）：
+- 注入后的回答会严格分成三段（永不跳层/合并）：
+  - `### L0｜证据支持的结论`（Evidence-Bound：仅基于 evidence/文档，不允许扩写；证据不足必须写“暂无证据支持”）
+  - `### L1｜领域共识（LLM 内部知识）`（Domain Prior：教科书级共识解释；不得与 L0 冲突；禁止“最新研究/假说”）
+  - `### L2｜推测性或解释性补充`（Speculative：默认关闭；开启后必须显式“推测/尚未完全证实”，不得覆盖 L0/L1）
+
+开启 L2（可选）：
+- 默认 L2 不生成，只保留占位；如需开启推测层，给 demo 加：
+  - `--enable_layer2`
+  - 可调 token 预算：`--layer2_max_new_tokens 192`
+  - L1 token 预算：`--layer1_max_new_tokens 256`
 
 ### 2.1（legacy）Evidence-first 注入
 

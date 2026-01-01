@@ -921,9 +921,19 @@ class MultiStepInjector:
             return s
 
         def _layer_headings(*, lang: str) -> tuple[str, str, str]:
+            # Strict output format (see docs/74_three_knowledge_layers.md and user contract):
+            # Must always output L0/L1/L2 sections and never merge/skip.
             if lang == "zh":
-                return "【证据支持的结论】", "【领域共识解释】", "【推测与研究进展（可选）】"
-            return "[Evidence-backed conclusions]", "[Domain-prior explanation]", "[Speculative / open (optional)]"
+                return (
+                    "### L0｜证据支持的结论",
+                    "### L1｜领域共识（LLM 内部知识）",
+                    "### L2｜推测性或解释性补充",
+                )
+            return (
+                "### L0 | Evidence-backed conclusions",
+                "### L1 | Domain prior (model knowledge)",
+                "### L2 | Speculative / reasoned addendum",
+            )
 
         def _slot_uncertainty(slot: str, *, lang: str) -> str:
             s = (slot or "").strip().lower()
@@ -1149,16 +1159,17 @@ class MultiStepInjector:
                             if lang == "zh":
                                 p1 = (
                                     "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识，"
-                                    "对用户问题给出【领域共识解释】。"
+                                        "对用户问题给出【领域共识解释】。"
                                     "要求：只输出中文；不引用或复述证据原文；"
                                     "除非【证据支持的结论】明确提及，否则不要给出具体蜱种/学名/物种名称；"
                                     "不要编造具体物种中文俗名（如需提及拉丁学名/英文名，请原样保留）；"
-                                    "不要给出最新假说/研究争议；避免具体数值与未经证据支持的细节。"
+                                        "不要给出最新研究/假说/研究争议；避免具体数值与未经证据支持的细节。"
+                                        "不得与【证据支持的结论】冲突；若不确定请保持保守、以证据结论为准。"
                                     "\n\n用户问题：\n"
                                     + str(query_text or prompt)
                                     + "\n\n证据支持的结论（仅供对齐，不要当作证据引用）：\n"
                                     + layer0
-                                    + "\n\n请输出领域共识解释正文："
+                                    + "\n\n请用要点列表输出（每条以“- ”开头）："
                                 )
                             else:
                                 p1 = (
@@ -1166,11 +1177,12 @@ class MultiStepInjector:
                                     "based on long-standing consensus knowledge only. "
                                     "Do NOT quote evidence. Do NOT add speculative or controversial claims. "
                                     "Do NOT name specific species/taxa unless explicitly mentioned in the evidence-backed conclusions."
+                                    " Do NOT contradict the evidence-backed conclusions; if unsure, defer to them."
                                     "\n\nUser question:\n"
                                     + str(query_text or prompt)
                                     + "\n\nEvidence-backed conclusions (for alignment only, do not cite):\n"
                                     + layer0
-                                    + "\n\nOutput the domain-prior explanation text:"
+                                    + "\n\nOutput as bullet points (each starts with '- '):"
                                 )
                             layer1_raw = self._greedy_generate_with_past_prefix(
                                 model=model,
@@ -1183,8 +1195,11 @@ class MultiStepInjector:
                                 repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
                             ).strip()
                             layer1 = layer1_raw.strip()
+                            # Ensure bullet formatting (best-effort) even if the model doesn't comply perfectly.
+                            if layer1 and not re.search(r"^\s*-\s+", layer1):
+                                layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
 
-                            out_sections = [h0, layer0, "", h1, layer1]
+                            out_sections = [h0, layer0, "", h1, layer1, "", h2]
 
                             # Layer 2: Speculative/Open (optional)
                             if bool(getattr(self.cfg, "enable_speculative_layer", False)):
@@ -1193,11 +1208,12 @@ class MultiStepInjector:
                                         "你将补充【推测与研究进展】部分。"
                                         "要求：只输出中文；必须使用不确定性措辞（例如“可能”“尚在研究中”）；"
                                         "必须显式标注为推测；不要把推测伪装成证据。"
+                                        "不得回写或覆盖【证据支持的结论】与【领域共识解释】。"
                                         "\n\n用户问题：\n"
                                         + str(query_text or prompt)
                                         + "\n\n证据支持的结论（供参考）：\n"
                                         + layer0
-                                        + "\n\n请输出推测与研究进展正文："
+                                        + "\n\n请用要点列表输出（每条以“- ”开头）："
                                     )
                                 else:
                                     p2 = (
@@ -1206,7 +1222,7 @@ class MultiStepInjector:
                                         + str(query_text or prompt)
                                         + "\n\nEvidence-backed conclusions:\n"
                                         + layer0
-                                        + "\n\nOutput speculative/open text:"
+                                        + "\n\nOutput as bullet points (each starts with '- '):"
                                     )
                                 layer2_raw = self._greedy_generate_with_past_prefix(
                                     model=model,
@@ -1218,7 +1234,13 @@ class MultiStepInjector:
                                     no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
                                     repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
                                 ).strip()
-                                out_sections.extend(["", h2, layer2_raw.strip()])
+                                layer2 = layer2_raw.strip()
+                                if layer2 and not re.search(r"^\s*-\s+", layer2):
+                                    layer2 = "- " + layer2.lstrip("•").lstrip("-").strip()
+                                out_sections.append(layer2 if layer2 else ("- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)"))
+                            else:
+                                # L2 exists but is intentionally empty unless enabled.
+                                out_sections.append("- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)")
 
                             return "\n".join([x for x in out_sections if x is not None]).strip(), step_debugs
 

@@ -201,6 +201,25 @@ def main() -> None:
         default=12,
         help="No-repeat ngram constraint during final decode to reduce repetitive filler (0 disables).",
     )
+    # Three-layer knowledge output (L0/L1/L2)
+    p.add_argument(
+        "--enable_layer2",
+        action="store_true",
+        help="Enable L2 (Speculative / Reasoned) section in the strict three-layer output. "
+        "Applies to GROUNDED mode only (schema injection path).",
+    )
+    p.add_argument(
+        "--layer1_max_new_tokens",
+        type=int,
+        default=256,
+        help="Token budget for L1 (Domain Prior) generation (GROUNDED mode only).",
+    )
+    p.add_argument(
+        "--layer2_max_new_tokens",
+        type=int,
+        default=192,
+        help="Token budget for L2 generation when --enable_layer2 is set (GROUNDED mode only).",
+    )
     p.add_argument(
         "--print_selected_block_text",
         action="store_true",
@@ -855,6 +874,10 @@ def main() -> None:
         entropy_threshold=float(args.entropy_threshold),
         debug_print_candidates_top_n=int(args.debug_print_candidates),
         schema_required_slots=[s.strip() for s in str(args.schema_required_slots or "").split(",") if s.strip()] or None,
+        enable_three_knowledge_layers=True,
+        enable_speculative_layer=bool(args.enable_layer2),
+        layer1_max_new_tokens=int(args.layer1_max_new_tokens),
+        layer2_max_new_tokens=int(args.layer2_max_new_tokens),
     )
     lookup = None
     if bool(args.ground_with_selected_text) or bool(args.use_struct_slots):
