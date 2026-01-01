@@ -993,6 +993,8 @@ class MultiStepInjector:
                                 # Strip leading instruction-echo fragments like "(不重复)(不超过20字)".
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(不重复|不超过|简要|一句话|20字|1-2|1–2)[^\)\）]{0,24}[\)\）]\s*", "", s0)
                                 s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,24}(do\s*not|concise|1-2)[^\)\）]{0,24}[\)\）]\s*", "", s0, flags=re.IGNORECASE)
+                                # Strip leading "rewrite suggestion" like "(简化为：...)" / "(改写为：...)".
+                                s0 = re.sub(r"^\s*[\(\（][^\)\）]{0,80}(简化为|改写为|总结为|可简化为)\s*[:：][^\)\）]{0,160}[\)\）]\s*", "", s0)
                                 # Strip language directive echoes (ZH + translated EN).
                                 s0 = re.sub(r"^\s*(请用中文回答|用中文回答|请使用中文回答)\s*[:：]?\s*", "", s0)
                                 s0 = re.sub(r"^\s*(please\s+use\s+chinese\s+to\s+answer)\s*[:：]?\s*", "", s0, flags=re.IGNORECASE)
@@ -1018,7 +1020,7 @@ class MultiStepInjector:
                                 q_slot = q_plain
                                 # Minimal language guard (no slot ids/field names); evidence remains unmodified.
                                 if lang == "zh":
-                                    q_slot = "请用中文回答（不要复述问题/指令，只给结论，1-2句）：\n" + q_slot
+                                    q_slot = "请用中文回答（只输出答案正文，不要输出括号说明/改写提示；不要复述问题/指令；1-2句）：\n" + q_slot
                                 else:
                                     q_slot = "Answer concisely (1-2 sentences, no repetition): " + q_slot
                                 p_slot = q_slot + "\n\n" + evidence
