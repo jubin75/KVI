@@ -765,6 +765,11 @@ class MultiStepInjector:
                 r"^(主要|其他).*(途径|途经|方式)[：:]",  # instruction-like headers
                 r"^证据原文[：:]",
                 r"^回答要求",
+                # Bibliography / reference noise (must NOT be treated as evidence)
+                r"^(参考文献|references?)\s*[:：]?",
+                r"\bet\s+al\.\b",
+                r"\bdoi\s*[:：]",
+                r"^\s*\[[0-9]{1,3}\]\s*",  # [1] ...
             ]
             meta_re = re.compile("|".join(meta_patterns), re.IGNORECASE)
 
@@ -1136,6 +1141,9 @@ class MultiStepInjector:
                                 if q_plain:
                                     ans_slot = ans_slot.replace(q_plain, " ").strip()
                             ans_slot = _shorten_answer(ans_slot, lang=lang)
+                            # Evidence-bound safety: if the "answer" degenerates into bibliography/citation, drop it.
+                            if ans_slot and re.search(r"(参考文献|references?|doi\s*[:：]|\bet\s+al\.\b|\[[0-9]{1,3}\])", ans_slot, re.IGNORECASE):
+                                ans_slot = ""
                             # If still no Chinese, fall back to a minimal template (keeps policy: no hallucinated detail).
                             if lang == "zh" and (not ans_slot or not _has_cjk(ans_slot)):
                                 ev_l = (evidence or "").lower()
@@ -1273,6 +1281,11 @@ class MultiStepInjector:
                                     repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
                                 ).strip()
                                 txt = raw.strip()
+                                # Language unification: for Chinese queries, drop any non-CJK sentences (no translation).
+                                if lang == "zh" and txt:
+                                    sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", txt) if x.strip()]
+                                    kept = [x for x in sents if _has_cjk(x)]
+                                    txt = " ".join(kept).strip() if kept else txt.strip()
                                 # deterministic filtering for low-certainty: strip risky entities and enforce non-deterministic tone
                                 if allowed == "low":
                                     # remove mechanistic-entity sentences

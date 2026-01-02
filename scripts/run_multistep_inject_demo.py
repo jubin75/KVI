@@ -1002,6 +1002,16 @@ def main() -> None:
         for d in dbg:
             for bid in getattr(d, "selected_block_ids", []) or []:
                 wanted.add(str(bid))
+        if not wanted:
+            print("=== Selected Block Lookup (blocks_jsonl path + line_no) ===")
+            print(
+                f"blocks_jsonl={args.blocks_jsonl} blocks_jsonl_schema={args.blocks_jsonl_schema} blocks_jsonl_evidence={args.blocks_jsonl_evidence}",
+                flush=True,
+            )
+            print("[debug] no selected_block_ids (no blocks injected or no steps executed).", flush=True)
+            print("=== Selected Block Snippets ===")
+            print("[debug] (empty)", flush=True)
+            return
         if wanted:
             found = {}
             try:
