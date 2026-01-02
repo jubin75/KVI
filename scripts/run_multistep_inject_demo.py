@@ -1010,7 +1010,31 @@ def main() -> None:
             )
             print("[debug] no selected_block_ids (no blocks injected or no steps executed).", flush=True)
             print("=== Selected Block Snippets ===")
-            print("[debug] (empty)", flush=True)
+            # Still useful: show top evidence hits so we can verify retrieval isn't degenerate.
+            try:
+                if bank_evidence is not None and isinstance(block_text_by_id, dict):
+                    qv = query_embed_fn(retrieval_query_text)
+                    ev_items, _ev_dbg = bank_evidence.search(qv, top_k=8, filters=None)
+                    shown = 0
+                    for it in ev_items:
+                        bid = (it.meta or {}).get("block_id") or (it.meta or {}).get("chunk_id") or (it.meta or {}).get("id")
+                        if not bid:
+                            continue
+                        txt = block_text_by_id.get(str(bid), "")
+                        if not (isinstance(txt, str) and txt.strip()):
+                            continue
+                        snippet = re.sub(r"\s+", " ", txt).strip()[:320]
+                        print(f"\n--- evidence_hit block_id={bid} score={float(getattr(it, 'score', 0.0)):.4f} ---", flush=True)
+                        print(f"text_snippet={snippet}", flush=True)
+                        shown += 1
+                        if shown >= 5:
+                            break
+                    if shown == 0:
+                        print("[debug] (empty; no readable evidence hits found)", flush=True)
+                else:
+                    print("[debug] (empty; evidence bank/text lookup not available)", flush=True)
+            except Exception as e:
+                print(f"[debug] failed to print evidence hits: {e}", flush=True)
             return
         if wanted:
             found = {}

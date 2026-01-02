@@ -79,6 +79,23 @@ SLOT_REGISTRY: Dict[str, SlotSpec] = {
     "complications": SlotSpec("complications", "clinical.complications", evidence_density="medium", stability="medium", temporal_sensitivity="medium"),
     "prognosis": SlotSpec("prognosis", "clinical.prognosis", evidence_density="medium", stability="medium", temporal_sensitivity="high"),
     "overview": SlotSpec("overview", "definition.overview", evidence_density="low", stability="high", temporal_sensitivity="low"),
+    # Proposed slots (adjudicable, stable). These reduce fail-closed frequency for common questions.
+    "disease_full_name": SlotSpec(
+        slot_name="disease_full_name",
+        fact_type="taxonomy.definition",
+        evidence_density="high",
+        stability="high",
+        temporal_sensitivity="low",
+        adjudicable=True,
+    ),
+    "geographic_distribution": SlotSpec(
+        slot_name="geographic_distribution",
+        fact_type="epidemiology.geography",
+        evidence_density="medium",
+        stability="medium",
+        temporal_sensitivity="high",
+        adjudicable=True,
+    ),
 }
 
 

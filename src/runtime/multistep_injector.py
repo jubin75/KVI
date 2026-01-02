@@ -1041,11 +1041,20 @@ class MultiStepInjector:
                     fts = set(classify_fact_types(qtxt))
                     if fts:
                         ft_s = "、".join(sorted(fts)) if lang == "zh" else ", ".join(sorted(fts))
-                        layer0 = (
-                            f"- 暂无证据支持（schema 未覆盖该事实类型：{ft_s}；已降级为受控领域共识回答）。"
-                            if lang == "zh"
-                            else f"- No evidence support (schema has no coverage for fact types: {ft_s}; downgraded to controlled domain-prior answer)."
-                        )
+                        has_any_evidence = bool((evidence or "").strip()) or bool(evidence_texts)
+                        if has_any_evidence:
+                            # We retrieved evidence, but schema slots do not cover this fact type (cannot adjudicate via slots).
+                            layer0 = (
+                                f"- schema 未覆盖该事实类型：{ft_s}；但已检索到相关证据（见下方证据句），当前不做结构化裁决。"
+                                if lang == "zh"
+                                else f"- Schema has no coverage for fact types: {ft_s}; however, relevant evidence was retrieved (see evidence sentences below). No slot-based adjudication is performed."
+                            )
+                        else:
+                            layer0 = (
+                                f"- 暂无证据支持（schema 未覆盖该事实类型：{ft_s}；且未检索到可用证据，已降级为受控领域共识回答）。"
+                                if lang == "zh"
+                                else f"- No evidence support (schema has no coverage for fact types: {ft_s}; no usable evidence retrieved; downgraded to controlled domain-prior answer)."
+                            )
                     else:
                         layer0 = (
                             "- 暂无证据支持（该问题未命中可裁决的 slot，已降级为受控领域共识回答）。"
@@ -1056,9 +1065,17 @@ class MultiStepInjector:
                     # L1: Domain Prior answer for the whole question (base LLM, no injection)
                     allow_dp = bool(domain_prior_allowed_for_fact_types(fts))
                     if (not allow_dp) and lang == "zh":
-                        layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等），当前 schema/evidence 未覆盖，无法给出可靠结论。"
+                        has_any_evidence = bool((evidence or "").strip()) or bool(evidence_texts)
+                        if has_any_evidence:
+                            layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等）。已检索到证据，但 schema 未覆盖对应可裁决字段；因此仅在 L0 展示证据句，不在 L1 给出具体结论。"
+                        else:
+                            layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等），当前 schema 未覆盖且未检索到可用证据，无法给出可靠结论。"
                     elif (not allow_dp) and lang != "zh":
-                        layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Current schema/evidence coverage is insufficient to answer reliably."
+                        has_any_evidence = bool((evidence or "").strip()) or bool(evidence_texts)
+                        if has_any_evidence:
+                            layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Evidence was retrieved, but schema has no adjudicable fields for it; L1 will not produce a specific conclusion."
+                        else:
+                            layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Schema has no coverage and no usable evidence was retrieved; cannot answer reliably."
                     elif lang == "zh":
                         p1 = (
                             "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识回答用户问题。"
@@ -1108,6 +1125,18 @@ class MultiStepInjector:
 
                     # L2: disabled under coverage failure (fail-closed)
                     layer2 = "- （本题已降级，推测层禁用）" if lang == "zh" else "- (Downgraded; speculative layer disabled.)"
+                    # If we have evidence sentences, expose them in L0 as evidence-bound text (no expansion).
+                    if bool((evidence or "").strip()):
+                        ev_lines = []
+                        for ln in str(evidence).splitlines():
+                            ln = ln.strip()
+                            if not ln:
+                                continue
+                            ev_lines.append(f"- 证据句：{ln}" if lang == "zh" else f"- Evidence: {ln}")
+                            if len(ev_lines) >= 2:
+                                break
+                        layer0 = (layer0 + "\n" + "\n".join(ev_lines)).strip()
+
                     out = "\n".join([h0, layer0, "", h1, layer1, "", h2, layer2]).strip()
                     return out, step_debugs
 

@@ -17,7 +17,6 @@ class EvidenceSchema:
 
     transmission_primary: List[str] = field(default_factory=list)
     transmission_secondary: List[str] = field(default_factory=list)
-    vector: List[str] = field(default_factory=list)
     pathogenesis_notes: List[str] = field(default_factory=list)
 
     def dedup(self) -> "EvidenceSchema":
@@ -34,7 +33,6 @@ class EvidenceSchema:
 
         self.transmission_primary = _dedup(self.transmission_primary)
         self.transmission_secondary = _dedup(self.transmission_secondary)
-        self.vector = _dedup(self.vector)
         self.pathogenesis_notes = _dedup(self.pathogenesis_notes)
         return self
 
@@ -54,8 +52,9 @@ def build_schema_from_evidence_texts(texts: Iterable[str]) -> EvidenceSchema:
         # --- Transmission / vectors ---
         if ("tick" in tl) or ("tick-borne" in tl) or ("蜱" in t) or ("叮咬" in t):
             schema.transmission_primary.append("tick bite (蜱叮咬)")
-        if ("haemaphysalis" in tl) or ("h. longicornis" in tl) or ("长角血蜱" in t) or ("长角蜱" in t):
-            schema.vector.append("Haemaphysalis (e.g., H. longicornis)")
+        # NOTE: we intentionally do NOT include a "vector" slot in the schema interface.
+        # Species-level vector naming tends to be error-prone (common-name hallucination) and is not needed
+        # for the minimal adjudicable slot set. Keep this out of schema until explicitly proposed offline.
         if ("human-to-human" in tl) or ("person-to-person" in tl) or ("人传人" in t):
             schema.transmission_secondary.append("human-to-human transmission (人传人)")
         if ("body fluid" in tl) or ("blood" in tl) or ("体液" in t) or ("血液" in t):
@@ -95,7 +94,6 @@ def schema_to_injection_text(schema: EvidenceSchema, *, max_items_per_field: int
         "Confirmed evidence slots (do NOT treat as a full answer; do NOT invent new facts):\n"
         f"- transmission_primary: {_fmt(schema.transmission_primary)}\n"
         f"- transmission_secondary: {_fmt(schema.transmission_secondary)}\n"
-        f"- vector: {_fmt(schema.vector)}\n"
         f"- pathogenesis_notes: {_fmt(schema.pathogenesis_notes)}\n"
     )
 

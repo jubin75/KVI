@@ -251,11 +251,19 @@ export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
 
 python -u scripts/build_schema_blocks_from_evidence_jsonl.py \
   --blocks_jsonl_evidence "$WORK_DIR/blocks.evidence.jsonl" \
-  --out_jsonl "$WORK_DIR/blocks.schema.jsonl" \
-  --default_slots "transmission,pathogenesis"
+  --out_jsonl "$WORK_DIR/blocks.schema.jsonl"
 ```
 
-> `--default_slots`：临时给所有 schema 打同一组 slots（真实应由上游标注）
+说明：
+- 该脚本会从 evidence 文本中**启发式推断** `answerable_slots`（用于 slot-aware 选择），包括但不限于：
+  - `transmission` / `pathogenesis` / `diagnosis` / `treatment`
+  - `disease_full_name`（全称/缩写展开，taxonomy.definition）
+  - `geographic_distribution`（地区分布，epidemiology.geography）
+- schema text 中已移除 `vector` 字段（避免物种中文俗名误译/越权）。
+
+⚠️ 重要：如果你升级了 slot 或 schema 编译逻辑，必须 **重建**：
+- `blocks.schema.jsonl`
+- `kvbank_schema`
 
 ##### 2) 构建 schema KVBank
 

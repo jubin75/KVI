@@ -122,6 +122,41 @@ def build_schema_blocks_from_evidence_jsonl(
                 inferred_answerable.append("diagnosis")
             if any(kw in ev_text_joined for kw in ["treat", "therap", "drug", "antivir", "治疗", "药物"]):
                 inferred_answerable.append("treatment")
+            # taxonomy.definition: abbreviation expansion / full name (stable)
+            if any(
+                kw in ev_text_joined
+                for kw in [
+                    "stands for",
+                    "full name",
+                    "severe fever with thrombocytopenia",
+                    "sfts",
+                    "sftsv",
+                    "全称",
+                    "英文全称",
+                    "缩写",
+                ]
+            ):
+                inferred_answerable.append("disease_full_name")
+            # epidemiology.geography: geographic / province distribution (data-sensitive; still adjudicable when evidence exists)
+            if any(
+                kw in ev_text_joined
+                for kw in [
+                    "china",
+                    "chinese",
+                    "province",
+                    "geograph",
+                    "henan",
+                    "anhui",
+                    "hubei",
+                    "hunan",
+                    "jiangxi",
+                    "地区分布",
+                    "分布在",
+                    "省",
+                    "中国",
+                ]
+            ):
+                inferred_answerable.append("geographic_distribution")
 
             # answerable_slots: only slots where evidence can SUBSTANTIVELY answer.
             # slots: all declared slots (may include weak mentions); answerable_slots is the subset that gates selection.

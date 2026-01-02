@@ -128,6 +128,9 @@ _SLOT_PATTERNS_FALLBACK: Tuple[Tuple[str, re.Pattern], ...] = (
     ("diagnosis", re.compile(r"(diagnos|检测|诊断|test|pcr|elisa|assay)", re.I)),
     ("treatment", re.compile(r"(treat|治疗|therap|drug|antivir|cure|药物)", re.I)),
     ("epidemiology", re.compile(r"(epidem|流行病|incidence|prevalence|outbreak)", re.I)),
+    # New adjudicable slots (low-risk, stable) — enables L0 adjudication for common questions
+    ("disease_full_name", re.compile(r"(全称|全名|缩写|英文全称|stand\s*for|full\s*name)", re.I)),
+    ("geographic_distribution", re.compile(r"(地区分布|分布在|哪些地方|哪里|在哪些省|china|province|geographic)", re.I)),
     ("prevention", re.compile(r"(prevent|预防|vaccine|vaccin|prophyla)", re.I)),
     ("prognosis", re.compile(r"(prognos|预后|outcome|mortality|survival)", re.I)),
 )
