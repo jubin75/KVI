@@ -12,4 +12,6 @@
 - **维度不变**：`K_ext/V_ext` 的 `head_dim` 必须与目标模型 attention head_dim 一致
 - **KV cache 兼容**：prefill/decode 阶段注入行为一致；外部 KV 通常视为“静态前缀 KV”（不写入 cache）
 
+## 补充关键
+Schema slot 不是知识的全集，而是“可裁决事实的最小集合”
 

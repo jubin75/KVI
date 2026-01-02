@@ -29,7 +29,7 @@ import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT_STR = str(_REPO_ROOT)
@@ -53,6 +53,7 @@ class TestCfg:
     min_blocks_loaded: int = 200
     min_hit_rate_overall: float = 0.35
     min_categories_with_hits: int = 3
+    queries_by_category: Dict[str, List[str]] = None  # type: ignore[assignment]
 
 
 _CFG: TestCfg | None = None
@@ -156,6 +157,27 @@ def _queries_by_category() -> Dict[str, List[str]]:
     }
 
 
+def _load_topic_config(topic_config: str) -> Dict[str, Any]:
+    p = Path(str(topic_config))
+    if not p.exists():
+        raise FileNotFoundError(f"topic_config not found: {p}")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _queries_from_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
+    q = cfg.get("evidence_recall_queries")
+    if not isinstance(q, dict) or not q:
+        raise ValueError("Missing config key: evidence_recall_queries (required for this test)")
+    out: Dict[str, List[str]] = {}
+    for k, v in q.items():
+        if not isinstance(k, str) or not isinstance(v, list):
+            continue
+        out[k] = [str(x) for x in v if str(x).strip()]
+    if not out:
+        raise ValueError("evidence_recall_queries is empty after parsing")
+    return out
+
+
 class TestEvidenceRecall(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -175,14 +197,18 @@ class TestEvidenceRecall(unittest.TestCase):
         )
 
     def test_retrieval_hits_overall(self):
-        queries = _queries_by_category()
+        queries = dict(self.cfg.queries_by_category or {})
         total = 0
         hit = 0
         categories_with_hits = set()
         top1_ids: List[str] = []
+        per_query: List[Tuple[str, str, int, int, str]] = []  # (cat, q, hit_n, top_k, top1_id)
 
         for cat, qs in queries.items():
-            pat = self.anchors[cat]
+            pat = self.anchors.get(cat)
+            if pat is None:
+                # Unknown category keys in config are ignored (forward-compatible).
+                continue
             cat_hit = 0
             for q in qs:
                 total += 1
@@ -201,8 +227,9 @@ class TestEvidenceRecall(unittest.TestCase):
                 if ids:
                     top1_ids.append(ids[0])
 
-                joined = _norm_for_anchor("\n".join(texts))
-                ok = bool(joined and pat.search(joined))
+                hit_n = sum(1 for t in texts if pat.search(t or ""))
+                ok = hit_n > 0
+                per_query.append((cat, q, int(hit_n), int(len(texts)), str(ids[0]) if ids else ""))
                 if ok:
                     hit += 1
                     cat_hit += 1
@@ -210,6 +237,22 @@ class TestEvidenceRecall(unittest.TestCase):
                 categories_with_hits.add(cat)
 
         hit_rate = (hit / max(1, total))
+        # ---- Print a detailed recall report (not just "OK") ----
+        print("\n=== Evidence Recall Report ===", flush=True)
+        print(f"top_k={int(self.cfg.top_k)} blocks_loaded={len(self.blocks)} bank_dim={getattr(self.bank, 'dim', None)}", flush=True)
+        for cat, q, hit_n, denom, top1 in per_query:
+            # Example: 地区分布 hits=3/16 top1=...
+            print(f"[recall] category={cat} query={q} hits={hit_n}/{denom} top1={top1}", flush=True)
+        # Category summary
+        by_cat: Dict[str, Tuple[int, int]] = {}
+        for cat, _q, hit_n, _denom, _top1 in per_query:
+            h, n = by_cat.get(cat, (0, 0))
+            by_cat[cat] = (h + (1 if hit_n > 0 else 0), n + 1)
+        for cat in sorted(by_cat.keys()):
+            h, n = by_cat[cat]
+            print(f"[summary] category={cat} hit_queries={h}/{n} rate={(h/max(1,n)):.3f}", flush=True)
+        print(f"[summary] overall hit_queries={hit}/{total} rate={hit_rate:.3f}", flush=True)
+
         self.assertGreaterEqual(
             hit_rate,
             float(self.cfg.min_hit_rate_overall),
@@ -248,22 +291,40 @@ class TestEvidenceRecall(unittest.TestCase):
 
 def _parse_args() -> TestCfg:
     p = argparse.ArgumentParser()
-    p.add_argument("--kv_dir_evidence", required=True)
-    p.add_argument("--blocks_jsonl_evidence", required=True)
-    p.add_argument("--domain_encoder_model", required=True)
+    p.add_argument("--kv_dir_evidence", default=None, help="If omitted, infer from --topic_config build.work_dir.")
+    p.add_argument("--blocks_jsonl_evidence", default=None, help="If omitted, infer from --topic_config build.work_dir.")
+    p.add_argument("--domain_encoder_model", default=None, help="If omitted, infer from --topic_config build.retrieval_encoder_model.")
+    p.add_argument(
+        "--topic_config",
+        default=str(Path(__file__).resolve().parents[1] / "config" / "topics" / "SFTSV" / "config.json"),
+        help="Topic config.json path. Queries are loaded from its evidence_recall_queries field.",
+    )
     p.add_argument("--top_k", type=int, default=16)
     p.add_argument("--min_blocks_loaded", type=int, default=200)
     p.add_argument("--min_hit_rate_overall", type=float, default=0.35)
     p.add_argument("--min_categories_with_hits", type=int, default=3)
     args, _rest = p.parse_known_args()
+
+    cfg = _load_topic_config(str(args.topic_config))
+    queries_by_cat = _queries_from_config(cfg)
+    work_dir = ((cfg.get("build") or {}) if isinstance(cfg.get("build"), dict) else {}).get("work_dir")
+    retrieval_encoder_model = ((cfg.get("build") or {}) if isinstance(cfg.get("build"), dict) else {}).get("retrieval_encoder_model")
+
+    kv_dir_evidence = str(args.kv_dir_evidence or (str(work_dir) + "/kvbank_evidence"))
+    blocks_jsonl_evidence = str(args.blocks_jsonl_evidence or (str(work_dir) + "/blocks.evidence.jsonl"))
+    domain_encoder_model = str(args.domain_encoder_model or retrieval_encoder_model or "")
+    if not domain_encoder_model:
+        raise SystemExit("Missing --domain_encoder_model and build.retrieval_encoder_model in topic_config.")
+
     return TestCfg(
-        kv_dir_evidence=str(args.kv_dir_evidence),
-        blocks_jsonl_evidence=str(args.blocks_jsonl_evidence),
-        domain_encoder_model=str(args.domain_encoder_model),
+        kv_dir_evidence=kv_dir_evidence,
+        blocks_jsonl_evidence=blocks_jsonl_evidence,
+        domain_encoder_model=domain_encoder_model,
         top_k=int(args.top_k),
         min_blocks_loaded=int(args.min_blocks_loaded),
         min_hit_rate_overall=float(args.min_hit_rate_overall),
         min_categories_with_hits=int(args.min_categories_with_hits),
+        queries_by_category=queries_by_cat,
     )
 
 

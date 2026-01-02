@@ -50,6 +50,13 @@ import torch
 from ..retriever import Retriever
 from .hf_cache_prefix_injection import ExtKV, build_past_key_values_prefix, stack_ext_kv_items_by_layer
 from .schema_answerability import infer_slots_from_query
+from .slot_registry import (
+    adjudicable_slots_for_query,
+    classify_fact_types,
+    domain_prior_allowed_for_fact_types,
+    fact_types_need_schema_coverage,
+    speculative_allowed_for_fact_types,
+)
 
 
 @dataclass(frozen=True)
@@ -407,10 +414,17 @@ class MultiStepInjector:
 
         # Slot signals are bypass-side only (retrieval/injection eligibility).
         # They MUST NOT influence decoding, stop rules, prompt contracts, or postprocess.
-        if self.cfg.schema_required_slots:
-            slot_signal = {str(s) for s in self.cfg.schema_required_slots if str(s).strip()}
-        else:
-            slot_signal = infer_slots_from_query(str(query_text or prompt))
+        qtxt0 = str(query_text or prompt)
+        inferred_slots = (
+            {str(s) for s in self.cfg.schema_required_slots if str(s).strip()}
+            if self.cfg.schema_required_slots
+            else set(infer_slots_from_query(qtxt0))
+        )
+        fact_types = set(classify_fact_types(qtxt0))
+        adjudicable_slots = adjudicable_slots_for_query(inferred_slots=inferred_slots, fact_types=fact_types)
+        need_cov = fact_types_need_schema_coverage(fact_types)
+        injection_enabled = bool(adjudicable_slots)  # fail-closed: no adjudicable slots => no schema injection
+        slot_signal = set(adjudicable_slots)
 
         # If we need attentions (entropy signal), force an attention implementation that supports it.
         # Some HF backends (sdpa/flash-attn) don't support output_attentions.
@@ -433,7 +447,8 @@ class MultiStepInjector:
         if query_text is None:
             query_text = prompt
 
-        for step in range(self.cfg.max_steps):
+        # Fail-closed injection: if the query does not map to any adjudicable slots, do NOT inject schema KV.
+        for step in range(int(self.cfg.max_steps) if bool(injection_enabled) else 0):
             # ---- build query embedding from current state ----
             if query_embed_fn is not None:
                 query_vec = query_embed_fn(query_text)
@@ -1023,10 +1038,28 @@ class MultiStepInjector:
                 if not required_slots:
                     lang = _lang_of_query(qtxt)
                     h0, h1, h2 = _layer_headings(lang=lang)
-                    layer0 = "- 暂无证据支持（该问题未命中可裁决的 slot，已降级为领域共识回答）。" if lang == "zh" else "- No evidence support (question did not map to adjudicable slots; downgraded to domain-prior answer)."
+                    fts = set(classify_fact_types(qtxt))
+                    if fts:
+                        ft_s = "、".join(sorted(fts)) if lang == "zh" else ", ".join(sorted(fts))
+                        layer0 = (
+                            f"- 暂无证据支持（schema 未覆盖该事实类型：{ft_s}；已降级为受控领域共识回答）。"
+                            if lang == "zh"
+                            else f"- No evidence support (schema has no coverage for fact types: {ft_s}; downgraded to controlled domain-prior answer)."
+                        )
+                    else:
+                        layer0 = (
+                            "- 暂无证据支持（该问题未命中可裁决的 slot，已降级为受控领域共识回答）。"
+                            if lang == "zh"
+                            else "- No evidence support (question did not map to adjudicable slots; downgraded to controlled domain-prior answer)."
+                        )
 
                     # L1: Domain Prior answer for the whole question (base LLM, no injection)
-                    if lang == "zh":
+                    allow_dp = bool(domain_prior_allowed_for_fact_types(fts))
+                    if (not allow_dp) and lang == "zh":
+                        layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等），当前 schema/evidence 未覆盖，无法给出可靠结论。"
+                    elif (not allow_dp) and lang != "zh":
+                        layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Current schema/evidence coverage is insufficient to answer reliably."
+                    elif lang == "zh":
                         p1 = (
                             "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识回答用户问题。"
                             "要求：只输出中文；不编造具体论文/实验数据/精确数值；不输出最新研究/假说；避免离题。"
@@ -1042,22 +1075,39 @@ class MultiStepInjector:
                             + qtxt
                             + "\n\nOutput as bullet points (each starts with '- '), no headings:"
                         )
-                    layer1_raw = self._greedy_generate_with_past_prefix(
-                        model=model,
-                        tokenizer=tokenizer,
-                        prompt=p1,
-                        device=device,
-                        past_key_values=None,
-                        max_new_tokens=min(int(getattr(self.cfg, "layer1_max_new_tokens", 256)), 192),
-                        no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
-                        repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
-                    ).strip()
-                    layer1 = layer1_raw.strip()
-                    if layer1 and not re.search(r"^\s*-\s+", layer1):
-                        layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
+                    if allow_dp:
+                        layer1_raw = self._greedy_generate_with_past_prefix(
+                            model=model,
+                            tokenizer=tokenizer,
+                            prompt=p1,
+                            device=device,
+                            past_key_values=None,
+                            max_new_tokens=min(int(getattr(self.cfg, "layer1_max_new_tokens", 256)), 192),
+                            no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                            repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                        ).strip()
+                        layer1 = layer1_raw.strip()
+                        # Deterministic cleanup: drop prompt-echo lines and keep bullets.
+                        lines = [ln.strip() for ln in layer1.splitlines() if ln.strip()]
+                        cleaned = []
+                        for ln in lines:
+                            if re.search(r"(用户问题|请用要点|output as bullet|user question)", ln, re.I):
+                                continue
+                            cleaned.append(ln)
+                        layer1 = "\n".join(cleaned).strip()
+                        if lang == "zh" and layer1:
+                            # drop non-CJK sentences
+                            sents = [x.strip() for x in re.split(r"(?<=[。！？!?\.])\s*", layer1) if x.strip()]
+                            kept = [x for x in sents if _has_cjk(x)]
+                            layer1 = "\n".join(kept).strip() if kept else layer1
+                        if layer1 and not re.search(r"^\s*-\s+", layer1):
+                            layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
+                        # Hard cap: keep first 3 bullet lines only.
+                        bl = [ln for ln in layer1.splitlines() if ln.strip()]
+                        layer1 = "\n".join(bl[:3]).strip()
 
-                    # L2: keep placeholder unless explicitly enabled
-                    layer2 = "- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)"
+                    # L2: disabled under coverage failure (fail-closed)
+                    layer2 = "- （本题已降级，推测层禁用）" if lang == "zh" else "- (Downgraded; speculative layer disabled.)"
                     out = "\n".join([h0, layer0, "", h1, layer1, "", h2, layer2]).strip()
                     return out, step_debugs
 

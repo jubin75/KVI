@@ -2,6 +2,56 @@
   "topic_name": "SFTSV",
   "goal": "建立关于 SFTSV（发热伴血小板减少综合征）的专题知识库：传播途径（蜱叮咬、血液/体液接触等）、宿主/媒介、流行病学、诊断要点、治疗与预防。",
 
+  "evidence_recall_queries": {
+    "transmission": [
+      "主要传播途径",
+      "传播方式",
+      "是否人传人",
+      "是否经空气传播",
+      "是否经飞沫传播",
+      "是否经血液传播",
+      "是否经体液传播",
+      "是否经蚊虫传播",
+      "是否经蜱虫传播",
+      "是否经粪口途径传播"
+    ],
+    "pathogen": [
+      "病原体是什么",
+      "病毒还是细菌",
+      "病毒分类",
+      "RNA病毒",
+      "DNA病毒",
+      "是否为人畜共患病",
+      "病毒宿主"
+    ],
+    "pathogenesis": [
+      "发病机制",
+      "致病机制",
+      "病理机制",
+      "免疫机制",
+      "炎症反应",
+      "免疫风暴",
+      "多器官损伤",
+      "靶器官"
+    ],
+    "epidemiology": [
+      "潜伏期",
+      "高发季节",
+      "易感人群",
+      "病死率",
+      "发病率",
+      "地区分布"
+    ],
+    "diagnosis_prevention": [
+      "诊断标准",
+      "核酸检测",
+      "血清学检测",
+      "防控措施",
+      "预防方法",
+      "是否有疫苗"
+    ]
+  },
+
   "source_pdf_dir": "/home/jb/KVI/pdfs/sftsvpdf",
   "out_pdf_dir": "/home/jb/KVI/topics/SFTSV/pdfs",
   "results_jsonl": "/home/jb/KVI/topics/SFTSV/doc_filter_results.jsonl",
