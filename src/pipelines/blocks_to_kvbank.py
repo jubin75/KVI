@@ -232,6 +232,24 @@ def build_kvbank_from_blocks_jsonl(
                 slots = []
             slots = [str(s) for s in slots if isinstance(s, (str, int, float)) and str(s).strip()]
 
+            # Schema blocks may also carry `answerable_slots` (preferred) which is the subset of slots
+            # substantively covered by evidence. Runtime selection prefers this field.
+            answerable_slots = rec.get("answerable_slots", None)
+            if not isinstance(answerable_slots, list):
+                answerable_slots = meta_payload.get("answerable_slots") if isinstance(meta_payload, dict) else None
+            # Back-compat: schema builder always stores an unfiltered trace under metadata.inferred_answerable_slots.
+            # If upstream accidentally filtered declared slots too narrowly, use the inferred list as a conservative
+            # retrieval-side signal (still only affects injection eligibility/prioritization).
+            if not isinstance(answerable_slots, list) or not answerable_slots:
+                answerable_slots = (
+                    meta_payload.get("inferred_answerable_slots") if isinstance(meta_payload, dict) else None
+                )
+            if not isinstance(answerable_slots, list):
+                answerable_slots = []
+            answerable_slots = [
+                str(s) for s in answerable_slots if isinstance(s, (str, int, float)) and str(s).strip()
+            ]
+
             meta = {
                 "block_id": rec.get("block_id"),
                 "parent_chunk_id": rec.get("parent_chunk_id"),
@@ -246,6 +264,8 @@ def build_kvbank_from_blocks_jsonl(
                 "citation": rec.get("block_id"),
                 # slot availability (schema-first selector uses this; non-schema blocks can be empty)
                 "slots": slots,
+                # Preferred gating slots for schema-first selection.
+                "answerable_slots": answerable_slots,
                 # carry structured metadata (tables/disease/date/paragraph_type, etc.)
                 "metadata": meta_payload,
                 "is_table": bool(is_table),

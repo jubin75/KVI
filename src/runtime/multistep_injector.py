@@ -913,6 +913,8 @@ class MultiStepInjector:
                     "complications": "该疾病常见并发症有哪些？",
                     "prognosis": "该疾病的预后如何？",
                     "prevention": "该疾病如何预防？",
+                    "disease_full_name": "该疾病/病原的全称是什么？",
+                    "geographic_distribution": "该疾病/病原的地区分布如何？",
                     "overview": "请简要概述该疾病。",
                     "mechanism": "该疾病的机制是什么？",
                 }.get(s, "请回答用户问题中相关方面。")
@@ -927,6 +929,8 @@ class MultiStepInjector:
                 "complications": "What complications are reported?",
                 "prognosis": "What is the prognosis?",
                 "prevention": "How can it be prevented?",
+                "disease_full_name": "What is the full name (expansion) of the disease/pathogen abbreviation?",
+                "geographic_distribution": "What is the geographic distribution?",
                 "overview": "Provide a brief overview.",
                 "mechanism": "What is the mechanism?",
             }.get(s, "Answer the relevant aspect of the user question.")
@@ -945,6 +949,8 @@ class MultiStepInjector:
                     "complications": "并发症",
                     "prognosis": "预后",
                     "prevention": "预防",
+                    "disease_full_name": "疾病全称",
+                    "geographic_distribution": "地区分布",
                     "overview": "概述",
                     "mechanism": "机制",
                 }.get(s, s)
@@ -1210,7 +1216,70 @@ class MultiStepInjector:
                                     break
                             return " ".join(out_sents).strip()
 
+                        # Deterministic evidence rendering for slots where free-form generation tends to add
+                        # bibliographic noise ("(2021)") or partial "结论：" artifacts.
+                        def _strip_trailing_citation(t: str) -> str:
+                            x = (t or "").strip()
+                            if not x:
+                                return ""
+                            # [1], [12]
+                            x = re.sub(r"\s*\[[0-9]{1,3}\]\s*$", "", x).strip()
+                            # (Casel et al. 2021) / (2021) / (Smith 2020)
+                            x = re.sub(
+                                r"\s*[\(\（][^\)\）]{0,80}\b(19|20)\d{2}\b[^\)\）]{0,80}[\)\）]\s*\.?\s*$",
+                                "",
+                                x,
+                            ).strip()
+                            return x
+
+                        def _evidence_sentence_for_slot(slot: str, *, evidence_text: str, lang: str) -> str:
+                            s0 = (slot or "").strip().lower()
+                            lines = [ln.strip() for ln in (evidence_text or "").splitlines() if ln.strip()]
+                            if not lines:
+                                return ""
+                            if s0 == "geographic_distribution":
+                                kw = re.compile(
+                                    r"(east\s+asia|reported\s+in|province|provinces|country|countries|china|japan|korea|vietnam|taiwan|pakistan|"
+                                    r"地区分布|分布|报告|省|中国|日本|韩国|越南|台湾|巴基斯坦)",
+                                    re.IGNORECASE,
+                                )
+                                picked = [ln for ln in lines if kw.search(ln)]
+                                picked = picked[:2] if picked else lines[:1]
+                                picked = [_strip_trailing_citation(x) for x in picked]
+                                picked = [x for x in picked if x]
+                                if not picked:
+                                    return ""
+                                return ("证据句：" if lang == "zh" else "Evidence: ") + (
+                                    "；".join(picked) if lang == "zh" else " ".join(picked)
+                                )
+                            if s0 == "disease_full_name":
+                                # Only accept explicit expansion-like evidence sentences.
+                                kw = re.compile(
+                                    r"(stands\s+for|full\s+name|severe\s+fever\s+with\s+thrombocytopenia|"
+                                    r"严重发热伴血小板减少综合征|全称|缩写)",
+                                    re.IGNORECASE,
+                                )
+                                picked = [ln for ln in lines if kw.search(ln)]
+                                picked = picked[:1]
+                                picked = [_strip_trailing_citation(x) for x in picked]
+                                picked = [x for x in picked if x]
+                                if not picked:
+                                    return ""
+                                return ("证据句：" if lang == "zh" else "Evidence: ") + picked[0]
+                            return ""
+
                         for s in covered:
+                            # Special deterministic L0 path (no free-form summarization).
+                            s_l = str(s or "").strip().lower()
+                            if s_l in {"geographic_distribution", "disease_full_name"}:
+                                title = _slot_title(s, lang=lang)
+                                ev_ans = _evidence_sentence_for_slot(s, evidence_text=str(evidence or ""), lang=lang)
+                                if ev_ans:
+                                    parts.append(f"- {title}：{ev_ans}" if lang == "zh" else f"- {title}: {ev_ans}")
+                                else:
+                                    tmpl = _slot_uncertainty(s, lang=lang)
+                                    parts.append(f"- {title}：{tmpl}" if lang == "zh" else f"- {title}: {tmpl}")
+                                continue
                             q_plain = _slot_question(s, lang=lang).strip()
                             q_slot = q_plain
                             # Covered-slot generation: keep prompt minimal (avoid instruction-echo degradation).
@@ -1448,9 +1517,31 @@ class MultiStepInjector:
                                 else:
                                     # safe minimal fallback
                                     if lang == "zh":
-                                        l1_lines.append(f"- {title}：一般可从临床现象与常识性医学认识进行理解，但缺少本库证据支撑具体细节。")
+                                        s_l = str(s or "").strip().lower()
+                                        if s_l == "disease_full_name":
+                                            l1_lines.append(
+                                                f"- {title}：通常指该疾病/病原缩写对应的全称（英文展开或中文全称）。但该表述为领域共识，未由当前证据集裁决。"
+                                            )
+                                        elif s_l == "geographic_distribution":
+                                            l1_lines.append(
+                                                f"- {title}：地区分布通常需要具体监测/研究数据支撑；若缺少本库证据或输出被规则过滤，本层不给出具体范围结论。"
+                                            )
+                                        else:
+                                            l1_lines.append(f"- {title}：一般可从临床现象与常识性医学认识进行理解，但缺少本库证据支撑具体细节。")
                                     else:
-                                        l1_lines.append(f"- {title}: A conservative, textbook-level description is possible, but specific details are not supported by the current evidence set.")
+                                        s_l = str(s or "").strip().lower()
+                                        if s_l == "disease_full_name":
+                                            l1_lines.append(
+                                                f"- {title}: Typically refers to the expansion of the disease/pathogen abbreviation (full name). This is domain-prior knowledge and is not adjudicated by the current evidence set."
+                                            )
+                                        elif s_l == "geographic_distribution":
+                                            l1_lines.append(
+                                                f"- {title}: Geographic distribution typically requires specific surveillance/study data; if unsupported by the current evidence set (or filtered), we avoid asserting a concrete range here."
+                                            )
+                                        else:
+                                            l1_lines.append(
+                                                f"- {title}: A conservative, textbook-level description is possible, but specific details are not supported by the current evidence set."
+                                            )
 
                             layer1 = _dedupe_bullets("\n".join(l1_lines).strip(), max_items=12)
                             # absolute compression: ≤3 sentences total (across bullets) + ≤80 tokens
