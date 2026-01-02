@@ -969,8 +969,18 @@ class MultiStepInjector:
         if self.grounding_retriever is None:
             raise ValueError("schema-only injection requires grounding_retriever (schema->evidence->raw routing).")
         if True:
+            # IMPORTANT: grounding retrieval must be query-driven.
+            # Never fall back to a constant zero vector; that will repeatedly return the same evidence
+            # regardless of the user's question.
             if last_query_vec is None:
-                last_query_vec = np.zeros((1,), dtype=np.float32)
+                if query_embed_fn is not None:
+                    try:
+                        last_query_vec = query_embed_fn(str(query_text or prompt))
+                    except Exception:
+                        last_query_vec = None
+                if last_query_vec is None:
+                    # As a last resort, reuse the current step query_vec if available; otherwise abort grounding.
+                    last_query_vec = query_vec if "query_vec" in locals() else np.zeros((1,), dtype=np.float32)
             try:
                 gr = self.grounding_retriever.search(
                     last_query_vec, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text
@@ -1008,6 +1018,49 @@ class MultiStepInjector:
                 qtxt = str(query_text or prompt)
                 required_slots = set(infer_slots_from_query(qtxt))
                 evidence_covered_slots = set(infer_slots_from_query(str(evidence or "")))
+                # Fail-closed: if we cannot map the question to adjudicable slots,
+                # do NOT proceed with free-form GROUNDED generation.
+                if not required_slots:
+                    lang = _lang_of_query(qtxt)
+                    h0, h1, h2 = _layer_headings(lang=lang)
+                    layer0 = "- 暂无证据支持（该问题未命中可裁决的 slot，已降级为领域共识回答）。" if lang == "zh" else "- No evidence support (question did not map to adjudicable slots; downgraded to domain-prior answer)."
+
+                    # L1: Domain Prior answer for the whole question (base LLM, no injection)
+                    if lang == "zh":
+                        p1 = (
+                            "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识回答用户问题。"
+                            "要求：只输出中文；不编造具体论文/实验数据/精确数值；不输出最新研究/假说；避免离题。"
+                            "\n\n用户问题：\n"
+                            + qtxt
+                            + "\n\n请用要点列表输出（每条以“- ”开头），不要输出标题："
+                        )
+                    else:
+                        p1 = (
+                            "Answer the user question using only long-standing textbook-level consensus knowledge. "
+                            "No paper-specific claims, no precise numbers, no speculative hypotheses, stay on-topic.\n\n"
+                            "User question:\n"
+                            + qtxt
+                            + "\n\nOutput as bullet points (each starts with '- '), no headings:"
+                        )
+                    layer1_raw = self._greedy_generate_with_past_prefix(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompt=p1,
+                        device=device,
+                        past_key_values=None,
+                        max_new_tokens=min(int(getattr(self.cfg, "layer1_max_new_tokens", 256)), 192),
+                        no_repeat_ngram_size=max(0, int(no_repeat_ngram_size)),
+                        repetition_penalty=max(1.05, float(self.cfg.repetition_penalty)),
+                    ).strip()
+                    layer1 = layer1_raw.strip()
+                    if layer1 and not re.search(r"^\s*-\s+", layer1):
+                        layer1 = "- " + layer1.lstrip("•").lstrip("-").strip()
+
+                    # L2: keep placeholder unless explicitly enabled
+                    layer2 = "- （本次未提供推测性补充）" if lang == "zh" else "- (No speculative addendum in this run.)"
+                    out = "\n".join([h0, layer0, "", h1, layer1, "", h2, layer2]).strip()
+                    return out, step_debugs
+
                 if required_slots:
                     lang = _lang_of_query(qtxt)
                     covered = [s for s in sorted(required_slots) if s in evidence_covered_slots]

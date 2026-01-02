@@ -607,6 +607,29 @@ python -u scripts/run_ab_eval_protocol.py \
 - `ab_results.jsonl` 每条包含 baseline/injected 的原始输出、解析后的 JSON、以及 `covered/overclaim` 指标。
 - 终端末尾会打印 summary：`baseline_valid/inj_valid`、`baseline_covered/inj_covered`、`baseline_over/inj_over`。
 
+### 2.3（新增）单元测试：Evidence Recall（检索命中率冒烟测试）
+
+目的：
+- 验证 `blocks.evidence.jsonl` 产物非空、结构正常
+- 验证 `kvbank_evidence` 对一组常见中文问法具有基本“命中能力”（不要求逐条证据匹配，只做召回 sanity check）
+- 及时发现“检索向量退化/总是命中同一批证据”等问题
+
+运行（以 SFTSV 为例）：
+
+```bash
+export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
+
+python -u scripts/test_evidence_recall.py \
+  --kv_dir_evidence "$WORK_DIR/kvbank_evidence" \
+  --blocks_jsonl_evidence "$WORK_DIR/blocks.evidence.jsonl" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --top_k 16
+```
+
+说明：
+- 默认会对“传播途径/病原体/发病机制/流行病学/诊断防控”五类 query 做检索，并断言总体 hit_rate 不低于阈值
+- 若你发现 evidence 基本都是英文，可保留中文 query：该测试使用英文 anchor 做命中判断（检索是否拉回相关英文证据句）
+
 ## 3) （可选）训练 Projector（对齐到 past_key_values 空间，max_kv_tokens=256）
 
 > 这条训练链路使用 `ChunkStore`（见 `external_kv_injection/scripts/build_chunkstore_from_pdfs.py`）。  
