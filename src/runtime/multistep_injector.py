@@ -876,6 +876,10 @@ class MultiStepInjector:
         def _lang_of_query(q: str) -> str:
             return "zh" if re.search(r"[\u4e00-\u9fff]", q or "") else "en"
 
+        def _has_cjk(s: str) -> bool:
+            """Lightweight language detector: any CJK => zh."""
+            return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
+
         def _slot_question(slot: str, *, lang: str) -> str:
             """
             Slot-specific question used for covered-slot generation.
