@@ -1024,7 +1024,42 @@ class MultiStepInjector:
                 evidence_texts = []
                 raw_texts = []
 
-            evidence = _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None) if evidence_texts else ""
+            # Retrieval-side hinting only: if the question asks for abbreviation expansion (disease_full_name),
+            # bias evidence sentence selection toward expansion-like patterns. This does NOT affect prompts/decoding.
+            def _evidence_keywords_for_slots(q: str, slots: set[str]) -> list[str]:
+                import re
+
+                kws: list[str] = []
+                if "disease_full_name" in set(slots or set()):
+                    # Generic expansion cues (EN + ZH)
+                    kws += ["stands for", "abbrev", "abbreviation", "full name", "expanded as", "全称", "英文全称", "缩写"]
+                    # Also include any uppercase abbreviations present in the user query (topic-agnostic).
+                    abbrs = re.findall(r"\b[A-Z]{2,10}\b", str(q or ""))
+                    for a in abbrs[:8]:
+                        kws.append(a)
+                        kws.append(f"({a}")
+                if "geographic_distribution" in set(slots or set()):
+                    kws += ["reported", "province", "provinces", "geograph", "distribution", "地区", "分布", "报告", "省"]
+                # Deduplicate while preserving order
+                seen: set[str] = set()
+                out: list[str] = []
+                for k in kws:
+                    kk = str(k).strip()
+                    if not kk:
+                        continue
+                    k_norm = kk.lower()
+                    if k_norm in seen:
+                        continue
+                    seen.add(k_norm)
+                    out.append(kk)
+                return out
+
+            qtxt_for_slots = str(query_text or prompt)
+            required_slots_hint = set(infer_slots_from_query(qtxt_for_slots))
+            evidence_keywords = _evidence_keywords_for_slots(qtxt_for_slots, required_slots_hint)
+            evidence = (
+                _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=evidence_keywords) if evidence_texts else ""
+            )
             # IMPORTANT: generation prompt must contain ONLY user question + selected evidence text.
             # raw_ctx is kept for offline logging only; it MUST NOT be appended to the prompt.
             raw_ctx = _extract_evidence(raw_texts, q=str(query_text or ""), keywords=None) if raw_texts else ""
@@ -1224,12 +1259,10 @@ class MultiStepInjector:
                                 return ""
                             # [1], [12]
                             x = re.sub(r"\s*\[[0-9]{1,3}\]\s*$", "", x).strip()
-                            # (Casel et al. 2021) / (2021) / (Smith 2020)
-                            x = re.sub(
-                                r"\s*[\(\（][^\)\）]{0,80}\b(19|20)\d{2}\b[^\)\）]{0,80}[\)\）]\s*\.?\s*$",
-                                "",
-                                x,
-                            ).strip()
+                            # (Casel et al. 2021) / (2021) / (Smith 2020) / (et al. 2021)
+                            x = re.sub(r"\s*[\(\（][^\)\）]{0,160}[\)\）]\s*\.?\s*$", lambda m: "" if re.search(r"(\bet\s+al\.\b|\bdoi\b|\b(19|20)\d{2}\b)", m.group(0), re.I) else m.group(0), x).strip()  # type: ignore[arg-type]
+                            # If stripping removed the year but left a dangling opening paren fragment, drop it.
+                            x = re.sub(r"\s*[\(\（][^\)\）]{0,160}$", "", x).strip()
                             return x
 
                         def _evidence_sentence_for_slot(slot: str, *, evidence_text: str, lang: str) -> str:
@@ -1448,6 +1481,18 @@ class MultiStepInjector:
                                 st = slot_epistemic_state.get(str(s), {})
                                 allowed = str(st.get("allowed_certainty") or "low")
                                 title = _slot_title(str(s), lang=lang)
+                                s_l = str(s or "").strip().lower()
+
+                                # Data-sensitive slot: do NOT let L1 invent finer-grained geography beyond L0 evidence.
+                                # Keep L1 deterministic and evidence-referential.
+                                if s_l == "geographic_distribution":
+                                    if lang == "zh":
+                                        l1_lines.append(f"- {title}：本层不补充具体地区范围；以 L0 的证据句为准（地区分布需要监测/研究数据支持）。")
+                                    else:
+                                        l1_lines.append(
+                                            f"- {title}: We do not add a finer-grained geographic range here; refer to L0 evidence (distribution requires surveillance/study data)."
+                                        )
+                                    continue
                                 if lang == "zh":
                                     if allowed == "low":
                                         p1s = (
