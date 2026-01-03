@@ -978,10 +978,14 @@ class MultiStepInjector:
                 return {
                     "pathogenesis": "暂无证据支持（具体发病机制尚不明确）。",
                     "mechanism": "暂无证据支持（具体机制尚不明确）。",
+                    "disease_full_name": "暂无证据支持（未检索到缩写展开/全称的证据句；可能是 evidence 抽取缺漏）。",
+                    "geographic_distribution": "暂无证据支持（未检索到地区分布/省份覆盖的证据句）。",
                 }.get(s, "暂无证据支持，无法确定。")
             return {
                 "pathogenesis": "The specific pathogenesis is not well established based on the provided evidence.",
                 "mechanism": "The specific mechanism is not well established based on the provided evidence.",
+                "disease_full_name": "Evidence is insufficient to determine the abbreviation expansion / full name.",
+                "geographic_distribution": "Evidence is insufficient to determine geographic distribution / coverage.",
             }.get(s, "Evidence is insufficient to answer this aspect.")
 
         prompt_for_final = prompt
@@ -1024,42 +1028,137 @@ class MultiStepInjector:
                 evidence_texts = []
                 raw_texts = []
 
-            # Retrieval-side hinting only: if the question asks for abbreviation expansion (disease_full_name),
-            # bias evidence sentence selection toward expansion-like patterns. This does NOT affect prompts/decoding.
-            def _evidence_keywords_for_slots(q: str, slots: set[str]) -> list[str]:
+            # -------------------------
+            # QueryPlan -> fusion evidence retrieval (retrieval-only)
+            # -------------------------
+            # Goal: handle multi-intent questions in ONE pass:
+            # - detect required slots from the question
+            # - generate per-slot retrieval queries (often English-biased because evidence is EN-heavy)
+            # - fuse evidence hits across those queries, then derive slot-aligned evidence slices
+            #
+            # IMPORTANT: This is retrieval-side only. No slots enter the prompt; no evidence KV is injected.
+            def _extract_abbreviations(q: str) -> list[str]:
                 import re
 
+                abbrs = re.findall(r"\b[A-Z]{2,10}\b", str(q or ""))
+                # stable order de-dupe
+                out: list[str] = []
+                seen: set[str] = set()
+                for a in abbrs:
+                    aa = a.strip()
+                    if not aa:
+                        continue
+                    if aa in seen:
+                        continue
+                    seen.add(aa)
+                    out.append(aa)
+                return out[:8]
+
+            def _slot_keywords(slot: str, *, q: str, abbrs: list[str]) -> list[str]:
+                s0 = (slot or "").strip().lower()
                 kws: list[str] = []
-                if "disease_full_name" in set(slots or set()):
-                    # Generic expansion cues (EN + ZH)
+                if s0 == "disease_full_name":
                     kws += ["stands for", "abbrev", "abbreviation", "full name", "expanded as", "全称", "英文全称", "缩写"]
-                    # Also include any uppercase abbreviations present in the user query (topic-agnostic).
-                    abbrs = re.findall(r"\b[A-Z]{2,10}\b", str(q or ""))
-                    for a in abbrs[:8]:
+                    for a in (abbrs or []):
                         kws.append(a)
                         kws.append(f"({a}")
-                if "geographic_distribution" in set(slots or set()):
-                    kws += ["reported", "province", "provinces", "geograph", "distribution", "地区", "分布", "报告", "省"]
-                # Deduplicate while preserving order
-                seen: set[str] = set()
+                elif s0 == "geographic_distribution":
+                    kws += ["reported", "province", "provinces", "geograph", "distribution", "地区", "分布", "报告", "省", "China"]
+                # stable de-dupe
                 out: list[str] = []
+                seen: set[str] = set()
                 for k in kws:
                     kk = str(k).strip()
                     if not kk:
                         continue
-                    k_norm = kk.lower()
-                    if k_norm in seen:
+                    kn = kk.lower()
+                    if kn in seen:
                         continue
-                    seen.add(k_norm)
+                    seen.add(kn)
                     out.append(kk)
                 return out
 
-            qtxt_for_slots = str(query_text or prompt)
-            required_slots_hint = set(infer_slots_from_query(qtxt_for_slots))
-            evidence_keywords = _evidence_keywords_for_slots(qtxt_for_slots, required_slots_hint)
-            evidence = (
-                _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=evidence_keywords) if evidence_texts else ""
-            )
+            def _build_query_plan(q: str) -> tuple[set[str], list[str]]:
+                """
+                Returns: required_slots, retrieval_queries (global + per-slot queries)
+                """
+                rs = set(infer_slots_from_query(str(q or "")))
+                ab = _extract_abbreviations(str(q or ""))
+                qs: list[str] = []
+                # Always include the original query as the global retrieval query.
+                if str(q or "").strip():
+                    qs.append(str(q))
+                # Per-slot retrieval queries (English-biased; evidence often EN).
+                for s in sorted(rs):
+                    s0 = str(s).strip().lower()
+                    if s0 == "disease_full_name":
+                        if ab:
+                            qs.append(f"{ab[0]} stands for full name abbreviation")
+                        else:
+                            qs.append("abbreviation stands for full name")
+                    elif s0 == "geographic_distribution":
+                        if ab:
+                            qs.append(f"{ab[0]} reported in China provinces geographic distribution")
+                        else:
+                            qs.append("reported in China provinces geographic distribution")
+                # de-dupe while preserving order
+                out: list[str] = []
+                seen: set[str] = set()
+                for x in qs:
+                    xx = str(x).strip()
+                    if not xx:
+                        continue
+                    k = xx.lower()
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    out.append(xx)
+                return rs, out
+
+            qtxt_for_plan = str(query_text or prompt)
+            required_slots_hint, retrieval_queries = _build_query_plan(qtxt_for_plan)
+            abbrs_hint = _extract_abbreviations(qtxt_for_plan)
+
+            # 1) Collect evidence/raw texts from the GLOBAL query retrieval (already computed in `gr`).
+            # 2) If we have an embedding function, do additional retrieval for each per-slot query and union hits.
+            if query_embed_fn is not None and retrieval_queries:
+                try:
+                    # Keep it bounded: union only top-N evidence items per query.
+                    fused_items = list(gr.items or [])
+                    for q_r in retrieval_queries[1:]:
+                        v_r = query_embed_fn(str(q_r))
+                        gr_r = self.grounding_retriever.search(
+                            v_r, top_k=min(24, int(self.cfg.top_k_blocks) * 3), filters=None, query_text=str(q_r)
+                        )
+                        fused_items.extend(list(gr_r.items or []))
+
+                    # Rebuild evidence_texts/raw_texts from fused items (dedupe by block_id).
+                    evidence_texts = []
+                    raw_texts = []
+                    seen_ids: set[str] = set()
+                    if self.block_text_lookup is not None:
+                        for it in fused_items:
+                            bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                            if not bid:
+                                continue
+                            sid = str(bid)
+                            if sid in seen_ids:
+                                continue
+                            seen_ids.add(sid)
+                            t = self.block_text_lookup(sid)
+                            if not (isinstance(t, str) and t.strip()):
+                                continue
+                            src = (it.meta or {}).get("retrieval_source")
+                            if src == "evidence":
+                                evidence_texts.append(t.strip())
+                            else:
+                                raw_texts.append(t.strip())
+                except Exception:
+                    # Fallback to global retrieval result already in evidence_texts/raw_texts.
+                    pass
+
+            # Build a single global evidence slice for prompt grounding (slot-agnostic).
+            evidence = _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None) if evidence_texts else ""
             # IMPORTANT: generation prompt must contain ONLY user question + selected evidence text.
             # raw_ctx is kept for offline logging only; it MUST NOT be appended to the prompt.
             raw_ctx = _extract_evidence(raw_texts, q=str(query_text or ""), keywords=None) if raw_texts else ""
@@ -1072,8 +1171,48 @@ class MultiStepInjector:
                 # - required_slots from user question
                 # - evidence_covered_slots from selected evidence text (may be empty)
                 qtxt = str(query_text or prompt)
-                required_slots = set(infer_slots_from_query(qtxt))
+                required_slots = set(required_slots_hint or set(infer_slots_from_query(qtxt)))
                 evidence_covered_slots = set(infer_slots_from_query(str(evidence or "")))
+
+                # Slot-aligned evidence slices (built from the fused evidence_texts; retrieval-only).
+                slot_evidence_map: Dict[str, str] = {}
+                for s in sorted(required_slots):
+                    kws = _slot_keywords(str(s), q=qtxt, abbrs=abbrs_hint)
+                    slot_evidence_map[str(s)] = _extract_evidence(evidence_texts, q=str(qtxt), keywords=kws) if kws else ""
+
+                # Slot coverage: union the global evidence slice with special-slot support
+                # (affects which slots are treated as covered/uncovered in Scheme A).
+                def _special_slot_supported(slot: str, txt: str) -> bool:
+                    import re
+
+                    s0 = (slot or "").strip().lower()
+                    t0 = (txt or "").strip()
+                    if not t0:
+                        return False
+                    if s0 == "disease_full_name":
+                        return bool(
+                            re.search(
+                                r"(stands\s+for|full\s+name|abbrev|abbreviation|全称|缩写|英文全称)",
+                                t0,
+                                re.IGNORECASE,
+                            )
+                        )
+                    if s0 == "geographic_distribution":
+                        return bool(
+                            re.search(
+                                r"(emerged\s+in\s+china\s+in\s+\d{4}|between\s+\d{4}\s+and\s+\d{4}|"
+                                r"\d+\s+of\s+the\s+\d+\s+provinces|east\s+asia|reported\s+across|"
+                                r"省|地区分布|分布|报告|中国)",
+                                t0,
+                                re.IGNORECASE,
+                            )
+                        )
+                    return False
+
+                for s in sorted(required_slots):
+                    if str(s) in {"disease_full_name", "geographic_distribution"}:
+                        if _special_slot_supported(str(s), slot_evidence_map.get(str(s), "")):
+                            evidence_covered_slots.add(str(s))
                 # Fail-closed: if we cannot map the question to adjudicable slots,
                 # do NOT proceed with free-form GROUNDED generation.
                 if not required_slots:
@@ -1108,15 +1247,15 @@ class MultiStepInjector:
                     if (not allow_dp) and lang == "zh":
                         has_any_evidence = bool((evidence or "").strip()) or bool(evidence_texts)
                         if has_any_evidence:
-                            layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等）。已检索到证据，但 schema 未覆盖对应可裁决字段；因此仅在 L0 展示证据句，不在 L1 给出具体结论。"
+                            layer1 = "- 该问题涉及需要证据支持的事实类型。已检索到证据，但 schema 未覆盖对应可裁决字段；因此仅在 L0 展示证据，不在 L1 给出具体结论。"
                         else:
-                            layer1 = "- 该问题涉及需要证据支持的事实类型（例如地区分布等），当前 schema 未覆盖且未检索到可用证据，无法给出可靠结论。"
+                            layer1 = "- 该问题涉及需要证据支持的事实类型；当前 schema 未覆盖且未检索到可用证据，无法给出可靠结论。"
                     elif (not allow_dp) and lang != "zh":
                         has_any_evidence = bool((evidence or "").strip()) or bool(evidence_texts)
                         if has_any_evidence:
-                            layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Evidence was retrieved, but schema has no adjudicable fields for it; L1 will not produce a specific conclusion."
+                            layer1 = "- This question involves fact types that require evidence. Evidence was retrieved, but schema has no adjudicable fields for it; L1 will not produce a specific conclusion."
                         else:
-                            layer1 = "- This question involves fact types that require evidence (e.g., geographic distribution). Schema has no coverage and no usable evidence was retrieved; cannot answer reliably."
+                            layer1 = "- This question involves fact types that require evidence. Schema has no coverage and no usable evidence was retrieved; cannot answer reliably."
                     elif lang == "zh":
                         p1 = (
                             "你是医学教科书风格的助手。请基于常识性、长期共识的医学/生物学知识回答用户问题。"
@@ -1301,14 +1440,129 @@ class MultiStepInjector:
                                 return ("证据句：" if lang == "zh" else "Evidence: ") + picked[0]
                             return ""
 
+                        def _summary_from_evidence_for_slot(slot: str, *, evidence_text: str, lang: str) -> str:
+                            """
+                            Deterministic summarization for data-sensitive slots.
+                            Does NOT echo evidence sentences; only extracts key facts/patterns.
+                            """
+                            import re
+
+                            s0 = (slot or "").strip().lower()
+                            t0 = (evidence_text or "").strip()
+                            if not t0:
+                                return ""
+                            lines = [ln.strip() for ln in t0.splitlines() if ln.strip()]
+                            if s0 == "geographic_distribution":
+                                joined = " ".join(lines)
+                                year = None
+                                m = re.search(r"emerged\s+in\s+china\s+in\s+(\d{4})", joined, re.IGNORECASE)
+                                if m:
+                                    year = m.group(1)
+                                yr_a = yr_b = None
+                                m2 = re.search(r"between\s+(\d{4})\s+and\s+(\d{4})", joined, re.IGNORECASE)
+                                if m2:
+                                    yr_a, yr_b = m2.group(1), m2.group(2)
+                                n = tot = None
+                                m3 = re.search(r"(\d+)\s+of\s+the\s+(\d+)\s+provinces", joined, re.IGNORECASE)
+                                if m3:
+                                    n, tot = m3.group(1), m3.group(2)
+                                # Country list after "including ... such as ..."
+                                countries: List[str] = []
+                                m4 = re.search(r"including\s+(?:countries\s+such\s+as|countries|areas)\s+([^\.]+)", joined, re.IGNORECASE)
+                                if m4:
+                                    chunk = m4.group(1)
+                                    for c in re.split(r",|\band\b", chunk):
+                                        cc = c.strip().strip(".")
+                                        if cc and len(cc) <= 24:
+                                            countries.append(cc)
+                                # Extra "such as ..." (2nd sentence)
+                                m5 = re.search(r"such\s+as\s+([^\.]+)", joined, re.IGNORECASE)
+                                if m5 and not countries:
+                                    chunk = m5.group(1)
+                                    for c in re.split(r",|\band\b", chunk):
+                                        cc = c.strip().strip(".")
+                                        if cc and len(cc) <= 24:
+                                            countries.append(cc)
+                                # De-dupe and cap
+                                seen_c: set[str] = set()
+                                uniq = []
+                                for c in countries:
+                                    k = c.lower()
+                                    if k in seen_c:
+                                        continue
+                                    seen_c.add(k)
+                                    uniq.append(c)
+                                uniq = uniq[:6]
+                                facts: List[str] = []
+                                if lang == "zh":
+                                    if year:
+                                        facts.append(f"{year}年在中国首次报告/出现")
+                                    if n and tot:
+                                        if yr_a and yr_b:
+                                            facts.append(f"{yr_a}–{yr_b}年期间，中国{tot}个省中有{n}个省报告病例")
+                                        else:
+                                            facts.append(f"中国{tot}个省中有{n}个省报告病例")
+                                    if uniq:
+                                        facts.append("此后在东亚多国/地区也有报告（" + "、".join(uniq) + "等）")
+                                    return "；".join(facts).strip("；") + "。" if facts else ""
+                                else:
+                                    if year:
+                                        facts.append(f"first reported/emerged in China in {year}")
+                                    if n and tot:
+                                        if yr_a and yr_b:
+                                            facts.append(f"reported in {n} of {tot} provinces in China between {yr_a}–{yr_b}")
+                                        else:
+                                            facts.append(f"reported in {n} of {tot} provinces in China")
+                                    if uniq:
+                                        facts.append("reported across East Asia (e.g., " + ", ".join(uniq) + ")")
+                                    return "; ".join(facts).strip("; ") + "." if facts else ""
+
+                            if s0 == "disease_full_name":
+                                joined = " ".join(lines)
+                                # Prefer explicit "FULL (ABBR)" patterns using any abbreviation found in the user query.
+                                ab = (abbrs_hint[0] if abbrs_hint else "")
+                                if not ab:
+                                    m_ab = re.search(r"\b[A-Z]{2,10}\b", joined)
+                                    ab = m_ab.group(0) if m_ab else ""
+                                if ab:
+                                    # FULL (ABBR)
+                                    m = re.search(
+                                        r"([A-Za-z][A-Za-z0-9 \-]{6,160})\s*\(\s*"
+                                        + re.escape(ab)
+                                        + r"\s*\)",
+                                        joined,
+                                        re.IGNORECASE,
+                                    )
+                                    if not m:
+                                        # FULL, ABBR
+                                        m = re.search(
+                                            r"([A-Za-z][A-Za-z0-9 \-]{6,160})\s*[,，]\s*"
+                                            + re.escape(ab)
+                                            + r"\b",
+                                            joined,
+                                            re.IGNORECASE,
+                                        )
+                                    if m:
+                                        full_en = m.group(1).strip()
+                                        if lang == "zh":
+                                            return f"{ab} 的英文全称为“{full_en}”。"
+                                        return f"The full name of {ab} is “{full_en}”."
+                                # Chinese full name if present in evidence (generic)
+                                m2 = re.search(r"([一-龥]{4,24}(?:病毒|综合征|病毒病))", joined)
+                                if m2 and lang == "zh":
+                                    return f"该缩写对应的中文全称证据句中出现为“{m2.group(1)}”。"
+                                return ""
+                            return ""
+
                         for s in covered:
                             # Special deterministic L0 path (no free-form summarization).
                             s_l = str(s or "").strip().lower()
                             if s_l in {"geographic_distribution", "disease_full_name"}:
                                 title = _slot_title(s, lang=lang)
-                                ev_ans = _evidence_sentence_for_slot(s, evidence_text=str(evidence or ""), lang=lang)
-                                if ev_ans:
-                                    parts.append(f"- {title}：{ev_ans}" if lang == "zh" else f"- {title}: {ev_ans}")
+                                ev_txt = (slot_evidence_map.get(str(s), "") or "").strip() or str(evidence or "")
+                                summ = _summary_from_evidence_for_slot(s, evidence_text=str(ev_txt), lang=lang)
+                                if summ:
+                                    parts.append(f"- {title}：{summ}" if lang == "zh" else f"- {title}: {summ}")
                                 else:
                                     tmpl = _slot_uncertainty(s, lang=lang)
                                     parts.append(f"- {title}：{tmpl}" if lang == "zh" else f"- {title}: {tmpl}")
@@ -1492,6 +1746,12 @@ class MultiStepInjector:
                                         l1_lines.append(
                                             f"- {title}: We do not add a finer-grained geographic range here; refer to L0 evidence (distribution requires surveillance/study data)."
                                         )
+                                    continue
+                                if s_l == "disease_full_name":
+                                    if lang == "zh":
+                                        l1_lines.append(f"- {title}：本层不补充额外展开；以 L0 的缩写展开裁决为准。")
+                                    else:
+                                        l1_lines.append(f"- {title}: No extra expansion is added; refer to the L0 adjudication.")
                                     continue
                                 if lang == "zh":
                                     if allowed == "low":
