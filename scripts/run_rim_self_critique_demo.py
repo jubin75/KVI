@@ -33,12 +33,15 @@ if _REPO_ROOT_STR not in sys.path:
 try:
     from external_kv_injection.src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
     from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+    from external_kv_injection.src.pattern_retriever import PatternRetriever  # type: ignore
     from external_kv_injection.src.retriever import Retriever  # type: ignore
+    from external_kv_injection.src.rim import RIM, RIMConfig  # type: ignore
     from external_kv_injection.src.runtime.hf_cache_prefix_injection import (  # type: ignore
         build_past_key_values_prefix,
         stack_ext_kv_items_by_layer,
     )
     from external_kv_injection.src.runtime.kv_relevance import logit_delta_vs_zero_prefix  # type: ignore
+    from external_kv_injection.src.runtime.kvi2_runtime import KVI2Config, KVI2Runtime  # type: ignore
     from external_kv_injection.src.runtime.multistep_injector import MultiStepInjector  # type: ignore
     from external_kv_injection.src.runtime.self_critique import (  # type: ignore
         CritiqueResult,
@@ -48,9 +51,12 @@ try:
 except ModuleNotFoundError:
     from src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
     from src.kv_bank import FaissKVBank  # type: ignore
+    from src.pattern_retriever import PatternRetriever  # type: ignore
     from src.retriever import Retriever  # type: ignore
+    from src.rim import RIM, RIMConfig  # type: ignore
     from src.runtime.hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer  # type: ignore
     from src.runtime.kv_relevance import logit_delta_vs_zero_prefix  # type: ignore
+    from src.runtime.kvi2_runtime import KVI2Config, KVI2Runtime  # type: ignore
     from src.runtime.multistep_injector import MultiStepInjector  # type: ignore
     from src.runtime.self_critique import CritiqueResult, heuristic_self_critique, llm_json_self_critique  # type: ignore
 
@@ -114,6 +120,12 @@ def main() -> None:
     p.add_argument("--max_new_tokens_base", type=int, default=192)
     p.add_argument("--max_new_tokens_rim", type=int, default=192)
 
+    p.add_argument(
+        "--gate_mode",
+        choices=["introspection", "self_critique"],
+        default="introspection",
+        help="Gate strategy. introspection=RIM v0.4 style (no token generation); self_critique=demo legacy gate.",
+    )
     p.add_argument("--self_critique_mode", choices=["heuristic", "llm_json"], default="heuristic")
     p.add_argument("--critique_max_new_tokens", type=int, default=128)
     p.add_argument("--critique_conf_threshold", type=float, default=0.55, help="Trigger retrieval if confidence < threshold")
@@ -147,6 +159,45 @@ def main() -> None:
     model.to(device)
     model.eval()
 
+    # Fast path: v0.4 pipeline in reusable runtime
+    if str(args.gate_mode) == "introspection":
+        rt = KVI2Runtime(
+            cfg=KVI2Config(
+                layers=tuple(int(x.strip()) for x in str(args.layers).split(",") if x.strip() != ""),
+                top_k=int(args.top_k),
+                max_new_tokens_base=int(args.max_new_tokens_base),
+                max_new_tokens_rim=int(args.max_new_tokens_rim),
+                kv_refresh_rounds=int(args.kv_refresh_rounds),
+                kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
+            ),
+            domain_encoder_model=str(args.domain_encoder_model),
+            domain_encoder_max_length=int(args.domain_encoder_max_length),
+        )
+        out = rt.run_ab(
+            model=model,
+            tokenizer=tok,
+            prompt=str(args.prompt),
+            kv_dir=str(kv_dir),
+            device=device,
+            use_chat_template=bool(args.use_chat_template),
+            force_rim=bool(args.force_rim),
+        )
+        print("\n=== 无 RIM（Base LLM）===\n")
+        print(str(out.get("baseline_answer", "")).strip())
+        print("\n=== Pattern-first（non-semantic）===\n")
+        print(json.dumps(out.get("pattern_first", {}), ensure_ascii=False, indent=2))
+        print("\n=== Introspection Gate ===\n")
+        print(json.dumps({"gate_mode": "introspection", "gate": out.get("gate", {}), "retrieve_more": out.get("retrieve_more")}, ensure_ascii=False, indent=2))
+        if out.get("retrieve_more"):
+            print("\n=== RIM 检索（KV Bank）===\n")
+            print(json.dumps(out.get("retrieval", {}), ensure_ascii=False, indent=2))
+            print("\n=== 有 RIM（注入 KV → 第二轮生成）===\n")
+            print(str(out.get("rim_answer", "")).strip())
+        else:
+            print("\n=== 有 RIM ===\n")
+            print("(本次未触发检索/注入；可用 --force_rim 强制演示)")
+        return
+
     # --- Pass 1: Base LLM (no injection) ---
     user_prompt = str(args.prompt)
     prompt1 = _format_prompt(tok, user_prompt, use_chat_template=bool(args.use_chat_template))
@@ -161,28 +212,69 @@ def main() -> None:
         repetition_penalty=1.08,
     )
 
-    # --- Self-critique gate ---
-    if str(args.self_critique_mode) == "llm_json":
-        # Critique prompt does not need chat-template formatting; keep it standalone.
-        crit = llm_json_self_critique(
-            model=model,
-            tokenizer=tok,
-            prompt_text=prompt1,
-            question=user_prompt,
-            draft_answer=base_answer,
-            device=device,
-            max_new_tokens=int(args.critique_max_new_tokens),
-        )
-        if crit is None:
-            crit = heuristic_self_critique(user_prompt, base_answer)
-            crit_mode = "heuristic_fallback"
-        else:
-            crit_mode = "llm_json"
-    else:
-        crit = heuristic_self_critique(user_prompt, base_answer)
-        crit_mode = "heuristic"
+    # --- Pattern-first (v0.4) ---
+    # Pattern-first does NOT inject KV; it provides priors/constraints to semantic-second + gate.
+    pattern = PatternRetriever()
+    pattern_res = pattern.retrieve(user_prompt)
 
-    trigger = bool(args.force_rim) or (crit.is_medical_fact and float(crit.confidence) < float(args.critique_conf_threshold))
+    # --- Gate ---
+    # v0.4 default: RIM introspection gate (MUST NOT generate tokens).
+    # Legacy option: self-critique (may generate tokens if llm_json).
+    gate_debug: Dict[str, Any] = {}
+    trigger = False
+    crit: Optional[CritiqueResult] = None
+    crit_mode: Optional[str] = None
+
+    if str(args.gate_mode) == "self_critique":
+        if str(args.self_critique_mode) == "llm_json":
+            crit = llm_json_self_critique(
+                model=model,
+                tokenizer=tok,
+                prompt_text=prompt1,
+                question=user_prompt,
+                draft_answer=base_answer,
+                device=device,
+                max_new_tokens=int(args.critique_max_new_tokens),
+            )
+            if crit is None:
+                crit = heuristic_self_critique(user_prompt, base_answer)
+                crit_mode = "heuristic_fallback"
+            else:
+                crit_mode = "llm_json"
+        else:
+            crit = heuristic_self_critique(user_prompt, base_answer)
+            crit_mode = "heuristic"
+
+        trigger = bool(args.force_rim) or (crit.is_medical_fact and float(crit.confidence) < float(args.critique_conf_threshold))
+        gate_debug = {
+            "gate_mode": "self_critique",
+            "mode": crit_mode,
+            "is_medical_fact": bool(crit.is_medical_fact),
+            "confidence": float(crit.confidence),
+            "threshold": float(args.critique_conf_threshold),
+            "trigger_retrieve": bool(trigger),
+            "reason": str(crit.reason),
+        }
+    else:
+        # introspection gate: use retrieval-embedding drift as a proxy for q0 vs q'_t in embedding space
+        # (still non-generative). q'_t here is derived from (prompt + base_answer) as a cheap "reasoning cue".
+        enc_gate = DomainEncoder(
+            DomainEncoderConfig(
+                model_name_or_path=str(args.domain_encoder_model),
+                max_length=int(args.domain_encoder_max_length),
+                normalize=True,
+                device=str(device),
+            )
+        )
+        q0 = enc_gate.encode(user_prompt)[0]
+        qprime = enc_gate.encode(user_prompt + "\n" + base_answer)[0]
+
+        rim_gate = RIM(retriever=Retriever(FaissKVBank.load(Path(str(kv_dir)))) if kv_dir else Retriever(FaissKVBank.load(Path(str(kv_dir)))), cfg=RIMConfig())
+        rim_gate.set_q0(q0)
+        rim_gate.observe(hidden_states=None, generated_tokens=None, pattern_hits=pattern_res, semantic_hits=None)
+        gate = rim_gate.introspection_gate(q_prime_vec=qprime, kv_relevance_delta=None, pattern_mismatch=False)
+        trigger = bool(args.force_rim) or bool(gate.get("retrieve_more") is True)
+        gate_debug = {"gate_mode": "introspection", "gate": gate}
 
     # --- Pass 2: Retrieve + Inject + Regenerate ---
     rim_answer = ""
@@ -272,21 +364,22 @@ def main() -> None:
     # --- Print comparison ---
     print("\n=== 无 RIM（Base LLM）===\n")
     print(base_answer.strip())
-    print("\n=== RIM Self-Critique ===\n")
+    print("\n=== Pattern-first（non-semantic）===\n")
     print(
         json.dumps(
             {
-                "mode": crit_mode,
-                "is_medical_fact": bool(crit.is_medical_fact),
-                "confidence": float(crit.confidence),
-                "threshold": float(args.critique_conf_threshold),
-                "trigger_retrieve": bool(trigger),
-                "reason": str(crit.reason),
+                "recall_size": int(pattern_res.recall_size),
+                "debug": pattern_res.debug_info,
+                "pattern_hits": [
+                    {"block_id": h.block_id, "hit_types": h.hit_types, "confidence": h.confidence, "metadata": h.metadata} for h in pattern_res.pattern_hits
+                ],
             },
             ensure_ascii=False,
             indent=2,
         )
     )
+    print("\n=== Introspection Gate ===\n")
+    print(json.dumps(gate_debug, ensure_ascii=False, indent=2))
     if trigger:
         print("\n=== RIM 检索（KV Bank）===\n")
         print(
