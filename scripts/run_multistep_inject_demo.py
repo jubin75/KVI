@@ -108,6 +108,12 @@ def main() -> None:
         "This often reduces chat transcript artifacts like 'Human:' in outputs.",
     )
     p.add_argument(
+        "--append_evidence_to_prompt",
+        action="store_true",
+        help="(debug) If set, append a short evidence slice into the final generation prompt. "
+        "Default OFF for pure KV injection.",
+    )
+    p.add_argument(
         "--rewrite_query_for_retrieval",
         choices=["off", "acronym_lexicon_from_blocks", "zh_en_intent", "auto"],
         default="auto",
@@ -878,6 +884,7 @@ def main() -> None:
         enable_speculative_layer=bool(args.enable_layer2),
         layer1_max_new_tokens=int(args.layer1_max_new_tokens),
         layer2_max_new_tokens=int(args.layer2_max_new_tokens),
+        append_evidence_to_prompt=bool(args.append_evidence_to_prompt),
     )
     lookup = None
     if bool(args.ground_with_selected_text) or bool(args.use_struct_slots):
@@ -955,6 +962,7 @@ def main() -> None:
             ground_with_selected_text=bool(args.ground_with_selected_text),
             grounding_instructions=str(args.grounding_instructions or ""),
             use_struct_slots=bool(args.use_struct_slots),
+            use_chat_template=bool(args.use_chat_template),
         )
 
     print("=== Step Debug ===")
