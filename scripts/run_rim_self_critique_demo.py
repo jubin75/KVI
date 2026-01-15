@@ -132,10 +132,18 @@ def main() -> None:
     )
 
     p.add_argument(
+        "--runtime_backend",
+        choices=["kvi1", "kvi2"],
+        default="kvi1",
+        help="Which runtime path to use: kvi1=legacy semantic KV injection (no Pattern-first); "
+        "kvi2=KVI2Runtime (Pattern-first + introspection-gated).",
+    )
+    p.add_argument(
         "--gate_mode",
         choices=["introspection", "self_critique"],
         default="introspection",
-        help="Gate strategy. introspection=RIM v0.4 style (no token generation); self_critique=demo legacy gate.",
+        help="Gate strategy. introspection=non-generative gate (cosine drift) without Pattern-first when runtime=kvi1; "
+        "self_critique=legacy gate.",
     )
     p.add_argument("--self_critique_mode", choices=["heuristic", "llm_json"], default="heuristic")
     p.add_argument("--critique_max_new_tokens", type=int, default=128)
@@ -170,8 +178,8 @@ def main() -> None:
     model.to(device)
     model.eval()
 
-    # Fast path: v0.4 pipeline in reusable runtime
-    if str(args.gate_mode) == "introspection":
+    # Fast path: v0.4 pipeline in reusable runtime (only when explicitly selected)
+    if str(args.runtime_backend) == "kvi2" and str(args.gate_mode) == "introspection":
         rt = KVI2Runtime(
             cfg=KVI2Config(
                 layers=tuple(int(x.strip()) for x in str(args.layers).split(",") if x.strip() != ""),
@@ -235,8 +243,7 @@ def main() -> None:
     pattern_res = pattern.retrieve(user_prompt)
 
     # --- Gate ---
-    # v0.4 default: RIM introspection gate (MUST NOT generate tokens).
-    # Legacy option: self-critique (may generate tokens if llm_json).
+    # Legacy path (kvi1): no Pattern-first; gate can be introspection (cosine drift) or self-critique.
     gate_debug: Dict[str, Any] = {}
     trigger = False
     crit: Optional[CritiqueResult] = None
@@ -273,8 +280,7 @@ def main() -> None:
             "reason": str(crit.reason),
         }
     else:
-        # introspection gate: use retrieval-embedding drift as a proxy for q0 vs q'_t in embedding space
-        # (still non-generative). q'_t here is derived from (prompt + base_answer) as a cheap "reasoning cue".
+        # introspection gate (legacy path): use retrieval-embedding drift as a proxy for q0 vs q'_t
         enc_gate = DomainEncoder(
             DomainEncoderConfig(
                 model_name_or_path=str(args.domain_encoder_model),
@@ -286,12 +292,20 @@ def main() -> None:
         q0 = enc_gate.encode(user_prompt)[0]
         qprime = enc_gate.encode(user_prompt + "\n" + base_answer)[0]
 
-        rim_gate = RIM(retriever=Retriever(FaissKVBank.load(Path(str(kv_dir)))) if kv_dir else Retriever(FaissKVBank.load(Path(str(kv_dir)))), cfg=RIMConfig())
+        rim_gate = RIM(
+            retriever=Retriever(FaissKVBank.load(Path(str(kv_dir)))),
+            cfg=RIMConfig(
+                tau_cos_dist=0.35,
+                top_k=int(args.top_k),
+                kv_refresh_rounds=int(args.kv_refresh_rounds),
+                kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
+            ),
+        )
         rim_gate.set_q0(q0)
-        rim_gate.observe(hidden_states=None, generated_tokens=None, pattern_hits=pattern_res, semantic_hits=None)
+        rim_gate.observe(hidden_states=None, generated_tokens=None, pattern_hits=None, semantic_hits=None)
         gate = rim_gate.introspection_gate(q_prime_vec=qprime, kv_relevance_delta=None, pattern_mismatch=False)
         trigger = bool(args.force_rim) or bool(gate.get("retrieve_more") is True)
-        gate_debug = {"gate_mode": "introspection", "gate": gate}
+        gate_debug = {"gate_mode": "introspection", "gate": gate, "retrieve_more": bool(trigger)}
 
     # --- Pass 2: Retrieve + Inject + Regenerate ---
     rim_answer = ""
