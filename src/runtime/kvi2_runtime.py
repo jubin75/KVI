@@ -39,6 +39,8 @@ class KVI2Config:
     kv_irrelevant_logit_delta_threshold: float = 0.05
     tau_cos_dist: float = 0.35
     pattern_index_dir: str = ""
+    structured_answer_template: bool = False
+    structured_template_text: str = ""
 
 
 class KVI2Runtime:
@@ -74,6 +76,10 @@ class KVI2Runtime:
         """
         user_prompt = str(prompt)
         formatted_prompt = self._format_prompt(tokenizer, user_prompt, use_chat_template=bool(use_chat_template))
+        if bool(self.cfg.structured_answer_template):
+            tmpl = (self.cfg.structured_template_text or "").strip()
+            if tmpl:
+                formatted_prompt = formatted_prompt + "\n\n" + tmpl
 
         # 1) base LLM first pass (no injection)
         baseline = MultiStepInjector._greedy_generate_with_past_prefix(

@@ -918,67 +918,6 @@ class MultiStepInjector:
             """Lightweight language detector: any CJK => zh."""
             return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
 
-        def _slot_question(slot: str, *, lang: str) -> str:
-            """
-            Slot-specific question used for covered-slot generation.
-            IMPORTANT: must not mention slot ids/field names; only natural-language questions.
-            """
-            s = (slot or "").strip().lower()
-            if lang == "zh":
-                return {
-                    "transmission": "该疾病的主要传播途径是什么？",
-                    "pathogenesis": "该疾病的发病机制是什么？",
-                    "clinical_features": "该疾病的主要临床表现是什么？",
-                    "diagnosis": "该疾病如何诊断/检测？",
-                    "treatment": "该疾病如何治疗？",
-                    "epidemiology": "该疾病的流行病学特征是什么？",
-                    "risk_factors": "该疾病的风险因素是什么？",
-                    "complications": "该疾病常见并发症有哪些？",
-                    "prognosis": "该疾病的预后如何？",
-                    "prevention": "该疾病如何预防？",
-                    "disease_full_name": "该疾病/病原的全称是什么？",
-                    "geographic_distribution": "该疾病/病原的地区分布如何？",
-                    "overview": "请简要概述该疾病。",
-                    "mechanism": "该疾病的机制是什么？",
-                }.get(s, "请回答用户问题中相关方面。")
-            return {
-                "transmission": "What is the primary mode of transmission?",
-                "pathogenesis": "What is the pathogenesis?",
-                "clinical_features": "What are the main clinical features?",
-                "diagnosis": "How is it diagnosed/tested?",
-                "treatment": "How is it treated?",
-                "epidemiology": "What are key epidemiological characteristics?",
-                "risk_factors": "What are the risk factors?",
-                "complications": "What complications are reported?",
-                "prognosis": "What is the prognosis?",
-                "prevention": "How can it be prevented?",
-                "disease_full_name": "What is the full name (expansion) of the disease/pathogen abbreviation?",
-                "geographic_distribution": "What is the geographic distribution?",
-                "overview": "Provide a brief overview.",
-                "mechanism": "What is the mechanism?",
-            }.get(s, "Answer the relevant aspect of the user question.")
-
-        def _slot_title(slot: str, *, lang: str) -> str:
-            s = (slot or "").strip().lower()
-            if lang == "zh":
-                return {
-                    "transmission": "传播途径",
-                    "pathogenesis": "发病机制",
-                    "clinical_features": "临床表现",
-                    "diagnosis": "诊断",
-                    "treatment": "治疗",
-                    "epidemiology": "流行病学",
-                    "risk_factors": "风险因素",
-                    "complications": "并发症",
-                    "prognosis": "预后",
-                    "prevention": "预防",
-                    "disease_full_name": "疾病全称",
-                    "geographic_distribution": "地区分布",
-                    "overview": "概述",
-                    "mechanism": "机制",
-                }.get(s, s)
-            return s
-
         # -------------------------
         # Final prompt construction (product logic)
         # -------------------------

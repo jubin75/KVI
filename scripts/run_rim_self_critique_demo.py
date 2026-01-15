@@ -119,6 +119,17 @@ def main() -> None:
     p.add_argument("--layers", type=str, default="0,1,2,3")
     p.add_argument("--max_new_tokens_base", type=int, default=192)
     p.add_argument("--max_new_tokens_rim", type=int, default=192)
+    p.add_argument(
+        "--structured_template",
+        action="store_true",
+        help="If set, append a structured answer template to the prompt (LLM still answers; no slot hardcoding).",
+    )
+    p.add_argument(
+        "--structured_template_text",
+        type=str,
+        default="",
+        help="Optional template text to append when --structured_template is set. If empty, use a safe default.",
+    )
 
     p.add_argument(
         "--gate_mode",
@@ -169,6 +180,12 @@ def main() -> None:
                 max_new_tokens_rim=int(args.max_new_tokens_rim),
                 kv_refresh_rounds=int(args.kv_refresh_rounds),
                 kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
+                structured_answer_template=bool(args.structured_template),
+                structured_template_text=(
+                    str(args.structured_template_text).strip()
+                    if str(args.structured_template_text or "").strip()
+                    else "请按以下结构回答：\n- 结论：...\n- 证据依据：...\n- 不确定性/限制：..."
+                ),
             ),
             domain_encoder_model=str(args.domain_encoder_model),
             domain_encoder_max_length=int(args.domain_encoder_max_length),
