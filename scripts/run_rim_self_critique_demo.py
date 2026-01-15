@@ -385,14 +385,25 @@ def main() -> None:
             "threshold": float(args.kv_irrelevant_logit_delta_threshold),
         }
 
-        # If we cannot measure relevance (delta=None) or the prefix looks ineffective, fail-closed to base answer.
+        # For kvi1 + gate_mode=none: always inject if we have a prefix (no relevance gating).
         if chosen_pkv is None:
             trigger = False
             rim_answer = base_answer
             gate_debug = {**gate_debug, "note": "no_past_key_values_built"}
         else:
             th = float(args.kv_irrelevant_logit_delta_threshold)
-            if chosen_delta is not None and float(chosen_delta) < th:
+            if str(args.gate_mode) == "none":
+                rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                    model=model,
+                    tokenizer=tok,
+                    prompt=prompt1,
+                    device=device,
+                    past_key_values=chosen_pkv,
+                    max_new_tokens=int(args.max_new_tokens_rim),
+                    no_repeat_ngram_size=12,
+                    repetition_penalty=1.08,
+                )
+            elif chosen_delta is not None and float(chosen_delta) < th:
                 trigger = False
                 rim_answer = base_answer
                 gate_debug = {**gate_debug, "note": "kv_prefix_low_impact_fallback"}
@@ -435,7 +446,10 @@ def main() -> None:
         print(rim_answer.strip())
     else:
         print("\n=== 有 RIM ===\n")
-        print("(本次未触发检索/注入：Self-Critique 认为置信度足够或非医学事实问题；可用 --force_rim 强制演示)")
+        if str(args.gate_mode) == "none":
+            print("(本次未注入：未能构建可用 past_key_values 前缀或触发 fail-closed 回退)")
+        else:
+            print("(本次未触发检索/注入：Gate 未触发；可用 --force_rim 强制演示)")
 
 
 if __name__ == "__main__":
