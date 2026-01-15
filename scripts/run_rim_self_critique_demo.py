@@ -140,9 +140,10 @@ def main() -> None:
     )
     p.add_argument(
         "--gate_mode",
-        choices=["introspection", "self_critique"],
-        default="introspection",
-        help="Gate strategy. introspection=non-generative gate (cosine drift) without Pattern-first when runtime=kvi1; "
+        choices=["none", "introspection", "self_critique"],
+        default="none",
+        help="Gate strategy. none=always do single semantic retrieval+inject (KVI1.0, no gate); "
+        "introspection=non-generative gate (cosine drift) without Pattern-first when runtime=kvi1; "
         "self_critique=legacy gate.",
     )
     p.add_argument("--self_critique_mode", choices=["heuristic", "llm_json"], default="heuristic")
@@ -243,13 +244,16 @@ def main() -> None:
     )
 
     # --- Gate ---
-    # Legacy path (kvi1): no Pattern-first; gate can be introspection (cosine drift) or self-critique.
+    # Legacy path (kvi1): no Pattern-first; gate can be none/introspection/self_critique.
     gate_debug: Dict[str, Any] = {}
     trigger = False
     crit: Optional[CritiqueResult] = None
     crit_mode: Optional[str] = None
 
-    if str(args.gate_mode) == "self_critique":
+    if str(args.gate_mode) == "none":
+        trigger = True
+        gate_debug = {"gate_mode": "none", "retrieve_more": True, "note": "kvi1_single_pass_inject"}
+    elif str(args.gate_mode) == "self_critique":
         if str(args.self_critique_mode) == "llm_json":
             crit = llm_json_self_critique(
                 model=model,
@@ -411,8 +415,9 @@ def main() -> None:
     # --- Print comparison ---
     print("\n=== 无 RIM（Base LLM）===\n")
     print(base_answer.strip())
-    print("\n=== Introspection Gate ===\n")
-    print(json.dumps(gate_debug, ensure_ascii=False, indent=2))
+    if str(args.gate_mode) != "none":
+        print("\n=== Introspection Gate ===\n")
+        print(json.dumps(gate_debug, ensure_ascii=False, indent=2))
     if trigger:
         print("\n=== RIM 检索（KV Bank）===\n")
         print(
