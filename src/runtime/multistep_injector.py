@@ -927,26 +927,24 @@ class MultiStepInjector:
         if bool(getattr(self.cfg, "append_evidence_to_prompt", False)) and self.grounding_retriever is not None and self.block_text_lookup is not None:
             qv = last_query_vec
             if qv is None and query_embed_fn is not None:
-                try:
-                    qv = query_embed_fn(str(query_text or prompt))
-                except Exception:
-                    qv = None
+                qv = query_embed_fn(str(query_text or prompt))
             if qv is not None:
-                try:
-                    gr = self.grounding_retriever.search(qv, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text)
-                    evidence_texts: List[str] = []
-                    for it in (gr.items or []):
-                        bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
-                        if not bid:
-                            continue
-                        t = self.block_text_lookup(str(bid))
-                        if isinstance(t, str) and t.strip():
-                            src = (it.meta or {}).get("retrieval_source")
-                            if src == "evidence":
-                                evidence_texts.append(t.strip())
-                    evidence = _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None) if evidence_texts else ""
-                except Exception:
-                    evidence = ""
+                gr = self.grounding_retriever.search(
+                    qv, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text
+                )
+                evidence_texts: List[str] = []
+                for it in (gr.items or []):
+                    bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                    if not bid:
+                        continue
+                    t = self.block_text_lookup(str(bid))
+                    if isinstance(t, str) and t.strip():
+                        src = (it.meta or {}).get("retrieval_source")
+                        if src == "evidence":
+                            evidence_texts.append(t.strip())
+                evidence = _extract_evidence(
+                    evidence_texts, q=str(query_text or ""), keywords=None
+                ) if evidence_texts else ""
 
         prompt_for_final = prompt + ("\n\n" + evidence if str(evidence or "").strip() else "")
 
@@ -977,6 +975,11 @@ class MultiStepInjector:
         max_new_tokens: int,
         no_repeat_ngram_size: int = 0,
         repetition_penalty: float = 1.08,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        top_k: int = 0,
+        min_new_tokens: int = 0,
     ) -> str:
         """
         Greedy decode that supports an *external prefix* cache.
@@ -1015,6 +1018,44 @@ class MultiStepInjector:
         attention_mask = torch.cat([prefix_mask, prompt_mask], dim=1)
 
         eos_id = getattr(tokenizer, "eos_token_id", None)
+
+        def _apply_sampling(
+            logits: torch.Tensor,
+            *,
+            do_sample: bool,
+            temperature: float,
+            top_p: float,
+            top_k: int,
+            min_len_reached: bool,
+            eos_id: Optional[int],
+        ) -> torch.Tensor:
+            out = logits
+            if not min_len_reached and isinstance(eos_id, int):
+                out = out.clone()
+                out[0, int(eos_id)] = float("-inf")
+            if not bool(do_sample):
+                return out
+            temp = float(temperature) if float(temperature) > 0 else 1.0
+            out = out / temp
+            # top_k filtering
+            tk = int(top_k)
+            if tk > 0 and tk < out.shape[-1]:
+                v, _ = torch.topk(out, tk)
+                cutoff = v[:, -1].unsqueeze(-1)
+                out = torch.where(out < cutoff, torch.full_like(out, float("-inf")), out)
+            # top_p (nucleus) filtering
+            tp = float(top_p)
+            if tp < 1.0:
+                sorted_logits, sorted_indices = torch.sort(out, descending=True)
+                probs = torch.softmax(sorted_logits, dim=-1)
+                cum = torch.cumsum(probs, dim=-1)
+                mask = cum > tp
+                # keep at least 1 token
+                mask[..., 0] = False
+                sorted_logits = torch.where(mask, torch.full_like(sorted_logits, float("-inf")), sorted_logits)
+                out = torch.full_like(out, float("-inf"))
+                out.scatter_(1, sorted_indices, sorted_logits)
+            return out
 
         def _ban_repeated_ngrams(logits: torch.Tensor, seq: torch.Tensor, n: int) -> torch.Tensor:
             """
@@ -1103,13 +1144,26 @@ class MultiStepInjector:
         # Mild penalty to prevent repeating the prompt/evidence tokens.
         logits0 = _apply_repetition_penalty(logits0, seq0, penalty=float(repetition_penalty))
         logits0 = _ban_repeated_ngrams(logits0, seq0, int(no_repeat_ngram_size))
-        next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
+        logits0 = _apply_sampling(
+            logits0,
+            do_sample=bool(do_sample),
+            temperature=float(temperature),
+            top_p=float(top_p),
+            top_k=int(top_k),
+            min_len_reached=(0 >= int(min_new_tokens)),
+            eos_id=eos_id if isinstance(eos_id, int) else None,
+        )
+        if bool(do_sample):
+            probs0 = torch.softmax(logits0, dim=-1)
+            next_token = torch.multinomial(probs0, num_samples=1)
+        else:
+            next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
         attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
         # Subsequent steps: feed one token at a time with cache.
         for gen_i in range(max(0, int(max_new_tokens) - 1)):
-            if isinstance(eos_id, int) and int(next_token.item()) == int(eos_id):
+            if isinstance(eos_id, int) and int(next_token.item()) == int(eos_id) and gen_i >= int(min_new_tokens) - 1:
                 break
             # Next token position continues after (prefix + prompt + generated_so_far)
             cur_pos = prefix_len + input_ids.shape[1] + gen_i
@@ -1140,7 +1194,20 @@ class MultiStepInjector:
             logits = out.logits[:, -1, :]
             logits = _apply_repetition_penalty(logits, seq, penalty=float(repetition_penalty))
             logits = _ban_repeated_ngrams(logits, seq, int(no_repeat_ngram_size))
-            next_token = torch.argmax(logits, dim=-1, keepdim=True)
+            logits = _apply_sampling(
+                logits,
+                do_sample=bool(do_sample),
+                temperature=float(temperature),
+                top_p=float(top_p),
+                top_k=int(top_k),
+                min_len_reached=((gen_i + 1) >= int(min_new_tokens)),
+                eos_id=eos_id if isinstance(eos_id, int) else None,
+            )
+            if bool(do_sample):
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 

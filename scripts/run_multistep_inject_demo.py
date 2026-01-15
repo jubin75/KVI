@@ -190,6 +190,11 @@ def main() -> None:
         action="store_true",
         help="In --kvi1_mode, use model.generate (same path as base LLM) instead of manual greedy decode.",
     )
+    p.add_argument("--do_sample", action="store_true", help="Enable sampling for KVI1 decode (applies to kvi1_mode path).")
+    p.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature for KVI1 decode.")
+    p.add_argument("--top_p", type=float, default=1.0, help="Top-p (nucleus) sampling for KVI1 decode.")
+    p.add_argument("--top_k", type=int, default=0, help="Top-k sampling for KVI1 decode (0 disables).")
+    p.add_argument("--min_new_tokens", type=int, default=0, help="Minimum new tokens for KVI1 decode (prevents early EOS).")
     p.add_argument(
         "--print_retrieval_query",
         action="store_true",
@@ -959,28 +964,26 @@ def main() -> None:
 
         past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
         if bool(args.kvi1_use_generate):
-            inputs0 = tok(model_prompt, return_tensors="pt").to(device)
-            with torch.no_grad():
-                out = model.generate(
-                    **inputs0,
-                    max_new_tokens=int(args.max_new_tokens),
-                    do_sample=False,
-                    use_cache=True,
-                    past_key_values=past_key_values,
-                    no_repeat_ngram_size=int(args.no_repeat_ngram_size),
-                )
-            answer = tok.decode(out[0], skip_special_tokens=True)
-        else:
-            answer = MultiStepInjector._greedy_generate_with_past_prefix(
-                model=model,
-                tokenizer=tok,
-                prompt=model_prompt,
-                device=device,
-                past_key_values=past_key_values,
-                max_new_tokens=int(args.max_new_tokens),
-                no_repeat_ngram_size=int(args.no_repeat_ngram_size),
-                repetition_penalty=float(cfg.repetition_penalty),
+            print(
+                "[warn] kvi1_use_generate: HF generate is not safe with external prefix KV; "
+                "using prefix-aware decode with sampling/min_length instead.",
+                flush=True,
             )
+        answer = MultiStepInjector._greedy_generate_with_past_prefix(
+            model=model,
+            tokenizer=tok,
+            prompt=model_prompt,
+            device=device,
+            past_key_values=past_key_values,
+            max_new_tokens=int(args.max_new_tokens),
+            no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+            repetition_penalty=float(cfg.repetition_penalty),
+            do_sample=bool(args.do_sample),
+            temperature=float(args.temperature),
+            top_p=float(args.top_p),
+            top_k=int(args.top_k),
+            min_new_tokens=int(args.min_new_tokens),
+        )
         print("=== Answer ===")
         print(_postprocess_answer(answer, raw_user_prompt))
         return
