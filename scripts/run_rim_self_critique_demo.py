@@ -356,15 +356,43 @@ def main() -> None:
                 break
 
             ext_by_layer: Dict[int, Any] = {}
+            ext_errors: List[str] = []
             for li in layer_ids:
-                ext_by_layer[li] = stack_ext_kv_items_by_layer(
-                    items=batch,
-                    layer_id=int(li),
-                    batch_size=1,
-                    device=device,
-                    dtype=dtype,
-                )
-            pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
+                try:
+                    ext_by_layer[li] = stack_ext_kv_items_by_layer(
+                        items=batch,
+                        layer_id=int(li),
+                        batch_size=1,
+                        device=device,
+                        dtype=dtype,
+                    )
+                except Exception as e:
+                    ext_errors.append(f"layer={li} err={type(e).__name__}: {e}")
+            if not ext_by_layer:
+                chosen_delta = None
+                chosen_pkv = None
+                kv_refresh_debug = {
+                    "oversample_top_k": int(oversample_k),
+                    "attempts": int(attempts),
+                    "final_logit_delta_vs_zero_prefix": None,
+                    "threshold": float(args.kv_irrelevant_logit_delta_threshold),
+                    "note": "ext_by_layer_empty",
+                    "ext_errors": ext_errors[:5],
+                }
+                break
+            try:
+                pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
+            except Exception as e:
+                chosen_delta = None
+                chosen_pkv = None
+                kv_refresh_debug = {
+                    "oversample_top_k": int(oversample_k),
+                    "attempts": int(attempts),
+                    "final_logit_delta_vs_zero_prefix": None,
+                    "threshold": float(args.kv_irrelevant_logit_delta_threshold),
+                    "note": f"build_pkv_failed:{type(e).__name__}",
+                }
+                break
             delta = logit_delta_vs_zero_prefix(model=model, tokenizer=tok, prompt=prompt1, device=device, past_key_values=pkv)
 
             chosen_items = batch
