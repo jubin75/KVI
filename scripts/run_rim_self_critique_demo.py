@@ -150,6 +150,11 @@ def main() -> None:
     p.add_argument("--critique_conf_threshold", type=float, default=0.55, help="Trigger retrieval if confidence < threshold")
     p.add_argument("--force_rim", action="store_true", help="Force retrieval+injection regardless of critique")
     p.add_argument(
+        "--force_inject_on_unknown_delta",
+        action="store_true",
+        help="If set, still inject when KV impact delta is unavailable (None). Default is fail-closed to base answer.",
+    )
+    p.add_argument(
         "--kv_refresh_rounds",
         type=int,
         default=2,
@@ -236,11 +241,6 @@ def main() -> None:
         no_repeat_ngram_size=12,
         repetition_penalty=1.08,
     )
-
-    # --- Pattern-first (v0.4) ---
-    # Pattern-first does NOT inject KV; it provides priors/constraints to semantic-second + gate.
-    pattern = PatternRetriever()
-    pattern_res = pattern.retrieve(user_prompt)
 
     # --- Gate ---
     # Legacy path (kvi1): no Pattern-first; gate can be introspection (cosine drift) or self-critique.
@@ -381,34 +381,36 @@ def main() -> None:
             "threshold": float(args.kv_irrelevant_logit_delta_threshold),
         }
 
-        rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
-            model=model,
-            tokenizer=tok,
-            prompt=prompt1,
-            device=device,
-            past_key_values=chosen_pkv,
-            max_new_tokens=int(args.max_new_tokens_rim),
-            no_repeat_ngram_size=12,
-            repetition_penalty=1.08,
-        )
+        # If we cannot measure relevance (delta=None) or the prefix looks ineffective, fail-closed to base answer.
+        if chosen_pkv is None:
+            trigger = False
+            rim_answer = base_answer
+            gate_debug = {**gate_debug, "note": "no_past_key_values_built"}
+        else:
+            th = float(args.kv_irrelevant_logit_delta_threshold)
+            if chosen_delta is not None and float(chosen_delta) < th:
+                trigger = False
+                rim_answer = base_answer
+                gate_debug = {**gate_debug, "note": "kv_prefix_low_impact_fallback"}
+            elif chosen_delta is None and not bool(args.force_inject_on_unknown_delta):
+                trigger = False
+                rim_answer = base_answer
+                gate_debug = {**gate_debug, "note": "kv_delta_unknown_fallback"}
+            else:
+                rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                    model=model,
+                    tokenizer=tok,
+                    prompt=prompt1,
+                    device=device,
+                    past_key_values=chosen_pkv,
+                    max_new_tokens=int(args.max_new_tokens_rim),
+                    no_repeat_ngram_size=12,
+                    repetition_penalty=1.08,
+                )
 
     # --- Print comparison ---
     print("\n=== 无 RIM（Base LLM）===\n")
     print(base_answer.strip())
-    print("\n=== Pattern-first（non-semantic）===\n")
-    print(
-        json.dumps(
-            {
-                "recall_size": int(pattern_res.recall_size),
-                "debug": pattern_res.debug_info,
-                "pattern_hits": [
-                    {"block_id": h.block_id, "hit_types": h.hit_types, "confidence": h.confidence, "metadata": h.metadata} for h in pattern_res.pattern_hits
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
     print("\n=== Introspection Gate ===\n")
     print(json.dumps(gate_debug, ensure_ascii=False, indent=2))
     if trigger:
