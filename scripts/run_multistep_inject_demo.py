@@ -186,6 +186,11 @@ def main() -> None:
         "This bypasses AnswerMode and multistep injector.",
     )
     p.add_argument(
+        "--kvi1_use_generate",
+        action="store_true",
+        help="In --kvi1_mode, use model.generate (same path as base LLM) instead of manual greedy decode.",
+    )
+    p.add_argument(
         "--print_retrieval_query",
         action="store_true",
         help="If set, print the exact retrieval query text (after optional rewrite).",
@@ -953,16 +958,29 @@ def main() -> None:
             return
 
         past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
-        answer = MultiStepInjector._greedy_generate_with_past_prefix(
-            model=model,
-            tokenizer=tok,
-            prompt=model_prompt,
-            device=device,
-            past_key_values=past_key_values,
-            max_new_tokens=int(args.max_new_tokens),
-            no_repeat_ngram_size=int(args.no_repeat_ngram_size),
-            repetition_penalty=float(cfg.repetition_penalty),
-        )
+        if bool(args.kvi1_use_generate):
+            inputs0 = tok(model_prompt, return_tensors="pt").to(device)
+            with torch.no_grad():
+                out = model.generate(
+                    **inputs0,
+                    max_new_tokens=int(args.max_new_tokens),
+                    do_sample=False,
+                    use_cache=True,
+                    past_key_values=past_key_values,
+                    no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+                )
+            answer = tok.decode(out[0], skip_special_tokens=True)
+        else:
+            answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=model_prompt,
+                device=device,
+                past_key_values=past_key_values,
+                max_new_tokens=int(args.max_new_tokens),
+                no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+                repetition_penalty=float(cfg.repetition_penalty),
+            )
         print("=== Answer ===")
         print(_postprocess_answer(answer, raw_user_prompt))
         return
