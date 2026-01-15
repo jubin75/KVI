@@ -36,12 +36,17 @@ try:
         RoutedRetrieverConfig,
     )
     from external_kv_injection.src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
+    from external_kv_injection.src.runtime.hf_cache_prefix_injection import (  # type: ignore
+        build_past_key_values_prefix,
+        stack_ext_kv_items_by_layer,
+    )
     from external_kv_injection.src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
     from external_kv_injection.src.runtime.postprocess import postprocess_answer  # type: ignore
 except ModuleNotFoundError:
     from src.kv_bank import FaissKVBank  # type: ignore
     from src.retriever import EvidenceFirstRetriever, EvidenceFirstRetrieverConfig, Retriever, RoutedRetriever, RoutedRetrieverConfig  # type: ignore
     from src.runtime.multistep_injector import MultiStepConfig, MultiStepInjector  # type: ignore
+    from src.runtime.hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer  # type: ignore
     from src.encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig  # type: ignore
     from src.runtime.postprocess import postprocess_answer  # type: ignore
 
@@ -173,6 +178,12 @@ def main() -> None:
         type=int,
         default=0,
         help="If >0, print top-N retrieved candidate ids + scores for each step.",
+    )
+    p.add_argument(
+        "--kvi1_mode",
+        action="store_true",
+        help="Force KVI1.0 single-pass semantic KV injection (no gate/slots). "
+        "This bypasses AnswerMode and multistep injector.",
     )
     p.add_argument(
         "--print_retrieval_query",
@@ -904,6 +915,57 @@ def main() -> None:
         block_text_lookup=lookup,
         grounding_retriever=retriever_grounding,
     )
+
+    # ---------------------------
+    # KVI1.0 single-pass semantic KV injection (no gate / no AnswerMode)
+    # ---------------------------
+    if bool(args.kvi1_mode):
+        qv = query_embed_fn(retrieval_query_text)
+        res = retriever.search(qv, top_k=int(args.top_k_blocks), filters=None, query_text=retrieval_query_text)
+        if int(args.debug_print_candidates) > 0:
+            topn = int(args.debug_print_candidates)
+            cands = []
+            for it in (res.items or [])[:topn]:
+                bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                cands.append(f"{bid}@{float(getattr(it, 'score', 0.0)):.4f}")
+            shown = min(int(topn), len(res.items or []))
+            print(f"[retrieval] top{shown}=" + " | ".join(cands), flush=True)
+
+        layer_ids = [int(x.strip()) for x in args.layers.split(",") if x.strip() != ""]
+        dtype = next(model.parameters()).dtype
+        ext_by_layer = {}
+        for li in layer_ids:
+            try:
+                ext_by_layer[li] = stack_ext_kv_items_by_layer(
+                    items=res.items or [],
+                    layer_id=int(li),
+                    batch_size=1,
+                    device=device,
+                    dtype=dtype,
+                )
+            except Exception:
+                continue
+        if not ext_by_layer:
+            print("[warn] KVI1.0 injection skipped: ext_by_layer empty (no compatible KV)", flush=True)
+            answer = _base_llm_answer()
+            print("=== Answer ===")
+            print(_postprocess_answer(answer, raw_user_prompt))
+            return
+
+        past_key_values = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
+        answer = MultiStepInjector._greedy_generate_with_past_prefix(
+            model=model,
+            tokenizer=tok,
+            prompt=model_prompt,
+            device=device,
+            past_key_values=past_key_values,
+            max_new_tokens=int(args.max_new_tokens),
+            no_repeat_ngram_size=int(args.no_repeat_ngram_size),
+            repetition_penalty=float(cfg.repetition_penalty),
+        )
+        print("=== Answer ===")
+        print(_postprocess_answer(answer, raw_user_prompt))
+        return
 
     # ---------------------------
     # AnswerMode decision (MUST be BEFORE injection)
