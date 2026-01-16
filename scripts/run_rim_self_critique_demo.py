@@ -119,6 +119,7 @@ def main() -> None:
     p.add_argument("--layers", type=str, default="0,1,2,3")
     p.add_argument("--max_new_tokens_base", type=int, default=192)
     p.add_argument("--max_new_tokens_rim", type=int, default=192)
+    p.add_argument("--pattern_index_dir", default="", help="Pattern-first sidecar index directory (KVI2 only)")
     p.add_argument(
         "--structured_template",
         action="store_true",
@@ -194,6 +195,7 @@ def main() -> None:
                 max_new_tokens_rim=int(args.max_new_tokens_rim),
                 kv_refresh_rounds=int(args.kv_refresh_rounds),
                 kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
+                pattern_index_dir=str(args.pattern_index_dir or ""),
                 structured_answer_template=bool(args.structured_template),
                 structured_template_text=(
                     str(args.structured_template_text).strip()
