@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -80,6 +81,46 @@ def _format_prompt(tokenizer: Any, user_text: str, *, use_chat_template: bool) -
         return txt
 
 
+def _extract_keywords(text: str) -> List[str]:
+    raw = str(text or "")
+    kws: List[str] = []
+    # English-like tokens
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9\-_/]{1,}", raw):
+        if len(w) >= 3:
+            kws.append(w)
+    # CJK tokens: sliding window of length 2-4
+    cjk = re.findall(r"[\u4e00-\u9fff]{2,4}", raw)
+    kws.extend(cjk)
+    # de-dup while preserving order
+    seen = set()
+    out: List[str] = []
+    for k in kws:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _split_sentences(text: str) -> List[str]:
+    t = str(text or "").strip()
+    if not t:
+        return []
+    parts = re.split(r"(?<=[\.\!\?。！？])\s+", t)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _highlight_keywords(sentence: str, keywords: Sequence[str]) -> str:
+    out = sentence
+    for k in keywords:
+        if not k:
+            continue
+        try:
+            out = re.sub(re.escape(k), lambda m: f"[[{m.group(0)}]]", out)
+        except Exception:
+            continue
+    return out
+
+
 def _resolve_topic_kv_dir(*, topic: str, topic_work_dir: str) -> Path:
     twd = Path(str(topic_work_dir))
     t = str(topic).strip()
@@ -111,6 +152,11 @@ def main() -> None:
     p.add_argument("--kv_dir", default=None, help="Path to KVBank dir (manifest.json etc.)")
     p.add_argument("--topic", default=None, help="Optional topic mode (any string; resolves <topic_work_dir>/<topic>/kvbank_blocks)")
     p.add_argument("--topic_work_dir", default=None, help="Topic work dir (used with --topic)")
+    p.add_argument(
+        "--blocks_jsonl",
+        default="",
+        help="Optional blocks.jsonl path for debug: print evidence text for retrieved_ids.",
+    )
 
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model for retrieval query embedding")
     p.add_argument("--domain_encoder_max_length", type=int, default=256)
@@ -177,6 +223,24 @@ def main() -> None:
             raise SystemExit("Missing --kv_dir. Either pass --kv_dir or use --topic + --topic_work_dir.")
         kv_dir = str(_resolve_topic_kv_dir(topic=str(args.topic), topic_work_dir=str(args.topic_work_dir)))
 
+    # Optional block text lookup for debug
+    block_text_by_id: Dict[str, str] = {}
+    blocks_jsonl = str(args.blocks_jsonl or "").strip()
+    if blocks_jsonl:
+        try:
+            with Path(blocks_jsonl).open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = json.loads(line)
+                    bid = str(rec.get("block_id") or rec.get("id") or rec.get("chunk_id") or "")
+                    txt = rec.get("text")
+                    if bid and isinstance(txt, str) and txt.strip():
+                        block_text_by_id[bid] = txt.strip()
+        except Exception:
+            block_text_by_id = {}
+
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -224,6 +288,31 @@ def main() -> None:
         if out.get("retrieve_more"):
             print("\n=== RIM 检索（KV Bank）===\n")
             print(json.dumps(out.get("retrieval", {}), ensure_ascii=False, indent=2))
+            if block_text_by_id:
+                print("\n=== Retrieved Evidence Text (debug) ===\n")
+                retrieved_ids = (out.get("retrieval", {}) or {}).get("retrieved_ids", [])
+                keywords = _extract_keywords(str(args.prompt))
+                if keywords:
+                    print("[evidence_keywords] " + ", ".join(keywords), flush=True)
+                for rid in retrieved_ids or []:
+                    text = block_text_by_id.get(str(rid), "")
+                    if text:
+                        sentences = _split_sentences(text)
+                        matched: List[str] = []
+                        for s in sentences:
+                            s_norm = s.lower()
+                            hit = any((k.lower() in s_norm) for k in keywords) if keywords else False
+                            if hit:
+                                matched.append(_highlight_keywords(s, keywords))
+                            if len(matched) >= 3:
+                                break
+                        if not matched:
+                            excerpt = text[:240].replace("\n", " ").strip()
+                            matched = [_highlight_keywords(excerpt, keywords)]
+                        print(f"- {rid}")
+                        for s in matched:
+                            print(f"  {s}")
+                        print("")
             print("\n=== 有 RIM（注入 KV → 第二轮生成）===\n")
             print(str(out.get("rim_answer", "")).strip())
         else:

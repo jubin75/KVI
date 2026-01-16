@@ -47,6 +47,54 @@ def _zero_like_past_key_values(pkv: Any) -> Any:
         return None
 
 
+def _forward_logits_last_token(
+    *,
+    model: torch.nn.Module,
+    tokenizer: Any,
+    prompt: str,
+    device: torch.device,
+    past_key_values: Any,
+) -> Optional[torch.Tensor]:
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    input_ids = inputs["input_ids"]
+    prompt_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
+
+    prefix_len = _cache_seq_len(past_key_values)
+    if prefix_len < 0:
+        prefix_len = 0
+    if prefix_len > 0:
+        prefix_mask = torch.ones((prompt_mask.shape[0], prefix_len), dtype=prompt_mask.dtype, device=device)
+        attention_mask = torch.cat([prefix_mask, prompt_mask], dim=1)
+    else:
+        attention_mask = prompt_mask
+
+    pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long).unsqueeze(0)
+    cache_pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long)
+
+    with torch.no_grad():
+        try:
+            out = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=pos0,
+                cache_position=cache_pos0,
+                past_key_values=past_key_values,
+                use_cache=True,
+                return_dict=True,
+            )
+        except TypeError:
+            out = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=pos0,
+                past_key_values=past_key_values,
+                use_cache=True,
+                return_dict=True,
+            )
+
+    return out.logits[:, -1, :].to(dtype=torch.float32)
+
+
 def logit_delta_vs_zero_prefix(
     *,
     model: torch.nn.Module,
@@ -57,64 +105,26 @@ def logit_delta_vs_zero_prefix(
 ) -> Optional[float]:
     """
     One-step forward comparison: injected prefix vs zero prefix.
+    If zero-prefix cache is unavailable, fall back to no-prefix baseline.
     Returns mean absolute logit difference on the last prompt token.
     """
     if past_key_values is None:
         return None
     pkv_zero = _zero_like_past_key_values(past_key_values)
-    if pkv_zero is None:
+    li = _forward_logits_last_token(
+        model=model, tokenizer=tokenizer, prompt=prompt, device=device, past_key_values=past_key_values
+    )
+    if li is None:
         return None
-
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    input_ids = inputs["input_ids"]
-    prompt_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
-
-    prefix_len = _cache_seq_len(past_key_values)
-    prefix_mask = torch.ones((prompt_mask.shape[0], prefix_len), dtype=prompt_mask.dtype, device=device)
-    attention_mask = torch.cat([prefix_mask, prompt_mask], dim=1)
-
-    pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long).unsqueeze(0)
-    cache_pos0 = torch.arange(prefix_len, prefix_len + input_ids.shape[1], device=device, dtype=torch.long)
-
-    with torch.no_grad():
-        try:
-            out_inj = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=pos0,
-                cache_position=cache_pos0,
-                past_key_values=past_key_values,
-                use_cache=True,
-                return_dict=True,
-            )
-            out_zero = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=pos0,
-                cache_position=cache_pos0,
-                past_key_values=pkv_zero,
-                use_cache=True,
-                return_dict=True,
-            )
-        except TypeError:
-            out_inj = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=pos0,
-                past_key_values=past_key_values,
-                use_cache=True,
-                return_dict=True,
-            )
-            out_zero = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=pos0,
-                past_key_values=pkv_zero,
-                use_cache=True,
-                return_dict=True,
-            )
-
-    li = out_inj.logits[:, -1, :].to(dtype=torch.float32)
-    lz = out_zero.logits[:, -1, :].to(dtype=torch.float32)
+    if pkv_zero is not None:
+        lz = _forward_logits_last_token(
+            model=model, tokenizer=tokenizer, prompt=prompt, device=device, past_key_values=pkv_zero
+        )
+    else:
+        lz = _forward_logits_last_token(
+            model=model, tokenizer=tokenizer, prompt=prompt, device=device, past_key_values=None
+        )
+    if lz is None:
+        return None
     return float((li - lz).abs().mean().item())
 
