@@ -26,10 +26,15 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Tuple
 
 
 def _ensure_repo_root_on_syspath() -> None:
-    repo_root = Path(__file__).resolve().parents[1]  # <repo_root>/external_kv_injection
-    s = str(repo_root.parent)
-    if s not in sys.path:
-        sys.path.insert(0, s)
+    # Support both layouts:
+    # 1) local: <repo>/external_kv_injection/scripts (package import external_kv_injection.*)
+    # 2) remote: <repo>/scripts with flat src/ (import src.*)
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = [repo_root, repo_root.parent]
+    for p in candidates:
+        sp = str(p)
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
 
 
 _ensure_repo_root_on_syspath()
