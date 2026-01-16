@@ -1,11 +1,11 @@
 """
-Build Pattern-first sidecar index + enrich blocks.v2.jsonl metadata.
+Build Pattern-first sidecar index + enrich blocks.jsonl metadata.
 
 Inputs:
-- blocks.v2.jsonl (JSONL of evidence blocks)
+- blocks.jsonl (JSONL of evidence blocks)
 
 Outputs:
-- blocks.v2.enriched.jsonl (same records, with enhanced `metadata` fields)
+- blocks.enriched.jsonl (same records, with enhanced `metadata` fields)
 - pattern_out_dir/alias_map.json
 - pattern_out_dir/schema_triggers.json
 - pattern_out_dir/fixed_entities.json
@@ -98,8 +98,8 @@ def _default_schema_triggers() -> Dict[str, List[str]]:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--blocks_jsonl_in", required=True, help="Input blocks.v2.jsonl")
-    p.add_argument("--blocks_jsonl_out", required=True, help="Output enriched blocks jsonl (e.g., blocks.v2.enriched.jsonl)")
+    p.add_argument("--blocks_jsonl_in", required=True, help="Input blocks.jsonl")
+    p.add_argument("--blocks_jsonl_out", required=True, help="Output enriched blocks jsonl (e.g., blocks.enriched.jsonl)")
     p.add_argument("--pattern_out_dir", required=True, help="Output directory for pattern index sidecar")
     p.add_argument("--max_blocks", type=int, default=0, help="If >0, only process first N blocks (debug).")
     p.add_argument("--max_pairs_per_block", type=int, default=32)

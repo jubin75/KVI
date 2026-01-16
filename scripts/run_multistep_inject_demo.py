@@ -79,7 +79,7 @@ def main() -> None:
     p.add_argument(
         "--blocks_jsonl",
         default=None,
-        help="Optional blocks.jsonl path (e.g. $WORK_DIR/blocks.v2.jsonl). If provided, print text snippets for selected blocks.",
+        help="Optional blocks.jsonl path (e.g. $WORK_DIR/blocks.jsonl). If provided, print text snippets for selected blocks.",
     )
     p.add_argument(
         "--blocks_jsonl_evidence",
@@ -318,7 +318,7 @@ def main() -> None:
             return base_dir / "kvbank_blocks"
 
         def _pick_blocks_jsonl(base_dir: Path) -> Path:
-            opts = [base_dir / "blocks.jsonl", base_dir / "blocks.v2.jsonl"]
+            opts = [base_dir / "blocks.jsonl"]
             for p in opts:
                 if p.exists():
                     return p

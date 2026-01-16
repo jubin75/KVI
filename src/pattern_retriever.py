@@ -58,7 +58,7 @@ class PatternRetriever:
     @classmethod
     def from_dir(cls, pattern_dir: str | Path) -> "PatternRetriever":
         """
-        Load Pattern-first indices from a sidecar directory (built from blocks.v2.jsonl).
+        Load Pattern-first indices from a sidecar directory (built from blocks.jsonl).
 
         Expected files (any subset is ok):
         - alias_map.json            # {ABBR: [full1, full2, ...]}
