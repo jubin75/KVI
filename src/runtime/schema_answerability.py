@@ -290,7 +290,6 @@ def choose_answerable_schema(
                 "uncovered_slots": sorted(uncovered),
                 "rejected_due_to_slot_overlap": rejected_due_to_slot_overlap[:50],
                 "candidates": int(len(candidate_texts)),
-                "selected_ids": [],
                 "covered_slots": [],
                 "newly_answered_slots": [],
             }
@@ -317,7 +316,6 @@ def choose_answerable_schema(
         "min_overlap": int(cfg.min_overlap),
         "query_terms": terms[:10],
         "candidates": int(len(candidate_texts)),
-        "selected_ids": [str(candidate_ids[i]) for i in selected] if selected else [],
         "selected_overlaps": [int(scored[i][0]) if i < len(scored) else 0 for i in selected] if selected else [],
         "required_slots": sorted(required_slots),
         "answered_slots": sorted(answered_slots),

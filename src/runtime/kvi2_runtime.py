@@ -21,6 +21,7 @@ import torch
 
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
+from ..pattern_contract import PatternContract, PatternContractValidator, run_pattern_first
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
 from ..rim import RIM, RIMConfig
@@ -100,6 +101,8 @@ class KVI2Runtime:
             else PatternRetriever()
         )
         pattern_res = pattern.retrieve(user_prompt)
+        pattern_contracts = run_pattern_first(user_prompt, pattern_res)
+        validator = PatternContractValidator()
 
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
@@ -131,7 +134,7 @@ class KVI2Runtime:
 
         out: Dict[str, Any] = {
             "baseline_answer": baseline.strip(),
-            "pattern_first": _pattern_to_json(pattern_res),
+            "pattern_first": _pattern_to_json(pattern_res, pattern_contracts),
             "gate": gate,
             "retrieve_more": bool(retrieve_more),
         }
@@ -151,8 +154,10 @@ class KVI2Runtime:
         chosen_items = []
         chosen_pkv: Any = None
         chosen_delta: Optional[float] = None
+        chosen_contract_validation: Optional[Dict[str, Any]] = None
+        chosen_gate_after_validation: Optional[Dict[str, Any]] = None
         attempts = max(0, int(self.cfg.kv_refresh_rounds)) + 1
-        for _ in range(attempts):
+        for attempt_idx in range(attempts):
             batch = []
             for it in rr.items:
                 meta = getattr(it, "meta", None) or {}
@@ -171,7 +176,32 @@ class KVI2Runtime:
                 for li in layer_ids
             }
             pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
-            delta = logit_delta_vs_zero_prefix(model=model, tokenizer=tokenizer, prompt=formatted_prompt, device=device, past_key_values=pkv)
+            delta = logit_delta_vs_zero_prefix(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=formatted_prompt,
+                device=device,
+                past_key_values=pkv,
+            )
+
+            contract_validation = validator.validate_all(pattern_contracts, batch)
+            chosen_contract_validation = contract_validation
+            pattern_mismatch = bool(contract_validation.get("fulfilled") is False)
+            gate_after_validation = rim.introspection_gate(
+                q_prime_vec=qprime,
+                kv_relevance_delta=delta,
+                pattern_mismatch=pattern_mismatch,
+            )
+            chosen_gate_after_validation = gate_after_validation
+
+            if pattern_mismatch:
+                # Reject current KV batch; try refresh if budget remains.
+                if attempt_idx + 1 < attempts:
+                    continue
+                chosen_items = []
+                chosen_pkv = None
+                chosen_delta = None
+                break
 
             chosen_items = batch
             chosen_pkv = pkv
@@ -179,13 +209,6 @@ class KVI2Runtime:
             th = float(self.cfg.kv_irrelevant_logit_delta_threshold)
             if delta is None or float(delta) >= th:
                 break
-
-        selected_ids = []
-        for it in chosen_items:
-            meta = getattr(it, "meta", None) or {}
-            bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
-            if bid:
-                selected_ids.append(bid)
 
         out["retrieval"] = {
             "kv_dir": str(kv_dir),
@@ -197,10 +220,14 @@ class KVI2Runtime:
                 "final_logit_delta_vs_zero_prefix": chosen_delta,
                 "threshold": float(self.cfg.kv_irrelevant_logit_delta_threshold),
             },
-            "selected_ids": selected_ids,
+            "contract_validation": dict(chosen_contract_validation or {}),
+            "gate_after_validation": dict(chosen_gate_after_validation or {}),
         }
 
         # 5) Second pass generation with injected prefix
+        if chosen_pkv is None:
+            out["rim_answer"] = ""
+            return out
         rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
             tokenizer=tokenizer,
@@ -229,10 +256,18 @@ class KVI2Runtime:
             return txt
 
 
-def _pattern_to_json(r: PatternRetrieveResult) -> Dict[str, Any]:
+def _pattern_to_json(r: PatternRetrieveResult, contracts: Sequence[PatternContract]) -> Dict[str, Any]:
     return {
         "recall_size": int(r.recall_size),
         "debug": r.debug_info,
-        "pattern_hits": [{"block_id": h.block_id, "hit_types": h.hit_types, "confidence": h.confidence, "metadata": h.metadata} for h in r.pattern_hits],
+        "contracts": [
+            {
+                "pattern_id": c.pattern_id,
+                "expected_information": c.expected_information,
+                "required_signals": c.required_signals,
+                "min_information_density": c.min_information_density,
+            }
+            for c in (contracts or [])
+        ],
     }
 
