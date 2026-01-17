@@ -1155,7 +1155,7 @@ class MultiStepInjector:
             probs0 = torch.softmax(logits0, dim=-1)
             next_token = torch.multinomial(probs0, num_samples=1)
         else:
-        next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
+            next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
         attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
@@ -1205,7 +1205,7 @@ class MultiStepInjector:
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
             else:
-            next_token = torch.argmax(logits, dim=-1, keepdim=True)
+                next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
