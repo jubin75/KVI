@@ -52,9 +52,9 @@
     ]
   },
 
-  "source_pdf_dir": "/home/jb/KVI/pdfs/sftsvpdf",
-  "out_pdf_dir": "/home/jb/KVI/topics/SFTSV/pdfs",
-  "results_jsonl": "/home/jb/KVI/topics/SFTSV/doc_filter_results.jsonl",
+  "source_pdf_dir": "/home/jb/topics/SFTSV/pdfs",
+  "out_pdf_dir": "/home/jb/topics/SFTSV/pdfs",
+  "results_jsonl": "/home/jb/topics/SFTSV/doc_filter_results.jsonl",
 
   "ocr": "auto",
   "extract_tables": true,
@@ -74,7 +74,7 @@
   },
 
   "build": {
-    "work_dir": "/home/jb/KVI/topics/SFTSV/work",
+    "work_dir": "/home/jb/topics/SFTSV/work",
     "base_llm": "Qwen/Qwen2.5-7B-Instruct",
     "retrieval_encoder_model": "sentence-transformers/all-MiniLM-L6-v2",
     "layers": [0, 1, 2, 3],
