@@ -9,7 +9,7 @@ Core rules (docs/08_Detoxification.md):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from .pattern_retriever import PatternRetrieveResult
 
@@ -23,6 +23,10 @@ class PatternContract:
     required_signals: Dict[str, List[str]]
     # Minimum information density (0~1)
     min_information_density: float
+    # Contract level: hard must be satisfied; soft is advisory only.
+    level: str = "soft"  # "hard" | "soft"
+    # Contract kind: schema contracts are planning-only (not reject).
+    kind: str = "other"  # "abbr" | "schema" | "entity" | "other"
 
 
 @dataclass
@@ -35,21 +39,28 @@ class ContractValidationResult:
 
 class PatternContractValidator:
     """
-    Validate PatternContract against Evidence metadata only.
+    Validate PatternContract against Evidence metadata + optional block text lookup.
     - No LLM
     - No embeddings
     - No text-level RAG
+    - Pattern→Evidence mapping is explicit (pattern != KV tag)
     """
 
-    def validate(self, contract: PatternContract, evidence_blocks: Sequence[Any]) -> Dict[str, Any]:
+    def validate(
+        self,
+        contract: PatternContract,
+        evidence_blocks: Sequence[Any],
+        *,
+        block_text_lookup: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         signal_set, info_density = _collect_signals_from_evidence(evidence_blocks)
         must_contain = list(contract.required_signals.get("must_contain") or [])
         must_not_be_only = list(contract.required_signals.get("must_not_be_only") or [])
 
-        missing = [s for s in must_contain if s not in signal_set]
+        satisfied = any(_satisfy_contract(contract, it, block_text_lookup) for it in (evidence_blocks or []))
         violations: List[str] = []
-        if missing:
-            violations.append(f"missing_required={missing}")
+        if not satisfied and must_contain:
+            violations.append(f"missing_required={must_contain}")
 
         if must_not_be_only:
             # Violation if evidence has only generic/background signals.
@@ -59,13 +70,11 @@ class PatternContractValidator:
         if info_density < float(contract.min_information_density):
             violations.append(f"low_information_density<{contract.min_information_density}")
 
-        # Score: blend of required-signal coverage and information density
-        coverage = 1.0
-        if must_contain:
-            coverage = 1.0 - (len(missing) / max(1, len(must_contain)))
+        # Score: blend of satisfy + density (soft contracts can be low without rejection).
+        coverage = 1.0 if satisfied else 0.0
         score = max(0.0, min(1.0, 0.7 * coverage + 0.3 * info_density))
 
-        fulfilled = (len(violations) == 0)
+        fulfilled = (len(violations) == 0) and bool(satisfied or not must_contain)
         return {
             "pattern_id": contract.pattern_id,
             "fulfilled": bool(fulfilled),
@@ -73,31 +82,58 @@ class PatternContractValidator:
             "violations": violations,
             "info_density": float(info_density),
             "required_signals": dict(contract.required_signals),
+            "level": contract.level,
+            "kind": contract.kind,
+            "satisfied": bool(satisfied),
         }
 
-    def validate_all(self, contracts: Sequence[PatternContract], evidence_blocks: Sequence[Any]) -> Dict[str, Any]:
-        results = [self.validate(c, evidence_blocks) for c in (contracts or [])]
-        fulfilled = all(r.get("fulfilled") is True for r in results) if results else True
+    def validate_all(
+        self,
+        contracts: Sequence[PatternContract],
+        evidence_blocks: Sequence[Any],
+        *,
+        block_text_lookup: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        results = [self.validate(c, evidence_blocks, block_text_lookup=block_text_lookup) for c in (contracts or [])]
+
+        hard_missing = [r["pattern_id"] for r in results if r.get("level") == "hard" and not r.get("satisfied")]
+        soft_missing = [r["pattern_id"] for r in results if r.get("level") == "soft" and not r.get("satisfied") and r.get("kind") != "schema"]
+        schema_missing = [r["pattern_id"] for r in results if r.get("kind") == "schema" and not r.get("satisfied")]
+
+        fulfilled_hard = len(hard_missing) == 0
         score = sum(float(r.get("score") or 0.0) for r in results) / max(1, len(results)) if results else 1.0
         violations: List[str] = []
         for r in results:
             for v in r.get("violations") or []:
                 violations.append(f"{r.get('pattern_id')}: {v}")
         return {
-            "fulfilled": bool(fulfilled),
+            "fulfilled": bool(fulfilled_hard),
             "score": float(score),
             "violations": violations,
             "results": results,
+            "hard_missing": hard_missing,
+            "soft_missing": soft_missing,
+            "schema_missing": schema_missing,
+            "hard_fulfilled": bool(fulfilled_hard),
+            "soft_fulfilled": len(soft_missing) == 0,
         }
 
 
-def run_pattern_first(query_text: str, pattern_result: PatternRetrieveResult) -> List[PatternContract]:
+def run_pattern_first(
+    query_text: str,
+    pattern_result: PatternRetrieveResult,
+    *,
+    hard_pattern_ids: Optional[Sequence[str]] = None,
+    soft_pattern_ids: Optional[Sequence[str]] = None,
+) -> List[PatternContract]:
     """
     Pattern-first output must be PatternContract list (not keywords / ids).
     This function converts PatternRetriever hits -> PatternContracts.
     """
     _ = query_text
     contracts: List[PatternContract] = []
+    hard_set = {str(x) for x in (hard_pattern_ids or []) if str(x).strip()}
+    soft_set = {str(x) for x in (soft_pattern_ids or []) if str(x).strip()}
     for hit in pattern_result.pattern_hits or []:
         meta = hit.metadata or {}
         ptype = str(meta.get("pattern_type") or "")
@@ -107,12 +143,19 @@ def run_pattern_first(query_text: str, pattern_result: PatternRetrieveResult) ->
             abbr = str(payload.get("abbr") or "")
             exps = payload.get("expansions") if isinstance(payload.get("expansions"), list) else []
             required = {"must_contain": [f"abbr:{abbr}"] if abbr else [], "must_not_be_only": []}
+            level = "hard" if (len(abbr) >= 4 and float(getattr(hit, "confidence", 0.0)) >= 0.9) else "soft"
+            if str(hit.block_id) in hard_set:
+                level = "hard"
+            if str(hit.block_id) in soft_set:
+                level = "soft"
             contracts.append(
                 PatternContract(
                     pattern_id=str(hit.block_id),
                     expected_information={"entity_types": ["abbreviation"], "abbr": abbr, "expansions": list(exps)},
                     required_signals=required,
                     min_information_density=0.3,
+                    level=level,
+                    kind="abbr",
                 )
             )
             continue
@@ -129,6 +172,8 @@ def run_pattern_first(query_text: str, pattern_result: PatternRetrieveResult) ->
                     expected_information={"schema_slots": list(slots)},
                     required_signals=required,
                     min_information_density=0.45,
+                    level="soft" if str(hit.block_id) not in hard_set else "hard",
+                    kind="schema",
                 )
             )
             continue
@@ -142,6 +187,8 @@ def run_pattern_first(query_text: str, pattern_result: PatternRetrieveResult) ->
                     expected_information={"entities": [canonical] if canonical else []},
                     required_signals=required,
                     min_information_density=0.35,
+                    level="soft" if str(hit.block_id) not in hard_set else "hard",
+                    kind="entity",
                 )
             )
             continue
@@ -153,9 +200,45 @@ def run_pattern_first(query_text: str, pattern_result: PatternRetrieveResult) ->
                 expected_information={"pattern_type": ptype, "hit_types": list(hit.hit_types or [])},
                 required_signals={"must_contain": [], "must_not_be_only": []},
                 min_information_density=0.2,
+                level="soft" if str(hit.block_id) not in hard_set else "hard",
+                kind="other",
             )
         )
     return contracts
+
+
+def _satisfy_contract(contract: PatternContract, block: Any, block_text_lookup: Optional[Dict[str, str]] = None) -> bool:
+    meta = getattr(block, "meta", None) or {}
+    bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+    text = ""
+    if block_text_lookup and bid:
+        text = str(block_text_lookup.get(bid) or "")
+    text_low = text.lower()
+    signals, _ = _collect_signals_from_evidence([block])
+
+    if contract.kind == "abbr":
+        abbr = str(contract.expected_information.get("abbr") or "")
+        exps = contract.expected_information.get("expansions") or []
+        if abbr and (abbr in text or abbr.lower() in text_low):
+            return True
+        for e in exps if isinstance(exps, list) else []:
+            e2 = str(e or "").strip()
+            if e2 and e2.lower() in text_low:
+                return True
+        if abbr and f"abbr:{abbr.upper()}" in signals:
+            return True
+        return False
+
+    if contract.kind == "schema":
+        slots = contract.expected_information.get("schema_slots") or []
+        for s in slots if isinstance(slots, list) else []:
+            s2 = str(s or "").strip()
+            if s2 and (f"schema_slot:{s2}" in signals):
+                return True
+        return False
+
+    must_contain = list(contract.required_signals.get("must_contain") or [])
+    return any(s in signals for s in must_contain) if must_contain else False
 
 
 def _collect_signals_from_evidence(evidence_blocks: Sequence[Any]) -> Tuple[Set[str], float]:
@@ -235,4 +318,6 @@ EXAMPLE_SFTSV_CONTRACT = PatternContract(
     },
     required_signals={"must_contain": ["schema_slot:treatment"], "must_not_be_only": ["block_type:general"]},
     min_information_density=0.6,
+    level="soft",
+    kind="schema",
 )

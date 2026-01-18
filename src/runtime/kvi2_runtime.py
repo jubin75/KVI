@@ -42,6 +42,9 @@ class KVI2Config:
     pattern_index_dir: str = ""
     structured_answer_template: bool = False
     structured_template_text: str = ""
+    # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
+    pattern_hard: Sequence[str] = ()
+    pattern_soft: Sequence[str] = ()
 
 
 class KVI2Runtime:
@@ -66,6 +69,7 @@ class KVI2Runtime:
         device: torch.device,
         use_chat_template: bool = False,
         force_rim: bool = False,
+        block_text_lookup: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Returns a dict containing:
@@ -101,7 +105,12 @@ class KVI2Runtime:
             else PatternRetriever()
         )
         pattern_res = pattern.retrieve(user_prompt)
-        pattern_contracts = run_pattern_first(user_prompt, pattern_res)
+        pattern_contracts = run_pattern_first(
+            user_prompt,
+            pattern_res,
+            hard_pattern_ids=list(self.cfg.pattern_hard or []),
+            soft_pattern_ids=list(self.cfg.pattern_soft or []),
+        )
         validator = PatternContractValidator()
 
         # 3) Introspection gate (non-generative)
@@ -184,14 +193,23 @@ class KVI2Runtime:
                 past_key_values=pkv,
             )
 
-            contract_validation = validator.validate_all(pattern_contracts, batch)
+            contract_validation = validator.validate_all(pattern_contracts, batch, block_text_lookup=block_text_lookup)
             chosen_contract_validation = contract_validation
-            pattern_mismatch = bool(contract_validation.get("fulfilled") is False)
+            hard_missing = contract_validation.get("hard_missing") or []
+            soft_missing = contract_validation.get("soft_missing") or []
+            schema_missing = contract_validation.get("schema_missing") or []
+            pattern_mismatch = bool(len(hard_missing) > 0)
             gate_after_validation = rim.introspection_gate(
                 q_prime_vec=qprime,
                 kv_relevance_delta=delta,
                 pattern_mismatch=pattern_mismatch,
             )
+            if pattern_mismatch:
+                gate_after_validation["rationale"] = "pattern-missing-hard"
+            elif not gate_after_validation.get("reject_current_kv") and soft_missing:
+                gate_after_validation["rationale"] = "pattern-missing-soft"
+            elif not gate_after_validation.get("reject_current_kv") and schema_missing:
+                gate_after_validation["rationale"] = "schema-not-yet-instantiated"
             chosen_gate_after_validation = gate_after_validation
 
             if pattern_mismatch:
@@ -266,6 +284,8 @@ def _pattern_to_json(r: PatternRetrieveResult, contracts: Sequence[PatternContra
                 "expected_information": c.expected_information,
                 "required_signals": c.required_signals,
                 "min_information_density": c.min_information_density,
+                "level": c.level,
+                "kind": c.kind,
             }
             for c in (contracts or [])
         ],

@@ -22,7 +22,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -167,6 +167,16 @@ def main() -> None:
     p.add_argument("--max_new_tokens_rim", type=int, default=192)
     p.add_argument("--pattern_index_dir", default="", help="Pattern-first sidecar index directory (KVI2 only)")
     p.add_argument(
+        "--pattern_hard",
+        default="",
+        help="Comma-separated pattern_ids to treat as hard contracts (e.g., abbr:SFTSV).",
+    )
+    p.add_argument(
+        "--pattern_soft",
+        default="",
+        help="Comma-separated pattern_ids to treat as soft contracts (override hard if both set).",
+    )
+    p.add_argument(
         "--structured_template",
         action="store_true",
         help="If set, append a structured answer template to the prompt (LLM still answers; no slot hardcoding).",
@@ -266,6 +276,8 @@ def main() -> None:
                     if str(args.structured_template_text or "").strip()
                     else "请按以下结构回答：\n- 结论：...\n- 证据依据：...\n- 不确定性/限制：..."
                 ),
+                pattern_hard=[x.strip() for x in str(args.pattern_hard or "").split(",") if x.strip()],
+                pattern_soft=[x.strip() for x in str(args.pattern_soft or "").split(",") if x.strip()],
             ),
             domain_encoder_model=str(args.domain_encoder_model),
             domain_encoder_max_length=int(args.domain_encoder_max_length),
@@ -278,6 +290,7 @@ def main() -> None:
             device=device,
             use_chat_template=bool(args.use_chat_template),
             force_rim=bool(args.force_rim),
+            block_text_lookup=block_text_by_id or None,
         )
         print("\n=== 无 RIM（Base LLM）===\n")
         print(str(out.get("baseline_answer", "")).strip())

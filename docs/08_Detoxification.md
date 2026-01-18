@@ -126,6 +126,33 @@ Pattern Contract 不替代 ANN
 
 Pattern Contract 只对 ANN 结果做 验收 / 拒绝
 
+---
+
+## 七、关键修正（必读）
+
+### 改动1：Pattern 契约不应作为“强一致性”全盘硬约束
+过去把 Pattern 契约当作强一致性约束，会与下游现实产生冲突：
+
+- RIM / KV Bank 的 block 粒度较粗
+- schema 标注方式不稳定
+- FDA 等弱上下文实体无法稳定命中
+
+结果是 Introspection Gate 被迫持续触发：
+retrieve_more → reject_current_kv 的死循环。
+
+**结论**：Pattern 契约应被分级（Hard / Soft），只让 Hard 触发 reject。
+
+### 改动2：Hard / Soft 是 topic 级配置（不是 prompt 级）
+
+- Hard / Soft Pattern 来自该 topic 下 evidence 语料的结构统计
+- 专家少量修正后冻结
+- 描述的是“在这个知识子空间中，不可避免的信息结构”
+- Prompt 不参与 Pattern 生成，只影响生成与排序
+
+**工程实现建议**：
+- Pattern 生成与配置绑定 topic（而非每次解析 prompt）
+- CLI 仅作为 override/调试开关
+
 七、针对上述设计，以下是示例：SFTSV + FDA 药物 Pattern Contract
 PatternContract(
     pattern_id="schema:sftsv_fda_drug_research",
