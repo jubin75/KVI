@@ -122,19 +122,29 @@ def _highlight_keywords(sentence: str, keywords: Sequence[str]) -> str:
 
 
 def _resolve_topic_kv_dir(*, topic: str, topic_work_dir: str) -> Path:
-    twd = Path(str(topic_work_dir))
+    # Prefer explicit topic_work_dir, then fall back to common roots.
+    roots = [
+        str(topic_work_dir),
+        "/home/jb/topics",
+        "/home/jb/KVI/topics",
+    ]
     t = str(topic).strip()
     if not t:
-        return twd / "UNKNOWN" / "kvbank_blocks"
+        return Path(roots[0]) / "UNKNOWN" / "kvbank_blocks"
     # Try common variants; do NOT hardcode specific topics.
-    candidates = [
-        twd / t,
-        twd / t / "work",
-        twd / t.lower(),
-        twd / t.lower() / "work",
-        twd / t.upper(),
-        twd / t.upper() / "work",
-    ]
+    candidates: list[Path] = []
+    for r in roots:
+        twd = Path(r)
+        candidates.extend(
+            [
+                twd / t,
+                twd / t / "work",
+                twd / t.lower(),
+                twd / t.lower() / "work",
+                twd / t.upper(),
+                twd / t.upper() / "work",
+            ]
+        )
     for b in candidates:
         for opt in [b / "kvbank_blocks", b / "kvbank_blocks_v2"]:
             if (opt / "manifest.json").exists():
