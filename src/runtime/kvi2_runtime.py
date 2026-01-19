@@ -22,6 +22,7 @@ import torch
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
 from ..pattern_contract import PatternContract, PatternContractValidator, run_pattern_first
+from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, SemanticInstanceBuilder, SlotSchema
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
 from ..rim import RIM, RIMConfig
@@ -98,20 +99,31 @@ class KVI2Runtime:
             repetition_penalty=1.08,
         )
 
-        # 2) Pattern-first (non-semantic)
+        # 2) Pattern-first (non-semantic) + topic-level contracts (prompt-agnostic)
         pattern = (
             PatternRetriever.from_dir(str(self.cfg.pattern_index_dir))
             if str(getattr(self.cfg, "pattern_index_dir", "") or "").strip()
             else PatternRetriever()
         )
-        pattern_res = pattern.retrieve(user_prompt)
-        pattern_contracts = run_pattern_first(
-            user_prompt,
-            pattern_res,
-            hard_pattern_ids=list(self.cfg.pattern_hard or []),
-            soft_pattern_ids=list(self.cfg.pattern_soft or []),
-        )
+        loader = PatternContractLoader()
+        topic_dir = loader.infer_topic_dir_from_kv_dir(str(kv_dir))
+        loaded_contracts = loader.load(topic_dir=str(topic_dir) if topic_dir else None)
+
+        pattern_res: PatternRetrieveResult
+        pattern_contracts: Sequence[PatternContract]
+        if loaded_contracts:
+            matcher = PatternMatcher(loaded_contracts, retriever=pattern)
+            pattern_res, pattern_contracts = matcher.match(user_prompt)
+        else:
+            pattern_res = pattern.retrieve(user_prompt)
+            pattern_contracts = run_pattern_first(
+                user_prompt,
+                pattern_res,
+                hard_pattern_ids=list(self.cfg.pattern_hard or []),
+                soft_pattern_ids=list(self.cfg.pattern_soft or []),
+            )
         validator = PatternContractValidator()
+        slot_schema = SlotSchema.from_contracts(pattern_contracts)
 
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
@@ -138,7 +150,14 @@ class KVI2Runtime:
         )
         rim.set_q0(q0)
         rim.observe(hidden_states=None, generated_tokens=None, pattern_hits=pattern_res, semantic_hits=None)
-        gate = rim.introspection_gate(q_prime_vec=qprime, kv_relevance_delta=None, pattern_mismatch=False)
+        gate = IntrospectionGate(rim).evaluate(
+            q_prime_vec=qprime,
+            kv_relevance_delta=None,
+            missing_hard=[],
+            missing_soft=[],
+            missing_schema=[],
+            slot_schema=slot_schema,
+        )
         retrieve_more = bool(force_rim) or bool(gate.get("retrieve_more") is True)
 
         out: Dict[str, Any] = {
@@ -199,17 +218,14 @@ class KVI2Runtime:
             soft_missing = contract_validation.get("soft_missing") or []
             schema_missing = contract_validation.get("schema_missing") or []
             pattern_mismatch = bool(len(hard_missing) > 0)
-            gate_after_validation = rim.introspection_gate(
+            gate_after_validation = IntrospectionGate(rim).evaluate(
                 q_prime_vec=qprime,
                 kv_relevance_delta=delta,
-                pattern_mismatch=pattern_mismatch,
+                missing_hard=hard_missing,
+                missing_soft=soft_missing,
+                missing_schema=schema_missing,
+                slot_schema=slot_schema,
             )
-            if pattern_mismatch:
-                gate_after_validation["rationale"] = "pattern-missing-hard"
-            elif not gate_after_validation.get("reject_current_kv") and soft_missing:
-                gate_after_validation["rationale"] = "pattern-missing-soft"
-            elif not gate_after_validation.get("reject_current_kv") and schema_missing:
-                gate_after_validation["rationale"] = "schema-not-yet-instantiated"
             chosen_gate_after_validation = gate_after_validation
 
             if pattern_mismatch:
@@ -228,6 +244,7 @@ class KVI2Runtime:
             if delta is None or float(delta) >= th:
                 break
 
+        semantic_instances = SemanticInstanceBuilder().build(evidence_blocks=chosen_items, slot_schema=slot_schema)
         out["retrieval"] = {
             "kv_dir": str(kv_dir),
             "top_k": int(self.cfg.top_k),
@@ -240,6 +257,7 @@ class KVI2Runtime:
             },
             "contract_validation": dict(chosen_contract_validation or {}),
             "gate_after_validation": dict(chosen_gate_after_validation or {}),
+            "semantic_instances": semantic_instances,
         }
 
         # 5) Second pass generation with injected prefix
