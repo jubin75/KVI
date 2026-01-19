@@ -437,17 +437,22 @@ def _apply_sidecar_slot_guard(
     if not required_or_soft:
         return gate_after_validation
 
-    block_facets = _load_block_facets(kv_dir, sidecar_dir=sidecar_dir)
-    coverage_fn = _load_slot_coverage_fn(sidecar_dir=sidecar_dir)
-    if not block_facets or not coverage_fn:
-        return gate_after_validation
-
     block_ids: list[str] = []
     for it in retrieved_items or []:
         meta = getattr(it, "meta", None) or {}
         bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
         if bid:
             block_ids.append(bid)
+
+    evidence_items = _load_evidence_sidecar(kv_dir, sidecar_dir=sidecar_dir)
+    if evidence_items:
+        block_facets = _build_facets_from_evidence(evidence_items, slot_schema, block_ids)
+    else:
+        block_facets = _load_block_facets(kv_dir, sidecar_dir=sidecar_dir)
+
+    coverage_fn = _load_slot_coverage_fn(sidecar_dir=sidecar_dir)
+    if not block_facets or not coverage_fn:
+        return gate_after_validation
 
     coverage = coverage_fn(semantic_instances, block_ids, block_facets)
     if not isinstance(coverage, dict):
@@ -504,6 +509,66 @@ def _load_block_facets(kv_dir: str, *, sidecar_dir: str) -> Dict[str, Dict[str, 
             continue
         if facets:
             break
+    return facets
+
+
+def _load_evidence_sidecar(kv_dir: str, *, sidecar_dir: str) -> List[Dict[str, Any]]:
+    topic_dir = Path(str(kv_dir)).resolve()
+    if topic_dir.name in {"kvbank_blocks", "kvbank_blocks_v2"}:
+        if topic_dir.parent.name == "work":
+            topic_dir = topic_dir.parent.parent
+        else:
+            topic_dir = topic_dir.parent
+    candidates = []
+    if sidecar_dir:
+        candidates.append(Path(sidecar_dir) / "evidence.sidecar.jsonl")
+    candidates.extend(
+        [
+            topic_dir / "work" / "evidence.sidecar.jsonl",
+            Path(__file__).resolve().parents[1] / "sidecar" / "evidence.sidecar.jsonl",
+        ]
+    )
+    items: List[Dict[str, Any]] = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    rec = json.loads(s)
+                    if isinstance(rec, dict):
+                        items.append(rec)
+        except Exception:
+            continue
+        if items:
+            break
+    return items
+
+
+def _build_facets_from_evidence(
+    evidence_items: Sequence[Dict[str, Any]],
+    slot_schema: SlotSchema,
+    block_ids: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    allowed_by_slot: Dict[str, set[str]] = {}
+    for name, spec in (slot_schema.slots or {}).items():
+        allowed_by_slot[name] = {str(t).strip().lower() for t in (spec.evidence_type or []) if str(t).strip()}
+
+    block_id_set = {str(b) for b in (block_ids or []) if str(b).strip()}
+    facets: Dict[str, Dict[str, Any]] = {}
+    for it in evidence_items or []:
+        bid = str(it.get("source_block_id") or "").strip()
+        if not bid or (block_id_set and bid not in block_id_set):
+            continue
+        ev_type = str(it.get("type") or "").strip().lower()
+        if not ev_type:
+            continue
+        for slot_name, allowed in allowed_by_slot.items():
+            if ev_type in allowed:
+                facets.setdefault(bid, {})[slot_name] = True
     return facets
 
 
