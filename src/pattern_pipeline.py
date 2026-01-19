@@ -340,6 +340,7 @@ class IntrospectionGate:
         slot_schema: Optional[SlotSchema] = None,
         answer_style: str = "factual",
         question_intent: str = "legacy",
+        semantic_instances: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         gate = self.rim.introspection_gate(
             q_prime_vec=q_prime_vec,
@@ -362,7 +363,18 @@ class IntrospectionGate:
 
         allowed = _allowed_capabilities(slot_schema)
         final_style = _normalize_answer_style(answer_style)
-        if not allowed:
+        missing_all_required = _missing_all_required(slot_schema, semantic_instances)
+        if missing_all_required:
+            # R1/R2: forbid factual assertion when all required slots are empty.
+            allowed.discard("FACTUAL_ASSERTION")
+            if "EXPLANATION" in allowed:
+                final_style = "EXPLANATION"
+                gate["decision"] = "ALLOW"
+                gate["decision_reason"] = "required slots missing; downgrade to explanation"
+            else:
+                gate["decision"] = "REFUSE"
+                gate["decision_reason"] = "required slots missing; no safe answer capability"
+        elif not allowed:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "no-allowed-capability"
         elif final_style not in allowed:
@@ -524,4 +536,28 @@ def _allowed_capabilities(slot_schema: Optional[SlotSchema]) -> set[str]:
         elif spec.inference_level == "hard":
             allowed = allowed.intersection({"FACTUAL_ASSERTION"})
     return allowed
+
+
+def _missing_all_required(
+    slot_schema: Optional[SlotSchema], semantic_instances: Optional[Sequence[Dict[str, Any]]]
+) -> bool:
+    if slot_schema is None:
+        return False
+    required_slots = [k for k, v in (slot_schema.slots or {}).items() if v.required]
+    if not required_slots:
+        return False
+    if not semantic_instances:
+        return True
+    slot_state: Dict[str, Any] = {}
+    for inst in semantic_instances:
+        if isinstance(inst, dict) and isinstance(inst.get("slots"), dict):
+            slot_state = inst["slots"]
+            break
+    if not slot_state:
+        return True
+    for s in required_slots:
+        vals = slot_state.get(s) or []
+        if isinstance(vals, list) and len(vals) > 0:
+            return False
+    return True
 

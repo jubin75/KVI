@@ -167,6 +167,12 @@ def main() -> None:
         default="",
         help="Optional blocks.jsonl path for debug: print evidence text for retrieved_ids.",
     )
+    default_sidecar_dir = str(Path(__file__).resolve().parents[1] / "src" / "sidecar")
+    p.add_argument(
+        "--sidecar_dir",
+        default=default_sidecar_dir,
+        help="Optional sidecar dir (contains block_facets.jsonl and slot_coverage.py).",
+    )
 
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model for retrieval query embedding")
     p.add_argument("--domain_encoder_max_length", type=int, default=256)
@@ -301,6 +307,7 @@ def main() -> None:
             use_chat_template=bool(args.use_chat_template),
             force_rim=bool(args.force_rim),
             block_text_lookup=block_text_by_id or None,
+            sidecar_dir=str(args.sidecar_dir or "").strip(),
         )
         print("\n=== 无 RIM（Base LLM）===\n")
         print(str(out.get("baseline_answer", "")).strip())

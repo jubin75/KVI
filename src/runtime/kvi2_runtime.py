@@ -14,6 +14,7 @@ Hard constraints (docs/07_KVI_RMI.md):
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -71,6 +72,7 @@ class KVI2Runtime:
         use_chat_template: bool = False,
         force_rim: bool = False,
         block_text_lookup: Optional[Dict[str, str]] = None,
+        sidecar_dir: str = "",
     ) -> Dict[str, Any]:
         """
         Returns a dict containing:
@@ -185,6 +187,7 @@ class KVI2Runtime:
             slot_schema=slot_schema,
             answer_style=best_pattern.answer_style,
             question_intent=best_pattern.question_intent,
+            semantic_instances=[],
         )
         if gate.get("decision") == "REFUSE":
             out: Dict[str, Any] = {
@@ -257,6 +260,12 @@ class KVI2Runtime:
             soft_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "soft"]
             schema_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "schema"]
             pattern_mismatch = bool(len(hard_missing) > 0)
+            temp_instances = SemanticInstanceBuilder().build(
+                pattern=best_pattern,
+                evidence_blocks=batch,
+                slot_schema=slot_schema,
+                block_text_lookup=block_text_lookup,
+            )
             gate_after_validation = IntrospectionGate(rim).evaluate(
                 q_prime_vec=qprime,
                 kv_relevance_delta=delta,
@@ -269,6 +278,7 @@ class KVI2Runtime:
                 slot_schema=slot_schema,
                 answer_style=best_pattern.answer_style,
                 question_intent=best_pattern.question_intent,
+                semantic_instances=temp_instances,
             )
             chosen_gate_after_validation = gate_after_validation
 
@@ -298,6 +308,14 @@ class KVI2Runtime:
             evidence_blocks=chosen_items,
             slot_schema=slot_schema,
             block_text_lookup=block_text_lookup,
+        )
+        chosen_gate_after_validation = _apply_sidecar_slot_guard(
+            gate_after_validation=chosen_gate_after_validation,
+            slot_schema=slot_schema,
+            semantic_instances=semantic_instances,
+            retrieved_items=chosen_items,
+            kv_dir=str(kv_dir),
+            sidecar_dir=str(sidecar_dir or "").strip(),
         )
         out["retrieval"] = {
             "kv_dir": str(kv_dir),
@@ -393,4 +411,123 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
         )
         return str(prompt) + guard
     return str(prompt)
+
+
+def _apply_sidecar_slot_guard(
+    *,
+    gate_after_validation: Optional[Dict[str, Any]],
+    slot_schema: SlotSchema,
+    semantic_instances: Sequence[Dict[str, Any]],
+    retrieved_items: Sequence[Any],
+    kv_dir: str,
+    sidecar_dir: str,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(gate_after_validation, dict):
+        return gate_after_validation
+    if gate_after_validation.get("decision") != "ALLOW":
+        return gate_after_validation
+    if str(gate_after_validation.get("final_answer_style") or "") != "FACTUAL_ASSERTION":
+        return gate_after_validation
+
+    required_or_soft = [
+        k
+        for k, v in (slot_schema.slots or {}).items()
+        if bool(v.required) or str(v.inference_level) == "soft"
+    ]
+    if not required_or_soft:
+        return gate_after_validation
+
+    block_facets = _load_block_facets(kv_dir, sidecar_dir=sidecar_dir)
+    coverage_fn = _load_slot_coverage_fn(sidecar_dir=sidecar_dir)
+    if not block_facets or not coverage_fn:
+        return gate_after_validation
+
+    block_ids: list[str] = []
+    for it in retrieved_items or []:
+        meta = getattr(it, "meta", None) or {}
+        bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+        if bid:
+            block_ids.append(bid)
+
+    coverage = coverage_fn(semantic_instances, block_ids, block_facets)
+    if not isinstance(coverage, dict):
+        return gate_after_validation
+    missing_all = True
+    for s in required_or_soft:
+        if isinstance(coverage.get(s), dict) and int(coverage[s].get("evidence_count") or 0) > 0:
+            missing_all = False
+            break
+
+    if missing_all:
+        gate_after_validation["final_answer_style"] = "EXPLANATION"
+        gate_after_validation["allowed_answer_capabilities"] = ["EXPLANATION"]
+        gate_after_validation["decision_reason"] = "slot-uncovered"
+    return gate_after_validation
+
+
+def _load_block_facets(kv_dir: str, *, sidecar_dir: str) -> Dict[str, Dict[str, Any]]:
+    # Prefer topic sidecar: {topic}/sidecar/block_facets.jsonl
+    topic_dir = Path(str(kv_dir)).resolve()
+    if topic_dir.name in {"kvbank_blocks", "kvbank_blocks_v2"}:
+        if topic_dir.parent.name == "work":
+            topic_dir = topic_dir.parent.parent
+        else:
+            topic_dir = topic_dir.parent
+    candidates = []
+    if sidecar_dir:
+        candidates.append(Path(sidecar_dir) / "block_facets.jsonl")
+    candidates.extend(
+        [
+            topic_dir / "sidecar" / "block_facets.jsonl",
+            Path(__file__).resolve().parents[1] / "sidecar" / "block_facets.jsonl",
+        ]
+    )
+    facets: Dict[str, Dict[str, Any]] = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    rec = json.loads(s)
+                    if not isinstance(rec, dict):
+                        continue
+                    bid = str(rec.get("block_id") or "").strip()
+                    if not bid:
+                        continue
+                    fac = rec.get("facets") if isinstance(rec.get("facets"), dict) else {}
+                    facets[bid] = fac
+        except Exception:
+            continue
+        if facets:
+            break
+    return facets
+
+
+def _load_slot_coverage_fn(*, sidecar_dir: str):
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    paths = []
+    if sidecar_dir:
+        paths.append(Path(sidecar_dir) / "slot_coverage.py")
+    paths.append(Path(__file__).resolve().parents[1] / "sidecar" / "slot_coverage.py")
+    path = None
+    for p in paths:
+        if p.exists():
+            path = p
+            break
+    if path is None:
+        return None
+    try:
+        spec = spec_from_file_location("slot_coverage", str(path))
+        if spec is None or spec.loader is None:
+            return None
+        mod = module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return getattr(mod, "compute_slot_coverage", None)
+    except Exception:
+        return None
 
