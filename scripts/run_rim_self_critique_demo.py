@@ -307,7 +307,18 @@ def main() -> None:
         print("\n=== Pattern-first（non-semantic）===\n")
         print(json.dumps(out.get("pattern_first", {}), ensure_ascii=False, indent=2))
         print("\n=== Introspection Gate ===\n")
-        print(json.dumps({"gate_mode": "introspection", "gate": out.get("gate", {}), "retrieve_more": out.get("retrieve_more")}, ensure_ascii=False, indent=2))
+        gate_payload = {"gate_mode": "introspection", "gate": out.get("gate", {}), "retrieve_more": out.get("retrieve_more")}
+        print(json.dumps(gate_payload, ensure_ascii=False, indent=2))
+        gate_dbg = out.get("gate") or {}
+        if isinstance(gate_dbg, dict):
+            dbg_line = {
+                "decision": gate_dbg.get("decision"),
+                "decision_reason": gate_dbg.get("decision_reason"),
+                "allowed_answer_capabilities": gate_dbg.get("allowed_answer_capabilities"),
+                "final_answer_style": gate_dbg.get("final_answer_style"),
+            }
+            print("\n=== Gate Decision Debug ===\n")
+            print(json.dumps(dbg_line, ensure_ascii=False, indent=2))
         if out.get("retrieve_more"):
             print("\n=== RIM 检索（KV Bank）===\n")
             print(json.dumps(out.get("retrieval", {}), ensure_ascii=False, indent=2))

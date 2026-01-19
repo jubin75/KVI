@@ -83,9 +83,33 @@ def _build_patterns(
             continue
         patterns.append(
             {
-                "id": f"abbr:{abbr}",
-                "type": "lexical",
-                "rule": f"abbr '{abbr}' appears in evidence (freq={cnt})",
+                "pattern_id": f"abbr:{abbr}",
+                "question_skeleton": {
+                    "intent": "ask_definition",
+                    "surface_forms": [
+                        "X 是什么",
+                        "X 的全称是什么",
+                        "What is X",
+                        "What does X stand for",
+                    ],
+                },
+                "slots": {
+                    "abbr": {
+                        "type": "string",
+                        "required": True,
+                        "evidence_type": ["abbreviation"],
+                        "min_evidence": 1,
+                        "inference_level": "hard",
+                    },
+                    "full_name": {
+                        "type": "string",
+                        "required": False,
+                        "evidence_type": ["definition", "abbreviation"],
+                        "min_evidence": 1,
+                        "inference_level": "soft",
+                    },
+                },
+                "answer_style": "factual",
                 "count": int(cnt),
             }
         )
@@ -98,10 +122,21 @@ def _build_patterns(
             continue
         patterns.append(
             {
-                "id": f"schema:{slot}",
-                "type": "schema",
-                "rule": f"schema slot '{slot}' appears in evidence (freq={cnt})",
-                "slots": [slot],
+                "pattern_id": f"schema:{slot}",
+                "question_skeleton": {
+                    "intent": "ask_schema_list",
+                    "surface_forms": [f"X 的{slot}是什么", f"X 有哪些{slot}"],
+                },
+                "slots": {
+                    slot: {
+                        "type": "string",
+                        "required": False,
+                        "evidence_type": ["schema"],
+                        "min_evidence": 1,
+                        "inference_level": "schema",
+                    }
+                },
+                "answer_style": "factual",
                 "count": int(cnt),
             }
         )
@@ -165,7 +200,7 @@ def main() -> None:
         "topic": topic,
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "source": str(in_path),
-        "patterns": {"hard": [], "soft": patterns},
+        "patterns": patterns,
         "stats": {
             "total_blocks": int(total_blocks),
             "unique_abbr": int(len(abbr_counts)),

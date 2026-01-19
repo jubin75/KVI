@@ -21,8 +21,8 @@ import torch
 
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
-from ..pattern_contract import PatternContract, PatternContractValidator, run_pattern_first
-from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, SemanticInstanceBuilder, SlotSchema
+from ..pattern_contract import PatternContractValidator, run_pattern_first
+from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, PatternSpec, SemanticInstanceBuilder, SlotSchema
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
 from ..rim import RIM, RIMConfig
@@ -110,20 +110,43 @@ class KVI2Runtime:
         loaded_contracts = loader.load(topic_dir=str(topic_dir) if topic_dir else None)
 
         pattern_res: PatternRetrieveResult
-        pattern_contracts: Sequence[PatternContract]
+        matched_patterns: Sequence[PatternSpec]
+        matched_skeletons: Dict[str, str]
         if loaded_contracts:
             matcher = PatternMatcher(loaded_contracts, retriever=pattern)
-            pattern_res, pattern_contracts = matcher.match(user_prompt)
+            pattern_res, matched_patterns, matched_skeletons = matcher.match(user_prompt)
         else:
             pattern_res = pattern.retrieve(user_prompt)
-            pattern_contracts = run_pattern_first(
-                user_prompt,
-                pattern_res,
-                hard_pattern_ids=list(self.cfg.pattern_hard or []),
-                soft_pattern_ids=list(self.cfg.pattern_soft or []),
-            )
+            matched_patterns = []
+            matched_skeletons = {}
+
+        # No contract => reject (contract-driven QA)
+        if not loaded_contracts:
+            out: Dict[str, Any] = {
+                "baseline_answer": baseline.strip(),
+                "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
+                "gate": {"decision": "reject_no_contract", "pattern_id": "", "matched_skeleton": ""},
+                "retrieve_more": False,
+                "rim_answer": "",
+                "retrieval": {},
+            }
+            return out
+
+        if not matched_patterns:
+            out = {
+                "baseline_answer": baseline.strip(),
+                "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
+                "gate": {"decision": "reject_no_pattern", "pattern_id": "", "matched_skeleton": ""},
+                "retrieve_more": False,
+                "rim_answer": "",
+                "retrieval": {},
+            }
+            return out
+
+        # Use best pattern (highest match score)
+        best_pattern = matched_patterns[0]
+        slot_schema = SlotSchema.from_pattern(best_pattern)
         validator = PatternContractValidator()
-        slot_schema = SlotSchema.from_contracts(pattern_contracts)
 
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
@@ -156,13 +179,28 @@ class KVI2Runtime:
             missing_hard=[],
             missing_soft=[],
             missing_schema=[],
+            pattern_id=best_pattern.pattern_id,
+            matched_skeleton=matched_skeletons.get(best_pattern.pattern_id, ""),
+            slot_status=slot_schema.status([]),
             slot_schema=slot_schema,
+            answer_style=best_pattern.answer_style,
+            question_intent=best_pattern.question_intent,
         )
+        if gate.get("decision") == "REFUSE":
+            out: Dict[str, Any] = {
+                "baseline_answer": baseline.strip(),
+                "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
+                "gate": gate,
+                "retrieve_more": False,
+                "rim_answer": "",
+                "retrieval": {},
+            }
+            return out
         retrieve_more = bool(force_rim) or bool(gate.get("retrieve_more") is True)
 
         out: Dict[str, Any] = {
             "baseline_answer": baseline.strip(),
-            "pattern_first": _pattern_to_json(pattern_res, pattern_contracts),
+            "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
             "gate": gate,
             "retrieve_more": bool(retrieve_more),
         }
@@ -212,11 +250,12 @@ class KVI2Runtime:
                 past_key_values=pkv,
             )
 
-            contract_validation = validator.validate_all(pattern_contracts, batch, block_text_lookup=block_text_lookup)
+            contract_validation = validator.validate_all([], batch, block_text_lookup=block_text_lookup)
             chosen_contract_validation = contract_validation
-            hard_missing = contract_validation.get("hard_missing") or []
-            soft_missing = contract_validation.get("soft_missing") or []
-            schema_missing = contract_validation.get("schema_missing") or []
+            slot_status = slot_schema.status(batch)
+            hard_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "hard"]
+            soft_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "soft"]
+            schema_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "schema"]
             pattern_mismatch = bool(len(hard_missing) > 0)
             gate_after_validation = IntrospectionGate(rim).evaluate(
                 q_prime_vec=qprime,
@@ -224,10 +263,20 @@ class KVI2Runtime:
                 missing_hard=hard_missing,
                 missing_soft=soft_missing,
                 missing_schema=schema_missing,
+                pattern_id=best_pattern.pattern_id,
+                matched_skeleton=matched_skeletons.get(best_pattern.pattern_id, ""),
+                slot_status=slot_status,
                 slot_schema=slot_schema,
+                answer_style=best_pattern.answer_style,
+                question_intent=best_pattern.question_intent,
             )
             chosen_gate_after_validation = gate_after_validation
 
+            if gate_after_validation.get("decision") == "REFUSE":
+                chosen_items = []
+                chosen_pkv = None
+                chosen_delta = None
+                break
             if pattern_mismatch:
                 # Reject current KV batch; try refresh if budget remains.
                 if attempt_idx + 1 < attempts:
@@ -244,7 +293,12 @@ class KVI2Runtime:
             if delta is None or float(delta) >= th:
                 break
 
-        semantic_instances = SemanticInstanceBuilder().build(evidence_blocks=chosen_items, slot_schema=slot_schema)
+        semantic_instances = SemanticInstanceBuilder().build(
+            pattern=best_pattern,
+            evidence_blocks=chosen_items,
+            slot_schema=slot_schema,
+            block_text_lookup=block_text_lookup,
+        )
         out["retrieval"] = {
             "kv_dir": str(kv_dir),
             "top_k": int(self.cfg.top_k),
@@ -264,10 +318,16 @@ class KVI2Runtime:
         if chosen_pkv is None:
             out["rim_answer"] = ""
             return out
+        guard_style = ""
+        if isinstance(chosen_gate_after_validation, dict):
+            guard_style = str(chosen_gate_after_validation.get("final_answer_style") or "")
+        if not guard_style and isinstance(gate, dict):
+            guard_style = str(gate.get("final_answer_style") or "")
+        guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
         rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
             tokenizer=tokenizer,
-            prompt=formatted_prompt,
+            prompt=guarded_prompt,
             device=device,
             past_key_values=chosen_pkv,
             max_new_tokens=int(self.cfg.max_new_tokens_rim),
@@ -292,20 +352,45 @@ class KVI2Runtime:
             return txt
 
 
-def _pattern_to_json(r: PatternRetrieveResult, contracts: Sequence[PatternContract]) -> Dict[str, Any]:
+def _pattern_to_json(
+    r: PatternRetrieveResult, patterns: Sequence[PatternSpec], matched_skeletons: Dict[str, str]
+) -> Dict[str, Any]:
     return {
         "recall_size": int(r.recall_size),
         "debug": r.debug_info,
-        "contracts": [
+        "patterns": [
             {
-                "pattern_id": c.pattern_id,
-                "expected_information": c.expected_information,
-                "required_signals": c.required_signals,
-                "min_information_density": c.min_information_density,
-                "level": c.level,
-                "kind": c.kind,
+                "pattern_id": p.pattern_id,
+                "question_skeleton": {
+                    "intent": p.question_intent,
+                    "surface_forms": list(p.question_surface_forms or []),
+                },
+                "slots": {k: v.to_dict() for k, v in (p.slots or {}).items()},
+                "answer_style": p.answer_style,
+                "matched_skeleton": matched_skeletons.get(p.pattern_id, ""),
             }
-            for c in (contracts or [])
+            for p in (patterns or [])
         ],
     }
+
+
+def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
+    style = str(final_style or "").strip().upper()
+    if style == "LIST_ONLY":
+        guard = (
+            "\n\n[STYLE_GUARD]\n"
+            "Return ONLY a bullet list of categories or item types. "
+            "Do NOT assert factual claims or name specific entities. "
+            "If evidence is insufficient, return only: '现有证据不足以回答该问题。'\n"
+        )
+        return str(prompt) + guard
+    if style == "EXPLANATION":
+        guard = (
+            "\n\n[STYLE_GUARD]\n"
+            "Provide a structural explanation only (no factual assertions, "
+            "no specific entity names). If evidence is insufficient, return only: "
+            "'现有证据不足以回答该问题。'\n"
+        )
+        return str(prompt) + guard
+    return str(prompt)
 
