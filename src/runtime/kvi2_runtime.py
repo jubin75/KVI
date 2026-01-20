@@ -660,7 +660,12 @@ def _extract_list_items_from_instances(
                     if bid:
                         src_ids.append(bid)
     # de-dup
-    items = list(dict.fromkeys([x for x in items if x]))
+    cleaned: List[str] = []
+    for x in items:
+        y = _normalize_list_item(x)
+        if y:
+            cleaned.append(y)
+    items = list(dict.fromkeys(cleaned))
     src_ids = list(dict.fromkeys([x for x in src_ids if x]))
     if not items:
         return [], src_ids, "no-bullets-in-evidence"
@@ -683,6 +688,40 @@ def _extract_bullet_like_items(text: str) -> List[str]:
                 out.append(ln[3:].strip())
                 continue
     return [x for x in out if x]
+
+
+def _normalize_list_item(item: str) -> str:
+    s = " ".join(str(item or "").split())
+    if not s:
+        return ""
+    # Remove leading boilerplate phrases.
+    s = re.sub(
+        r"^(symptoms?|clinical features|clinical manifestations|patients typically present)\s+"
+        r"(include|including|such as|with|are)\s+",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"^(表现为|症状包括|临床表现为|典型表现为|常见表现为)\s*", "", s)
+    # Drop trailing citations / bracketed refs.
+    s = re.sub(r"\[[^\]]+\]$", "", s).strip()
+    s = re.sub(r"\([^)]+\)$", "", s).strip()
+    # Fix common split medical terms.
+    s = re.sub(r"\bthrombo\s+cytopenia\b", "thrombocytopenia", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bleuko\s+cytopenia\b", "leukocytopenia", s, flags=re.IGNORECASE)
+    s = re.sub(r"\blympho\s+cytopenia\b", "lymphocytopenia", s, flags=re.IGNORECASE)
+    # Drop overly long or sentence-like fragments.
+    if len(s) < 2 or len(s) > 60:
+        return ""
+    if re.search(r"[.;:]", s):
+        return ""
+    if re.search(
+        r"\b(symptoms?|include|including|such as|present|presented|characterized|caused)\b",
+        s,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    return s.strip(" ,;:-")
 
 
 def _boost_list_like_items(items: Sequence[Any], slot_schema: Optional[SlotSchema]) -> List[Any]:
