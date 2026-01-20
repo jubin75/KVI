@@ -119,6 +119,32 @@ class PatternContractValidator:
         }
 
 
+def filter_evidence_by_contracts(
+    contracts: Sequence[PatternContract],
+    evidence_blocks: Sequence[Any],
+    *,
+    block_text_lookup: Optional[Dict[str, str]] = None,
+    pattern_id: Optional[str] = None,
+) -> List[Any]:
+    """
+    Return evidence blocks that satisfy at least one PatternContract.
+    If pattern_id is provided, only contracts with that id are considered.
+    """
+    if not contracts or not evidence_blocks:
+        return list(evidence_blocks or [])
+    if pattern_id:
+        target = [c for c in contracts if str(c.pattern_id) == str(pattern_id)]
+    else:
+        target = list(contracts)
+    if not target:
+        return list(evidence_blocks or [])
+    out: List[Any] = []
+    for it in evidence_blocks or []:
+        if any(_satisfy_contract(c, it, block_text_lookup=block_text_lookup) for c in target):
+            out.append(it)
+    return out
+
+
 def run_pattern_first(
     query_text: str,
     pattern_result: PatternRetrieveResult,
@@ -209,6 +235,8 @@ def run_pattern_first(
 
 def _satisfy_contract(contract: PatternContract, block: Any, block_text_lookup: Optional[Dict[str, str]] = None) -> bool:
     meta = getattr(block, "meta", None) or {}
+    meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+    pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
     bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
     text = ""
     if block_text_lookup and bid:
@@ -219,14 +247,15 @@ def _satisfy_contract(contract: PatternContract, block: Any, block_text_lookup: 
     if contract.kind == "abbr":
         abbr = str(contract.expected_information.get("abbr") or "")
         exps = contract.expected_information.get("expansions") or []
-        if abbr and (abbr in text or abbr.lower() in text_low):
-            return True
+        abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
+        for ap in abbr_pairs:
+            ok, ap_abbr, _ = _parse_valid_abbr_pair(ap)
+            if ok and (not abbr or ap_abbr.upper() == abbr.upper()):
+                return True
         for e in exps if isinstance(exps, list) else []:
             e2 = str(e or "").strip()
             if e2 and e2.lower() in text_low:
                 return True
-        if abbr and f"abbr:{abbr.upper()}" in signals:
-            return True
         return False
 
     if contract.kind == "schema":
@@ -265,10 +294,9 @@ def _collect_signals_from_evidence(evidence_blocks: Sequence[Any]) -> Tuple[Set[
         # Abbreviation pairs
         abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
         for ap in abbr_pairs:
-            if not isinstance(ap, dict):
+            ok, abbr, full = _parse_valid_abbr_pair(ap)
+            if not ok:
                 continue
-            abbr = str(ap.get("abbr") or "").upper()
-            full = str(ap.get("full") or "")
             if abbr:
                 _add(f"abbr:{abbr}")
             if abbr and full:
@@ -305,6 +333,31 @@ def _collect_signals_from_evidence(evidence_blocks: Sequence[Any]) -> Tuple[Set[
     denom = max(1.0, float(len(blocks)) * 2.0)
     info_density = min(1.0, float(len(info_signals)) / denom)
     return signals, info_density
+
+
+def _parse_valid_abbr_pair(ap: Any) -> Tuple[bool, str, str]:
+    if not isinstance(ap, dict):
+        return False, "", ""
+    abbr = str(ap.get("abbr") or "").strip()
+    full = str(ap.get("full") or "").strip()
+    if len(abbr) < 3:
+        return False, "", ""
+    if len(full) < (len(abbr) + 4):
+        return False, "", ""
+    full_low = full.lower()
+    if full_low.startswith(("abstract", "keywords", "introduction")):
+        return False, "", ""
+    first_word = full_low.split()[0] if full_low.split() else ""
+    if len(first_word) < 4:
+        return False, "", ""
+    if "confidence" in ap:
+        try:
+            conf = float(ap.get("confidence") or 0.0)
+        except Exception:
+            conf = 0.0
+        if conf < 0.85:
+            return False, "", ""
+    return True, abbr, full
 
 
 # Example medical contract for testing/debug

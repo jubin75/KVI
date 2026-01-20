@@ -22,7 +22,7 @@ import torch
 
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
-from ..pattern_contract import PatternContractValidator, run_pattern_first
+from ..pattern_contract import PatternContractValidator, filter_evidence_by_contracts, run_pattern_first
 from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, PatternSpec, SemanticInstanceBuilder, SlotSchema
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
@@ -149,6 +149,12 @@ class KVI2Runtime:
         best_pattern = matched_patterns[0]
         slot_schema = SlotSchema.from_pattern(best_pattern)
         validator = PatternContractValidator()
+        contracts = run_pattern_first(
+            user_prompt,
+            pattern_res,
+            hard_pattern_ids=self.cfg.pattern_hard,
+            soft_pattern_ids=self.cfg.pattern_soft,
+        )
 
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
@@ -240,8 +246,25 @@ class KVI2Runtime:
             if not batch:
                 break
 
+            filtered_batch = filter_evidence_by_contracts(
+                contracts,
+                batch,
+                block_text_lookup=block_text_lookup,
+                pattern_id=best_pattern.pattern_id,
+            )
+            if not filtered_batch:
+                if attempt_idx + 1 < attempts:
+                    continue
+                break
+
             ext_by_layer = {
-                li: stack_ext_kv_items_by_layer(items=batch, layer_id=int(li), batch_size=1, device=device, dtype=dtype)
+                li: stack_ext_kv_items_by_layer(
+                    items=filtered_batch,
+                    layer_id=int(li),
+                    batch_size=1,
+                    device=device,
+                    dtype=dtype,
+                )
                 for li in layer_ids
             }
             pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
@@ -253,16 +276,16 @@ class KVI2Runtime:
                 past_key_values=pkv,
             )
 
-            contract_validation = validator.validate_all([], batch, block_text_lookup=block_text_lookup)
+            contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
             chosen_contract_validation = contract_validation
-            slot_status = slot_schema.status(batch)
-            hard_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "hard"]
-            soft_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "soft"]
-            schema_missing = [k for k, v in slot_status.items() if v != "satisfied" and slot_schema.slots.get(k) and slot_schema.slots[k].inference_level == "schema"]
+            slot_status = slot_schema.status(filtered_batch)
+            hard_missing = list(contract_validation.get("hard_missing") or [])
+            soft_missing = list(contract_validation.get("soft_missing") or [])
+            schema_missing = list(contract_validation.get("schema_missing") or [])
             pattern_mismatch = bool(len(hard_missing) > 0)
             temp_instances = SemanticInstanceBuilder().build(
                 pattern=best_pattern,
-                evidence_blocks=batch,
+                evidence_blocks=filtered_batch,
                 slot_schema=slot_schema,
                 block_text_lookup=block_text_lookup,
             )
@@ -296,7 +319,7 @@ class KVI2Runtime:
                 chosen_delta = None
                 break
 
-            chosen_items = batch
+            chosen_items = filtered_batch
             chosen_pkv = pkv
             chosen_delta = delta
             th = float(self.cfg.kv_irrelevant_logit_delta_threshold)

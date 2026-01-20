@@ -456,13 +456,40 @@ def _extract_evidence_types(block: Any) -> List[str]:
         types.append(meta_payload.get("block_type"))
     if isinstance(meta.get("block_type"), str):
         types.append(meta.get("block_type"))
-    # Treat blocks with abbreviation pairs as abbreviation evidence.
+    # Treat blocks with valid abbreviation pairs as abbreviation evidence.
     pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
     abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
-    if abbr_pairs:
+    if _has_valid_abbr_pair(abbr_pairs):
         types.append("abbreviation")
     out = [str(t).strip().lower() for t in types if str(t).strip()]
     return list(dict.fromkeys(out))
+
+
+def _has_valid_abbr_pair(abbr_pairs: List[Any]) -> bool:
+    for ap in abbr_pairs or []:
+        if not isinstance(ap, dict):
+            continue
+        abbr = str(ap.get("abbr") or "").strip()
+        full = str(ap.get("full") or "").strip()
+        if len(abbr) < 3:
+            continue
+        if len(full) < (len(abbr) + 4):
+            continue
+        full_low = full.lower()
+        if full_low.startswith(("abstract", "keywords", "introduction")):
+            continue
+        first_word = full_low.split()[0] if full_low.split() else ""
+        if len(first_word) < 4:
+            continue
+        if "confidence" in ap:
+            try:
+                conf = float(ap.get("confidence") or 0.0)
+            except Exception:
+                conf = 0.0
+            if conf < 0.85:
+                continue
+        return True
+    return False
 
 
 def _collect_evidence_for_slot(spec: SlotSpec, evidence_blocks: Sequence[Any]) -> List[Any]:
