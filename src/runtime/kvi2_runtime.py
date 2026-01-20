@@ -707,10 +707,13 @@ def _normalize_list_item(item: str) -> str:
     # Drop trailing citations / bracketed refs.
     s = re.sub(r"\[[^\]]+\]$", "", s).strip()
     s = re.sub(r"\([^)]+\)$", "", s).strip()
-    # Fix common split medical terms.
-    s = re.sub(r"\bthrombo\s+cytopenia\b", "thrombocytopenia", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bleuko\s+cytopenia\b", "leukocytopenia", s, flags=re.IGNORECASE)
-    s = re.sub(r"\blympho\s+cytopenia\b", "lymphocytopenia", s, flags=re.IGNORECASE)
+    # Remove negated symptoms (e.g., "no ...", "without ...", "absence of ...").
+    if re.match(r"^(no|without|absence of|free of)\b", s, flags=re.IGNORECASE):
+        return ""
+    if re.match(r"^(无|未见|没有|否认)\b", s):
+        return ""
+    # Fix split/variant medical terms via regex map.
+    s = _apply_regex_map(s, _SYMPTOM_NORMALIZATION_MAP)
     # Drop overly long or sentence-like fragments.
     if len(s) < 2 or len(s) > 60:
         return ""
@@ -723,6 +726,23 @@ def _normalize_list_item(item: str) -> str:
     ):
         return ""
     return s.strip(" ,;:-")
+
+
+def _apply_regex_map(text: str, mapping: List[Tuple[str, str]]) -> str:
+    out = str(text or "")
+    for pat, repl in mapping:
+        out = re.sub(pat, repl, out, flags=re.IGNORECASE)
+    return out
+
+
+# Minimal, extensible normalization map (regex pattern -> replacement).
+_SYMPTOM_NORMALIZATION_MAP: List[Tuple[str, str]] = [
+    (r"\bthrombo\s+cytopenia\b", "thrombocytopenia"),
+    (r"\bleuko\s+cytopenia\b", "leukocytopenia"),
+    (r"\blympho\s+cytopenia\b", "lymphocytopenia"),
+    (r"\b(decreased|low)\s+(white\s+blood\s+cell|wbc)\b", "leukopenia"),
+    (r"\b(decreased|low)\s+platelet\s+counts?\b", "thrombocytopenia"),
+]
 
 
 def _boost_list_like_items(items: Sequence[Any], slot_schema: Optional[SlotSchema]) -> List[Any]:
