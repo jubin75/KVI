@@ -355,6 +355,17 @@ class KVI2Runtime:
             "semantic_instances": semantic_instances,
         }
 
+        # If this is an abbreviation pattern and we can extract a valid expansion
+        # from evidence metadata, return a deterministic answer to avoid hallucination.
+        if str(best_pattern.pattern_id).startswith("abbr:"):
+            abbr = str(best_pattern.pattern_id).split(":", 1)[1].strip()
+            full_name = _extract_abbr_expansion_from_blocks(chosen_items, abbr)
+            if full_name:
+                out["rim_answer"] = f"{abbr} 的全称是 {full_name}。"
+                return out
+            out["rim_answer"] = "现有证据不足以回答该问题。"
+            return out
+
         # 5) Second pass generation with injected prefix
         if chosen_pkv is None:
             out["rim_answer"] = ""
@@ -434,6 +445,43 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
         )
         return str(prompt) + guard
     return str(prompt)
+
+
+def _extract_abbr_expansion_from_blocks(evidence_blocks: Sequence[Any], abbr: str) -> str:
+    abbr_up = str(abbr or "").strip().upper()
+    if not abbr_up:
+        return ""
+    for it in evidence_blocks or []:
+        meta = getattr(it, "meta", None) or {}
+        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
+        for ap in abbr_pairs:
+            if not isinstance(ap, dict):
+                continue
+            ap_abbr = str(ap.get("abbr") or "").strip()
+            full = str(ap.get("full") or "").strip()
+            if not ap_abbr or not full:
+                continue
+            if ap_abbr.upper() != abbr_up:
+                continue
+            if len(ap_abbr) < 3 or len(full) < (len(ap_abbr) + 4):
+                continue
+            full_low = full.lower()
+            if full_low.startswith(("abstract", "keywords", "introduction")):
+                continue
+            first_word = full_low.split()[0] if full_low.split() else ""
+            if len(first_word) < 4:
+                continue
+            if "confidence" in ap:
+                try:
+                    conf = float(ap.get("confidence") or 0.0)
+                except Exception:
+                    conf = 0.0
+                if conf < 0.85:
+                    continue
+            return full
+    return ""
 
 
 def _apply_sidecar_slot_guard(
