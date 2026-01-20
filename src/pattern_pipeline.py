@@ -456,6 +456,11 @@ def _extract_evidence_types(block: Any) -> List[str]:
         types.append(meta_payload.get("block_type"))
     if isinstance(meta.get("block_type"), str):
         types.append(meta.get("block_type"))
+    # Treat blocks with abbreviation pairs as abbreviation evidence.
+    pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+    abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
+    if abbr_pairs:
+        types.append("abbreviation")
     out = [str(t).strip().lower() for t in types if str(t).strip()]
     return list(dict.fromkeys(out))
 
