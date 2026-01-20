@@ -384,6 +384,16 @@ class IntrospectionGate:
         allowed = _allowed_capabilities(slot_schema)
         final_style = _normalize_answer_style(answer_style)
         missing_all_required = _missing_all_required(slot_schema, semantic_instances)
+        has_schema = bool(slot_schema) and any(
+            str(spec.inference_level).lower() == "schema" for spec in (slot_schema.slots or {}).values()
+        )
+        schema_satisfied = has_schema and not bool(missing_schema)
+        if schema_satisfied:
+            allowed = allowed.intersection({"LIST_ONLY", "EXPLANATION"})
+            if "LIST_ONLY" in allowed:
+                final_style = "LIST_ONLY"
+            elif "EXPLANATION" in allowed:
+                final_style = "EXPLANATION"
         if missing_all_required:
             # R1/R2: forbid factual assertion when all required slots are empty.
             allowed.discard("FACTUAL_ASSERTION")
@@ -394,15 +404,18 @@ class IntrospectionGate:
             else:
                 gate["decision"] = "REFUSE"
                 gate["decision_reason"] = "required slots missing; no safe answer capability"
+        elif missing_hard:
+            gate["decision"] = "REFUSE"
+            gate["decision_reason"] = "hard-slot-missing"
+        elif schema_satisfied and allowed:
+            gate["decision"] = "ALLOW"
+            gate["decision_reason"] = "schema-slot-satisfied; limit-style"
         elif not allowed:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "no-allowed-capability"
         elif final_style not in allowed:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "schema-level-slot-limits-answer"
-        elif missing_hard:
-            gate["decision"] = "REFUSE"
-            gate["decision_reason"] = "hard-slot-missing"
         elif missing_schema:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "schema-level-slot-limits-answer"
