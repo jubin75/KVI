@@ -247,6 +247,7 @@ class KVI2Runtime:
                         "top_k": int(self.cfg.top_k),
                         "oversample_top_k": int(oversample_top_k),
                         "retriever_debug": dict(rr.debug or {}),
+                        "rim_retry": True,
                         "contract_validation": dict(contract_validation or {}),
                         "semantic_instances": temp_instances,
                     },

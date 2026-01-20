@@ -419,7 +419,7 @@ class IntrospectionGate:
         if gate.get("decision") == "REFUSE":
             gate["final_answer_style"] = None
             gate["allowed_answer_capabilities"] = []
-            if missing_schema:
+            if missing_schema or gate.get("decision_reason") == "schema-level-slot-limits-answer":
                 gate["allow_rim_retry"] = True
         return gate
 
