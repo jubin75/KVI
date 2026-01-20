@@ -239,8 +239,10 @@ class PatternMatcher:
         q = str(query or "")
         result = self.retriever.retrieve(q)
         hit_ids = {str(h.block_id) for h in (result.pattern_hits or [])}
+        q_low = q.lower()
 
         scored: List[Tuple[float, PatternSpec, str]] = []
+        has_schema_slot_in_query = False
         for c in self.contracts:
             best_score = 0.0
             best_skel = ""
@@ -251,8 +253,26 @@ class PatternMatcher:
                     best_skel = sk
             if c.pattern_id in hit_ids:
                 best_score = max(best_score, 1.0)
+            # Prefer schema patterns when the query mentions a schema slot name.
+            slot_names = [str(k).strip().lower() for k in (c.slots or {}).keys() if str(k).strip()]
+            is_schema = c.pattern_id.startswith("schema:") or any(
+                str(s.inference_level).lower() == "schema" for s in (c.slots or {}).values()
+            )
+            if slot_names and any(sn in q_low for sn in slot_names):
+                if is_schema:
+                    best_score += 0.2
+                    has_schema_slot_in_query = True
             if best_score > 0.0:
                 scored.append((best_score, c, best_skel))
+
+        if has_schema_slot_in_query:
+            adjusted: List[Tuple[float, PatternSpec, str]] = []
+            for score, c, sk in scored:
+                is_abbr = c.pattern_id.startswith("abbr:")
+                if is_abbr:
+                    score -= 0.2
+                adjusted.append((score, c, sk))
+            scored = adjusted
 
         scored.sort(key=lambda x: x[0], reverse=True)
         matched = [c for _, c, _ in scored]
