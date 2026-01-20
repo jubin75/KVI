@@ -24,6 +24,11 @@ except ModuleNotFoundError:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--blocks_jsonl", required=True)
+    p.add_argument(
+        "--disable_enriched",
+        action="store_true",
+        help="Do not auto-switch to blocks.enriched.jsonl when available",
+    )
     p.add_argument("--out_dir", required=True)
     p.add_argument("--base_llm", required=True)
     p.add_argument("--domain_encoder_model", required=True)
@@ -41,8 +46,16 @@ def main() -> None:
     max_blocks = int(args.max_blocks) if int(args.max_blocks) > 0 else None
     shard_size = int(args.shard_size) if int(args.shard_size) > 0 else None
 
+    blocks_path = Path(str(args.blocks_jsonl))
+    if not bool(args.disable_enriched):
+        if blocks_path.name == "blocks.jsonl":
+            enriched = blocks_path.with_name("blocks.enriched.jsonl")
+            if enriched.exists():
+                print(f"[build_kvbank_from_blocks_jsonl] using_enriched={enriched}", flush=True)
+                blocks_path = enriched
+
     stats = build_kvbank_from_blocks_jsonl(
-        blocks_jsonl=Path(str(args.blocks_jsonl)),
+        blocks_jsonl=blocks_path,
         out_dir=Path(str(args.out_dir)),
         split_tables=bool(args.split_tables),
         out_dir_tables=(Path(str(args.out_dir_tables)) if args.out_dir_tables else None),
