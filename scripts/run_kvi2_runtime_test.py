@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -34,6 +35,10 @@ def _load_block_text_lookup(path: str) -> Dict[str, str]:
 
 
 def main() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_root_str = str(repo_root)
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
     p = argparse.ArgumentParser(description="Run KVI2Runtime.run_ab test")
     p.add_argument("--model", required=True, help="HF model name or local path")
     p.add_argument("--prompt", required=True, help="User prompt")
