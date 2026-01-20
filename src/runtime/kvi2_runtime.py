@@ -209,9 +209,10 @@ class KVI2Runtime:
                 # retrieve-only retry (no generation)
                 oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
                 rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
+                rr_items = _boost_list_like_items(rr.items, slot_schema)
                 batch: list[Any] = []
                 seen_ids: set[str] = set()
-                for it in rr.items:
+                for it in rr_items:
                     meta = getattr(it, "meta", None) or {}
                     bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
                     if not bid or bid in seen_ids:
@@ -220,17 +221,17 @@ class KVI2Runtime:
                     seen_ids.add(bid)
                     if len(batch) >= int(self.cfg.top_k):
                         break
-                contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
-                slot_status = compute_slot_status_from_instances(slot_schema, temp_instances)
-                hard_missing = list(contract_validation.get("hard_missing") or [])
-                soft_missing = list(contract_validation.get("soft_missing") or [])
-                schema_missing = list(contract_validation.get("schema_missing") or [])
                 temp_instances = SemanticInstanceBuilder().build(
                     pattern=best_pattern,
                     evidence_blocks=batch,
                     slot_schema=slot_schema,
                     block_text_lookup=block_text_lookup,
                 )
+                contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
+                slot_status = compute_slot_status_from_instances(slot_schema, temp_instances)
+                hard_missing = list(contract_validation.get("hard_missing") or [])
+                soft_missing = list(contract_validation.get("soft_missing") or [])
+                schema_missing = list(contract_validation.get("schema_missing") or [])
                 gate_retry = IntrospectionGate(rim).evaluate(
                     q_prime_vec=qprime,
                     kv_relevance_delta=None,
@@ -294,6 +295,7 @@ class KVI2Runtime:
         # 4) Semantic-second retrieve + refresh (<=2 rounds)
         oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
         rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
+        rr_items = _boost_list_like_items(rr.items, slot_schema)
         layer_ids = [int(x) for x in self.cfg.layers]
         dtype = next(model.parameters()).dtype
 
@@ -306,7 +308,7 @@ class KVI2Runtime:
         attempts = max(0, int(self.cfg.kv_refresh_rounds)) + 1
         for attempt_idx in range(attempts):
             batch = []
-            for it in rr.items:
+            for it in rr_items:
                 meta = getattr(it, "meta", None) or {}
                 bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
                 if not bid or bid in seen_ids:
@@ -643,9 +645,12 @@ def _extract_list_items_from_instances(
                     continue
                 bid = str(ev.get("evidence_id") or "").strip()
                 span = str(ev.get("span") or "").strip()
-                if not span:
-                    continue
-                extracted = _extract_bullet_like_items(span)
+                list_items = ev.get("list_items") if isinstance(ev.get("list_items"), list) else []
+                extracted = [str(x).strip() for x in list_items if str(x).strip()]
+                if not extracted:
+                    if not span:
+                        continue
+                    extracted = _extract_bullet_like_items(span)
                 if extracted:
                     items.extend(extracted)
                     if bid:
@@ -674,6 +679,41 @@ def _extract_bullet_like_items(text: str) -> List[str]:
                 out.append(ln[3:].strip())
                 continue
     return [x for x in out if x]
+
+
+def _boost_list_like_items(items: Sequence[Any], slot_schema: Optional[SlotSchema]) -> List[Any]:
+    """
+    Boost list-like evidence for schema queries (non-destructive reordering).
+    """
+    if not items:
+        return list(items or [])
+    has_schema = bool(slot_schema) and any(
+        str(spec.inference_level).lower() == "schema" for spec in (slot_schema.slots or {}).values()
+    )
+    if not has_schema:
+        return list(items or [])
+
+    def _score(it: Any) -> float:
+        base = float(getattr(it, "score", 0.0) or 0.0)
+        meta = getattr(it, "meta", None) or {}
+        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+        boost = 0.0
+        if lf.get("has_bullets"):
+            boost += 0.25
+        if lf.get("has_enumeration"):
+            boost += 0.2
+        try:
+            dens = float(lf.get("list_density") or 0.0)
+        except Exception:
+            dens = 0.0
+        boost += min(0.3, max(0.0, dens))
+        if isinstance(lf.get("list_like_items"), list) and lf.get("list_like_items"):
+            boost += 0.2
+        return base + boost
+
+    return sorted(list(items), key=_score, reverse=True)
 
 
 def _find_abbr_expansion_in_text(text: str, abbr_up: str) -> str:

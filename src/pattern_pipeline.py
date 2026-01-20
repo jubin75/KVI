@@ -572,7 +572,11 @@ def _build_slot_evidence(
             span = str(block_text_lookup.get(bid) or "")
         elif isinstance(getattr(it, "text", None), str):
             span = str(getattr(it, "text") or "")
-        items.append({"evidence_id": bid, "source": source, "span": span})
+        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        list_features = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+        list_items = list_features.get("list_like_items") if isinstance(list_features.get("list_like_items"), list) else []
+        items.append({"evidence_id": bid, "source": source, "span": span, "list_items": list_items})
     return items
 
 

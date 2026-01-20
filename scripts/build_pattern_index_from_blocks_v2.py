@@ -43,11 +43,18 @@ try:
     from external_kv_injection.src.pattern_extraction import (  # type: ignore
         extract_abbreviation_pairs,
         extract_entities,
+        extract_list_like_features,
         infer_block_type,
         infer_schema_slots_from_text,
     )
 except ModuleNotFoundError:
-    from src.pattern_extraction import extract_abbreviation_pairs, extract_entities, infer_block_type, infer_schema_slots_from_text  # type: ignore
+    from src.pattern_extraction import (  # type: ignore
+        extract_abbreviation_pairs,
+        extract_entities,
+        extract_list_like_features,
+        infer_block_type,
+        infer_schema_slots_from_text,
+    )
 
 
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -138,6 +145,7 @@ def main() -> None:
         abbr_pairs = extract_abbreviation_pairs(text, max_pairs=int(args.max_pairs_per_block))
         entities = extract_entities(text, max_entities=int(args.max_entities_per_block))
         slots = infer_schema_slots_from_text(text)
+        list_features = extract_list_like_features(text)
 
         # aggregate alias map
         for ap in abbr_pairs:
@@ -157,6 +165,8 @@ def main() -> None:
             pat_meta["entities"] = entities
         if slots:
             pat_meta["schema_slots"] = slots
+        if list_features:
+            pat_meta["list_features"] = list_features
         meta["pattern"] = pat_meta
 
         # add a coarse block_type (do not overwrite if already present)

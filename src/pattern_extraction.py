@@ -193,3 +193,56 @@ def infer_block_type(*, text: str, metadata: Dict[str, Any]) -> str:
         return "prevention"
     return "general"
 
+
+def extract_list_like_features(text: str) -> Dict[str, Any]:
+    """
+    Detect list-like evidence and extract pseudo list items from sentences.
+    Returns:
+      {
+        "has_bullets": bool,
+        "has_enumeration": bool,
+        "list_density": float,
+        "list_like_items": [str, ...],
+      }
+    """
+    t = str(text or "")
+    if not t:
+        return {"has_bullets": False, "has_enumeration": False, "list_density": 0.0, "list_like_items": []}
+
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    has_bullets = any(ln.startswith(("-", "*", "•", "·")) for ln in lines)
+    has_enumeration = any(
+        (ln[:2].isdigit() and (ln[2:3] in {".", ")", "、"}))
+        or (ln.startswith(("（", "(", "【")) and len(ln) > 3 and ("）" in ln[:4] or ")" in ln[:4] or "】" in ln[:4]))
+        for ln in lines
+    )
+
+    # Extract list-like items from symptom-style phrases.
+    list_like_items: List[str] = []
+    patterns = [
+        r"(symptoms include|clinical manifestations are|patients typically present with)\s+([^.;]+)",
+        r"(表现为|症状包括|临床表现为|典型表现为)\s*([^。；;]+)",
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, t, flags=re.IGNORECASE):
+            frag = _norm_space(m.group(2))
+            if not frag:
+                continue
+            parts = re.split(r"[，,、;；]+|\band\b|\bor\b", frag)
+            for p in parts:
+                s = _norm_space(p)
+                if 2 <= len(s) <= 64:
+                    list_like_items.append(s)
+
+    # Heuristic list density: items per sentence (cap at 1.0)
+    sent_count = max(1, len(re.split(r"[。.!?;；]", t)))
+    list_density = min(1.0, float(len(list_like_items)) / float(sent_count))
+    # de-dupe
+    dedup = list(dict.fromkeys([x for x in list_like_items if x]))
+    return {
+        "has_bullets": bool(has_bullets),
+        "has_enumeration": bool(has_enumeration),
+        "list_density": float(list_density),
+        "list_like_items": dedup[:24],
+    }
+
