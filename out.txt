@@ -1,0 +1,2195 @@
+
+=== 无 RIM（Base LLM）===
+
+SFTSV，即塞卡病毒病（Severe Fever with Thrombocytopenia Syndrome Virus），是一种由新型布尼亚病毒科病毒引起的急性传染病。临床特征（clinical features）是指患者在感染该病毒后可能出现的一系列症状和体征。
+
+SFTSV的临床特征包括但不限于：
+
+1. 发热：这是最常见的早期症状之一。
+2. 乏力、肌肉疼痛：患者可能会感到全身无力，并伴有明显的肌肉酸痛或疼痛。
+3. 头痛：部分患者会出现头痛的症状。
+4. 咽喉痛、咳嗽等呼吸道症状：一些患者可能表现出类似感冒的症状。
+5. 出血倾向：严重情况下，患者可能出现皮肤瘀点、瘀斑，以及鼻衄、牙龈出血等症状，这是因为病毒感染导致血小板减少所致。
+6. 肝功能异常：部分病例中可观察到肝酶水平升高。
+7. 低
+
+=== Pattern-first（non-semantic）===
+
+{
+  "recall_size": 3,
+  "debug": {
+    "literal_hits": 2,
+    "structure_hits": 1,
+    "block_hits": 0
+  },
+  "patterns": [
+    {
+      "pattern_id": "schema:clinical_features",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的clinical_features是什么",
+          "X 有哪些clinical_features"
+        ]
+      },
+      "slots": {
+        "clinical_features": {
+          "name": "clinical_features",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的clinical_features是什么"
+    },
+    {
+      "pattern_id": "abbr:SFTSV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "schema:pathogenesis",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的pathogenesis是什么",
+          "X 有哪些pathogenesis"
+        ]
+      },
+      "slots": {
+        "pathogenesis": {
+          "name": "pathogenesis",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的pathogenesis是什么"
+    },
+    {
+      "pattern_id": "schema:diagnosis",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的diagnosis是什么",
+          "X 有哪些diagnosis"
+        ]
+      },
+      "slots": {
+        "diagnosis": {
+          "name": "diagnosis",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的diagnosis是什么"
+    },
+    {
+      "pattern_id": "schema:transmission",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的transmission是什么",
+          "X 有哪些transmission"
+        ]
+      },
+      "slots": {
+        "transmission": {
+          "name": "transmission",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的transmission是什么"
+    },
+    {
+      "pattern_id": "schema:treatment",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的treatment是什么",
+          "X 有哪些treatment"
+        ]
+      },
+      "slots": {
+        "treatment": {
+          "name": "treatment",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的treatment是什么"
+    },
+    {
+      "pattern_id": "schema:prevention",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的prevention是什么",
+          "X 有哪些prevention"
+        ]
+      },
+      "slots": {
+        "prevention": {
+          "name": "prevention",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的prevention是什么"
+    },
+    {
+      "pattern_id": "schema:geographic_distribution",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的geographic_distribution是什么",
+          "X 有哪些geographic_distribution"
+        ]
+      },
+      "slots": {
+        "geographic_distribution": {
+          "name": "geographic_distribution",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的geographic_distribution是什么"
+    },
+    {
+      "pattern_id": "schema:prognosis",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的prognosis是什么",
+          "X 有哪些prognosis"
+        ]
+      },
+      "slots": {
+        "prognosis": {
+          "name": "prognosis",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的prognosis是什么"
+    },
+    {
+      "pattern_id": "schema:epidemiology",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的epidemiology是什么",
+          "X 有哪些epidemiology"
+        ]
+      },
+      "slots": {
+        "epidemiology": {
+          "name": "epidemiology",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的epidemiology是什么"
+    },
+    {
+      "pattern_id": "schema:complications",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的complications是什么",
+          "X 有哪些complications"
+        ]
+      },
+      "slots": {
+        "complications": {
+          "name": "complications",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的complications是什么"
+    },
+    {
+      "pattern_id": "schema:disease_full_name",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 的disease_full_name是什么",
+          "X 有哪些disease_full_name"
+        ]
+      },
+      "slots": {
+        "disease_full_name": {
+          "name": "disease_full_name",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 的disease_full_name是什么"
+    },
+    {
+      "pattern_id": "abbr:SFTS",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:NP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:RNA",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:SE",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:PBS",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:SD",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:PCR",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:ELISA",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:HRTV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:VSV-SFTSV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:AST",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:GTV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:MOI",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:WBC",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:RT-PCR",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:LDH",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:ALT",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:PLT",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:WT",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:AUC",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:GP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:HRP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IFN",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IFA",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:WHO",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:CK",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IQR",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:FDR",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:II",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:III",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IL-6",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:OH",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:ROC",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:VSV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:KO",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:RNP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:IC50",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:BZA",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:FRNT50",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:CCND3",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:CRP",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:HTNV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:TCPDF",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:PVDF",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:CPE",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:DBV",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:LOD",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    },
+    {
+      "pattern_id": "abbr:FFU",
+      "question_skeleton": {
+        "intent": "legacy",
+        "surface_forms": [
+          "X 是什么",
+          "X 的全称是什么",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "name": "abbr",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        },
+        "full_name": {
+          "name": "full_name",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft",
+          "type": "string"
+        }
+      },
+      "answer_style": "factual",
+      "matched_skeleton": "X 是什么"
+    }
+  ]
+}
+
+=== Introspection Gate ===
+
+{
+  "gate_mode": "introspection",
+  "gate": {
+    "retrieve_more": true,
+    "reject_current_kv": false,
+    "confidence": 0.7,
+    "rationale": "semantic-shift",
+    "cos_dist": 0.3968863352388886,
+    "tau": 0.35,
+    "pattern_id": "schema:clinical_features",
+    "matched_skeleton": "X 的clinical_features是什么",
+    "matched_intent": "legacy",
+    "slot_status": {
+      "clinical_features": "satisfied"
+    },
+    "hard_rationale": [],
+    "soft_rationale": [],
+    "schema_rationale": [],
+    "decision": "REFUSE",
+    "decision_reason": "schema-level-slot-limits-answer",
+    "allowed_answer_capabilities": [],
+    "final_answer_style": null,
+    "slot_schema": {
+      "clinical_features": {
+        "name": "clinical_features",
+        "required": false,
+        "evidence_type": [
+          "schema"
+        ],
+        "min_evidence": 1,
+        "inference_level": "schema",
+        "type": "string"
+      }
+    },
+    "allow_rim_retry": true
+  },
+  "retrieve_more": false
+}
+
+=== Gate Decision Debug ===
+
+{
+  "decision": "REFUSE",
+  "decision_reason": "schema-level-slot-limits-answer",
+  "allowed_answer_capabilities": [],
+  "final_answer_style": null
+}
+
+=== 有 RIM ===
+
+(本次未触发检索/注入；可用 --force_rim 强制演示)
