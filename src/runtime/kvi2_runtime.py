@@ -23,7 +23,16 @@ import torch
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
 from ..pattern_contract import PatternContractValidator, filter_evidence_by_contracts, run_pattern_first
-from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, PatternSpec, SemanticInstanceBuilder, SlotSchema, find_unconsumed_evidence_blocks
+from ..pattern_pipeline import (
+    IntrospectionGate,
+    PatternContractLoader,
+    PatternMatcher,
+    PatternSpec,
+    SemanticInstanceBuilder,
+    SlotSchema,
+    compute_slot_status_from_instances,
+    find_unconsumed_evidence_blocks,
+)
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
 from ..rim import RIM, RIMConfig
@@ -212,7 +221,7 @@ class KVI2Runtime:
                     if len(batch) >= int(self.cfg.top_k):
                         break
                 contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
-                slot_status = slot_schema.status(batch)
+                slot_status = compute_slot_status_from_instances(slot_schema, temp_instances)
                 hard_missing = list(contract_validation.get("hard_missing") or [])
                 soft_missing = list(contract_validation.get("soft_missing") or [])
                 schema_missing = list(contract_validation.get("schema_missing") or [])
@@ -250,6 +259,8 @@ class KVI2Runtime:
                         "rim_retry": True,
                         "contract_validation": dict(contract_validation or {}),
                         "semantic_instances": temp_instances,
+                        "slot_status_source": "semantic_instances",
+                        "slot_status_snapshot": dict(slot_status or {}),
                     },
                 }
                 if any(v == "missing" for v in (slot_status or {}).values()):
@@ -339,17 +350,17 @@ class KVI2Runtime:
 
             contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
             chosen_contract_validation = contract_validation
-            slot_status = slot_schema.status(filtered_batch)
-            hard_missing = list(contract_validation.get("hard_missing") or [])
-            soft_missing = list(contract_validation.get("soft_missing") or [])
-            schema_missing = list(contract_validation.get("schema_missing") or [])
-            pattern_mismatch = bool(len(hard_missing) > 0)
             temp_instances = SemanticInstanceBuilder().build(
                 pattern=best_pattern,
                 evidence_blocks=filtered_batch,
                 slot_schema=slot_schema,
                 block_text_lookup=block_text_lookup,
             )
+            slot_status = compute_slot_status_from_instances(slot_schema, temp_instances)
+            hard_missing = list(contract_validation.get("hard_missing") or [])
+            soft_missing = list(contract_validation.get("soft_missing") or [])
+            schema_missing = list(contract_validation.get("schema_missing") or [])
+            pattern_mismatch = bool(len(hard_missing) > 0)
             gate_after_validation = IntrospectionGate(rim).evaluate(
                 q_prime_vec=qprime,
                 kv_relevance_delta=delta,
@@ -393,6 +404,7 @@ class KVI2Runtime:
             slot_schema=slot_schema,
             block_text_lookup=block_text_lookup,
         )
+        slot_status = compute_slot_status_from_instances(slot_schema, semantic_instances)
         chosen_gate_after_validation = _apply_sidecar_slot_guard(
             gate_after_validation=chosen_gate_after_validation,
             slot_schema=slot_schema,
@@ -414,6 +426,8 @@ class KVI2Runtime:
             "contract_validation": dict(chosen_contract_validation or {}),
             "gate_after_validation": dict(chosen_gate_after_validation or {}),
             "semantic_instances": semantic_instances,
+            "slot_status_source": "semantic_instances",
+            "slot_status_snapshot": dict(slot_status or {}),
         }
         if any(v == "missing" for v in (slot_status or {}).values()):
             out["retrieval"]["unconsumed_evidence_blocks"] = find_unconsumed_evidence_blocks(
@@ -440,6 +454,29 @@ class KVI2Runtime:
             guard_style = str(chosen_gate_after_validation.get("final_answer_style") or "")
         if not guard_style and isinstance(gate, dict):
             guard_style = str(gate.get("final_answer_style") or "")
+
+        # LIST_ONLY: extract-only from evidence, no free generation.
+        if str(guard_style or "").upper() == "LIST_ONLY":
+            items, src_ids, fail_reason = _extract_list_items_from_instances(
+                semantic_instances=semantic_instances,
+                slot_schema=slot_schema,
+            )
+            out["retrieval"]["list_items_extracted"] = items
+            out["retrieval"]["list_items_source_block_ids"] = src_ids
+            if fail_reason:
+                out["retrieval"]["list_extraction_failed_reason"] = fail_reason
+            if not items:
+                if isinstance(chosen_gate_after_validation, dict):
+                    chosen_gate_after_validation["decision"] = "REFUSE"
+                    chosen_gate_after_validation["decision_reason"] = "slot-satisfied-but-not-extractable"
+                    chosen_gate_after_validation["final_answer_style"] = None
+                    chosen_gate_after_validation["allowed_answer_capabilities"] = []
+                out["gate"] = dict(chosen_gate_after_validation or {})
+                out["rim_answer"] = ""
+                return out
+            out["rim_answer"] = "\n".join([f"- {x}" for x in items])
+            out["gate"] = dict(chosen_gate_after_validation or {})
+            return out
         guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
         rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
@@ -579,6 +616,64 @@ def _extract_abbr_expansion_from_blocks(
         if best_full:
             return best_full
     return ""
+
+
+def _extract_list_items_from_instances(
+    *,
+    semantic_instances: Sequence[Dict[str, Any]],
+    slot_schema: Optional[SlotSchema],
+) -> Tuple[List[str], List[str], str]:
+    """
+    Extract list items from evidence spans only (no free generation).
+    Returns (items, source_block_ids, fail_reason).
+    """
+    if slot_schema is None:
+        return [], [], "no-slot-schema"
+    items: List[str] = []
+    src_ids: List[str] = []
+    for inst in semantic_instances or []:
+        slots = inst.get("slots") if isinstance(inst, dict) else None
+        if not isinstance(slots, dict):
+            continue
+        for slot_name, ev_list in slots.items():
+            if not isinstance(ev_list, list):
+                continue
+            for ev in ev_list:
+                if not isinstance(ev, dict):
+                    continue
+                bid = str(ev.get("evidence_id") or "").strip()
+                span = str(ev.get("span") or "").strip()
+                if not span:
+                    continue
+                extracted = _extract_bullet_like_items(span)
+                if extracted:
+                    items.extend(extracted)
+                    if bid:
+                        src_ids.append(bid)
+    # de-dup
+    items = list(dict.fromkeys([x for x in items if x]))
+    src_ids = list(dict.fromkeys([x for x in src_ids if x]))
+    if not items:
+        return [], src_ids, "no-bullets-in-evidence"
+    return items[:12], src_ids, ""
+
+
+def _extract_bullet_like_items(text: str) -> List[str]:
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    out: List[str] = []
+    for ln in lines:
+        if ln.startswith(("-", "*", "•", "·")):
+            out.append(ln.lstrip("-*•· ").strip())
+            continue
+        if ln[:2].isdigit() and (ln[2:3] in {".", ")", "、"}):
+            out.append(ln[3:].strip())
+            continue
+        if ln.startswith(("（", "(", "【")) and len(ln) > 3:
+            # e.g., （1）xx
+            if "）" in ln[:4] or ")" in ln[:4] or "】" in ln[:4]:
+                out.append(ln[3:].strip())
+                continue
+    return [x for x in out if x]
 
 
 def _find_abbr_expansion_in_text(text: str, abbr_up: str) -> str:

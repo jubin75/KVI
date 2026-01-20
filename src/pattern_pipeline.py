@@ -657,6 +657,31 @@ def find_unconsumed_evidence_blocks(
     return out
 
 
+def compute_slot_status_from_instances(
+    slot_schema: Optional[SlotSchema],
+    semantic_instances: Sequence[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    Compute slot_status from semantic_instances only (single source of truth).
+    """
+    status: Dict[str, str] = {}
+    if slot_schema is None:
+        return status
+    slots_payload: Dict[str, List[Dict[str, Any]]] = {}
+    for inst in semantic_instances or []:
+        if isinstance(inst, dict) and isinstance(inst.get("slots"), dict):
+            for k, v in inst["slots"].items():
+                if isinstance(v, list):
+                    slots_payload.setdefault(str(k), []).extend(v)
+    for name, spec in (slot_schema.slots or {}).items():
+        items = slots_payload.get(name, []) if isinstance(slots_payload.get(name), list) else []
+        if len(items) >= int(spec.min_evidence):
+            status[name] = "satisfied"
+        else:
+            status[name] = "missing"
+    return status
+
+
 def _missing_all_required(
     slot_schema: Optional[SlotSchema], semantic_instances: Optional[Sequence[Dict[str, Any]]]
 ) -> bool:
