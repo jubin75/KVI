@@ -403,6 +403,11 @@ class IntrospectionGate:
         elif missing_hard:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "hard-slot-missing"
+        elif missing_schema:
+            gate["decision"] = "ALLOW"
+            gate["decision_reason"] = "schema-slot-missing; downgrade"
+            if "EXPLANATION" in allowed:
+                final_style = "EXPLANATION"
         else:
             gate["decision"] = "ALLOW"
             gate["decision_reason"] = "capability-allowed"
@@ -481,6 +486,12 @@ def _extract_evidence_types(block: Any) -> List[str]:
     abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
     if _has_valid_abbr_pair(abbr_pairs):
         types.append("abbreviation")
+    # Treat blocks with schema_slots as schema evidence.
+    schema_slots = pat.get("schema_slots")
+    if (isinstance(schema_slots, list) and schema_slots) or (
+        isinstance(schema_slots, dict) and schema_slots
+    ):
+        types.append("schema")
     out = [str(t).strip().lower() for t in types if str(t).strip()]
     return list(dict.fromkeys(out))
 
@@ -578,7 +589,10 @@ def _allowed_capabilities(slot_schema: Optional[SlotSchema]) -> set[str]:
     allowed = {"FACTUAL_ASSERTION", "EXPLANATION", "LIST_ONLY"}
     if slot_schema is None:
         return allowed
+    has_schema = False
     for spec in (slot_schema.slots or {}).values():
+        if spec.inference_level == "schema":
+            has_schema = True
         if not spec.required:
             continue
         if spec.inference_level == "schema":
@@ -587,6 +601,8 @@ def _allowed_capabilities(slot_schema: Optional[SlotSchema]) -> set[str]:
             allowed = allowed.intersection({"FACTUAL_ASSERTION", "EXPLANATION"})
         elif spec.inference_level == "hard":
             allowed = allowed.intersection({"FACTUAL_ASSERTION"})
+    if has_schema:
+        allowed.discard("FACTUAL_ASSERTION")
     return allowed
 
 
