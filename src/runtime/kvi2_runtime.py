@@ -23,7 +23,7 @@ import torch
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
 from ..kv_bank import FaissKVBank
 from ..pattern_contract import PatternContractValidator, filter_evidence_by_contracts, run_pattern_first
-from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, PatternSpec, SemanticInstanceBuilder, SlotSchema
+from ..pattern_pipeline import IntrospectionGate, PatternContractLoader, PatternMatcher, PatternSpec, SemanticInstanceBuilder, SlotSchema, find_unconsumed_evidence_blocks
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
 from ..retriever import Retriever
 from ..rim import RIM, RIMConfig
@@ -196,7 +196,67 @@ class KVI2Runtime:
             semantic_instances=[],
         )
         if gate.get("decision") == "REFUSE":
-            out: Dict[str, Any] = {
+            if gate.get("allow_rim_retry"):
+                # retrieve-only retry (no generation)
+                oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
+                rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
+                batch: list[Any] = []
+                seen_ids: set[str] = set()
+                for it in rr.items:
+                    meta = getattr(it, "meta", None) or {}
+                    bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+                    if not bid or bid in seen_ids:
+                        continue
+                    batch.append(it)
+                    seen_ids.add(bid)
+                    if len(batch) >= int(self.cfg.top_k):
+                        break
+                contract_validation = validator.validate_all(contracts, batch, block_text_lookup=block_text_lookup)
+                slot_status = slot_schema.status(batch)
+                hard_missing = list(contract_validation.get("hard_missing") or [])
+                soft_missing = list(contract_validation.get("soft_missing") or [])
+                schema_missing = list(contract_validation.get("schema_missing") or [])
+                temp_instances = SemanticInstanceBuilder().build(
+                    pattern=best_pattern,
+                    evidence_blocks=batch,
+                    slot_schema=slot_schema,
+                    block_text_lookup=block_text_lookup,
+                )
+                gate_retry = IntrospectionGate(rim).evaluate(
+                    q_prime_vec=qprime,
+                    kv_relevance_delta=None,
+                    missing_hard=hard_missing,
+                    missing_soft=soft_missing,
+                    missing_schema=schema_missing,
+                    pattern_id=best_pattern.pattern_id,
+                    matched_skeleton=matched_skeletons.get(best_pattern.pattern_id, ""),
+                    slot_status=slot_status,
+                    slot_schema=slot_schema,
+                    answer_style=best_pattern.answer_style,
+                    question_intent=best_pattern.question_intent,
+                    semantic_instances=temp_instances,
+                )
+                out: Dict[str, Any] = {
+                    "baseline_answer": baseline.strip(),
+                    "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
+                    "gate": gate_retry,
+                    "retrieve_more": False,
+                    "rim_answer": "",
+                    "retrieval": {
+                        "kv_dir": str(kv_dir),
+                        "top_k": int(self.cfg.top_k),
+                        "oversample_top_k": int(oversample_top_k),
+                        "retriever_debug": dict(rr.debug or {}),
+                        "contract_validation": dict(contract_validation or {}),
+                        "semantic_instances": temp_instances,
+                    },
+                }
+                if any(v == "missing" for v in (slot_status or {}).values()):
+                    out["retrieval"]["unconsumed_evidence_blocks"] = find_unconsumed_evidence_blocks(
+                        batch, slot_schema
+                    )
+                return out
+            out = {
                 "baseline_answer": baseline.strip(),
                 "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
                 "gate": gate,
@@ -354,6 +414,10 @@ class KVI2Runtime:
             "gate_after_validation": dict(chosen_gate_after_validation or {}),
             "semantic_instances": semantic_instances,
         }
+        if any(v == "missing" for v in (slot_status or {}).values()):
+            out["retrieval"]["unconsumed_evidence_blocks"] = find_unconsumed_evidence_blocks(
+                chosen_items, slot_schema
+            )
 
         # If this is an abbreviation pattern and we can extract a valid expansion
         # from evidence metadata, return a deterministic answer to avoid hallucination.

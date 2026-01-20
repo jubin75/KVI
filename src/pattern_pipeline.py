@@ -404,8 +404,8 @@ class IntrospectionGate:
             gate["decision"] = "REFUSE"
             gate["decision_reason"] = "hard-slot-missing"
         elif missing_schema:
-            gate["decision"] = "ALLOW"
-            gate["decision_reason"] = "schema-slot-missing; downgrade"
+            gate["decision"] = "REFUSE"
+            gate["decision_reason"] = "schema-level-slot-limits-answer"
             if "EXPLANATION" in allowed:
                 final_style = "EXPLANATION"
         else:
@@ -416,6 +416,11 @@ class IntrospectionGate:
 
         if slot_schema is not None:
             gate["slot_schema"] = slot_schema.to_dict()
+        if gate.get("decision") == "REFUSE":
+            gate["final_answer_style"] = None
+            gate["allowed_answer_capabilities"] = []
+            if missing_schema:
+                gate["allow_rim_retry"] = True
         return gate
 
 
@@ -604,6 +609,39 @@ def _allowed_capabilities(slot_schema: Optional[SlotSchema]) -> set[str]:
     if has_schema:
         allowed.discard("FACTUAL_ASSERTION")
     return allowed
+
+
+def find_unconsumed_evidence_blocks(
+    evidence_blocks: Sequence[Any],
+    slot_schema: Optional[SlotSchema],
+) -> List[str]:
+    """
+    Return block_ids that contain schema metadata but are not consumed by any slot.
+    """
+    if not evidence_blocks or slot_schema is None:
+        return []
+    consumed: set[str] = set()
+    for spec in (slot_schema.slots or {}).values():
+        for it in _collect_evidence_for_slot(spec, evidence_blocks):
+            meta = getattr(it, "meta", None) or {}
+            bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+            if bid:
+                consumed.add(bid)
+    out: List[str] = []
+    for it in evidence_blocks or []:
+        meta = getattr(it, "meta", None) or {}
+        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        schema_slots = pat.get("schema_slots")
+        has_schema = (isinstance(schema_slots, list) and schema_slots) or (
+            isinstance(schema_slots, dict) and schema_slots
+        )
+        if not has_schema:
+            continue
+        bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+        if bid and bid not in consumed:
+            out.append(bid)
+    return out
 
 
 def _missing_all_required(
