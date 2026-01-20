@@ -14,6 +14,7 @@ Hard constraints (docs/07_KVI_RMI.md):
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
