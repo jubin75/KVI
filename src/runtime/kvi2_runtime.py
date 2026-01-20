@@ -359,7 +359,7 @@ class KVI2Runtime:
         # from evidence metadata, return a deterministic answer to avoid hallucination.
         if str(best_pattern.pattern_id).startswith("abbr:"):
             abbr = str(best_pattern.pattern_id).split(":", 1)[1].strip()
-            full_name = _extract_abbr_expansion_from_blocks(chosen_items, abbr)
+            full_name = _extract_abbr_expansion_from_blocks(chosen_items, abbr, block_text_lookup=block_text_lookup)
             if full_name:
                 out["rim_answer"] = f"{abbr} 的全称是 {full_name}。"
                 return out
@@ -447,15 +447,38 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
     return str(prompt)
 
 
-def _extract_abbr_expansion_from_blocks(evidence_blocks: Sequence[Any], abbr: str) -> str:
+def _extract_abbr_expansion_from_blocks(
+    evidence_blocks: Sequence[Any],
+    abbr: str,
+    *,
+    block_text_lookup: Optional[Dict[str, str]] = None,
+) -> str:
     abbr_up = str(abbr or "").strip().upper()
     if not abbr_up:
         return ""
+    # 1) Prefer explicit patterns in text: "Full (ABBR)" or "ABBR (Full)"
+    for it in evidence_blocks or []:
+        meta = getattr(it, "meta", None) or {}
+        bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+        text = ""
+        if block_text_lookup and bid:
+            text = str(block_text_lookup.get(bid) or "")
+        elif isinstance(getattr(it, "text", None), str):
+            text = str(getattr(it, "text") or "")
+        if not text:
+            continue
+        full = _find_abbr_expansion_in_text(text, abbr_up)
+        if full:
+            return full
+
+    # 2) Fallback: abbreviation_pairs in metadata (filtered)
     for it in evidence_blocks or []:
         meta = getattr(it, "meta", None) or {}
         meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
         pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
         abbr_pairs = pat.get("abbreviation_pairs") if isinstance(pat.get("abbreviation_pairs"), list) else []
+        best_full = ""
+        best_score = -1
         for ap in abbr_pairs:
             if not isinstance(ap, dict):
                 continue
@@ -470,6 +493,10 @@ def _extract_abbr_expansion_from_blocks(evidence_blocks: Sequence[Any], abbr: st
             full_low = full.lower()
             if full_low.startswith(("abstract", "keywords", "introduction")):
                 continue
+            if " is " in full_low or " are " in full_low or " was " in full_low or " were " in full_low:
+                continue
+            if " caused by " in full_low:
+                continue
             first_word = full_low.split()[0] if full_low.split() else ""
             if len(first_word) < 4:
                 continue
@@ -480,8 +507,61 @@ def _extract_abbr_expansion_from_blocks(evidence_blocks: Sequence[Any], abbr: st
                     conf = 0.0
                 if conf < 0.85:
                     continue
+            score = _score_abbr_full(full)
+            if score > best_score:
+                best_score = score
+                best_full = full
+        if best_full:
+            return best_full
+    return ""
+
+
+def _find_abbr_expansion_in_text(text: str, abbr_up: str) -> str:
+    import re
+
+    t = " ".join(str(text or "").split())
+    if not t:
+        return ""
+    abbr_esc = re.escape(abbr_up)
+    # Full (ABBR)
+    m = re.search(rf"([A-Za-z][A-Za-z0-9\-\s]{{5,120}})\s*\(\s*{abbr_esc}\s*\)", t)
+    if m:
+        full = m.group(1).strip(" ,;:.-")
+        if _is_plausible_full(full, abbr_up):
+            return full
+    # ABBR (Full)
+    m = re.search(rf"\b{abbr_esc}\b\s*\(\s*([A-Za-z][A-Za-z0-9\-\s]{{5,120}})\)", t)
+    if m:
+        full = m.group(1).strip(" ,;:.-")
+        if _is_plausible_full(full, abbr_up):
             return full
     return ""
+
+
+def _is_plausible_full(full: str, abbr_up: str) -> bool:
+    if not full:
+        return False
+    full_low = full.lower()
+    if full_low.startswith(("abstract", "keywords", "introduction")):
+        return False
+    if " is " in full_low or " are " in full_low or " was " in full_low or " were " in full_low:
+        return False
+    if " caused by " in full_low:
+        return False
+    words = [w for w in full.split() if w.isalpha() or w.isalnum()]
+    if len(words) < 2:
+        return False
+    if len(full) < len(abbr_up) + 4:
+        return False
+    return True
+
+
+def _score_abbr_full(full: str) -> int:
+    words = [w for w in full.split() if w]
+    score = len(words) * 2
+    if len(words) > 12:
+        score -= 2
+    return score
 
 
 def _apply_sidecar_slot_guard(
