@@ -258,6 +258,8 @@ class KVI2Runtime:
                         "oversample_top_k": int(oversample_top_k),
                         "retriever_debug": dict(rr.debug or {}),
                         "rim_retry": True,
+                        "list_like_candidate_count": int(len(_collect_list_like_ids(rr_items))),
+                        "list_like_candidate_ids": _collect_list_like_ids(rr_items)[: int(self.cfg.top_k)],
                         "contract_validation": dict(contract_validation or {}),
                         "semantic_instances": temp_instances,
                         "slot_status_source": "semantic_instances",
@@ -420,6 +422,8 @@ class KVI2Runtime:
             "top_k": int(self.cfg.top_k),
             "oversample_top_k": int(oversample_top_k),
             "retriever_debug": dict(rr.debug or {}),
+            "list_like_candidate_count": int(len(_collect_list_like_ids(rr_items))),
+            "list_like_candidate_ids": _collect_list_like_ids(rr_items)[: int(self.cfg.top_k)],
             "kv_refresh": {
                 "attempts": int(attempts),
                 "final_logit_delta_vs_zero_prefix": chosen_delta,
@@ -714,6 +718,22 @@ def _boost_list_like_items(items: Sequence[Any], slot_schema: Optional[SlotSchem
         return base + boost
 
     return sorted(list(items), key=_score, reverse=True)
+
+
+def _collect_list_like_ids(items: Sequence[Any]) -> List[str]:
+    ids: List[str] = []
+    for it in items or []:
+        meta = getattr(it, "meta", None) or {}
+        bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+        if not bid:
+            continue
+        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+        has_list = bool(lf.get("has_bullets") or lf.get("has_enumeration") or lf.get("list_like_items"))
+        if has_list:
+            ids.append(bid)
+    return list(dict.fromkeys(ids))
 
 
 def _find_abbr_expansion_in_text(text: str, abbr_up: str) -> str:
