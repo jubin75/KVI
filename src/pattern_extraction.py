@@ -220,8 +220,11 @@ def extract_list_like_features(text: str) -> Dict[str, Any]:
     # Extract list-like items from symptom-style phrases.
     list_like_items: List[str] = []
     patterns = [
-        r"(symptoms include|clinical manifestations are|patients typically present with)\s+([^.;]+)",
-        r"(表现为|症状包括|临床表现为|典型表现为)\s*([^。；;]+)",
+        r"(symptoms include|clinical manifestations are|clinical features include|patients typically present with)\s+([^.;]+)",
+        r"(is characterized by|are characterized by|presents with|present with)\s+([^.;]+)",
+        r"(symptoms (?:such as|including)|features (?:such as|including))\s+([^.;]+)",
+        r"(表现为|症状包括|临床表现为|典型表现为|常见表现为|以.+为主要表现)\s*([^。；;]+)",
+        r"(主要症状包括|临床特征包括|临床症状包括)\s*([^。；;]+)",
     ]
     for pat in patterns:
         for m in re.finditer(pat, t, flags=re.IGNORECASE):
