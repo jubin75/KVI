@@ -64,7 +64,10 @@ except ModuleNotFoundError:
 
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
-    return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+    bid = meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or meta.get("citation")
+    if not bid:
+        bid = getattr(it, "block_id", None) or getattr(it, "chunk_id", None) or getattr(it, "id", None)
+    return str(bid or "")
 
 
 def _format_prompt(tokenizer: Any, user_text: str, *, use_chat_template: bool) -> str:
@@ -223,6 +226,11 @@ def main() -> None:
     p.add_argument("--critique_max_new_tokens", type=int, default=128)
     p.add_argument("--critique_conf_threshold", type=float, default=0.55, help="Trigger retrieval if confidence < threshold")
     p.add_argument("--force_rim", action="store_true", help="Force retrieval+injection regardless of critique")
+    p.add_argument(
+        "--debug_retrieved_ids",
+        action="store_true",
+        help="Print retrieved_ids and sample KVItem meta keys (debug only)",
+    )
     p.add_argument(
         "--force_inject_on_unknown_delta",
         action="store_true",
@@ -602,6 +610,22 @@ def main() -> None:
             print("\nretrieved_ids(top_k):")
             for x in retrieved_ids[: int(args.top_k)]:
                 print("-", x)
+        elif bool(args.debug_retrieved_ids):
+            print("\nretrieved_ids(top_k): (empty)")
+            sample_items = list(chosen_items or [])[:3]
+            for i, it in enumerate(sample_items):
+                meta = getattr(it, "meta", None) or {}
+                meta_keys = list(meta.keys())
+                bid = meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or meta.get("citation")
+                extra = {
+                    "block_id": meta.get("block_id"),
+                    "chunk_id": meta.get("chunk_id"),
+                    "id": meta.get("id"),
+                    "citation": meta.get("citation"),
+                    "source_id": meta.get("source_id"),
+                    "parent_chunk_id": meta.get("parent_chunk_id"),
+                }
+                print(f"- sample[{i}] meta_keys={meta_keys} id_hint={bid} extra={extra}")
         print("\n=== 有 RIM（注入 KV → 第二轮生成）===\n")
         print(rim_answer.strip())
     else:
