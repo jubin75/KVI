@@ -1,0 +1,30 @@
+semantic_type: symptom
+
+normalize:
+  thrombocytopenia:
+    - platelet counts
+    - low platelet
+    - decreased platelets
+    - low platelet counts
+  leukopenia:
+    - decreased white blood cell
+    - low white blood cell
+    - decreased wbc
+    - low wbc
+  leukocytopenia:
+    - leucocytopenia
+
+split:
+  connectors:
+    - " of "
+    - " and "
+    - " with "
+
+filter:
+  deny_terms:
+    - "no "
+    - "without "
+    - "absence of "
+    - "clear mind"
+    - "conscious"
+    - "alert"

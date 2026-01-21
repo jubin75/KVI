@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import json
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT_STR = str(_REPO_ROOT)
@@ -68,10 +69,55 @@ def main() -> None:
         dtype=(str(args.dtype) if args.dtype else None),
         shard_size=shard_size,
     )
+    report = _build_alignment_report(blocks_path)
+    report_path = Path(str(args.out_dir)) / "kvbank_alignment_report.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[build_kvbank_from_blocks_jsonl] done stats={stats}", flush=True)
+    print(f"[build_kvbank_from_blocks_jsonl] alignment_report={report_path}", flush=True)
 
 
 if __name__ == "__main__":
     main()
 
+
+def _build_alignment_report(blocks_path: Path) -> dict:
+    total = 0
+    list_like = 0
+    missing = 0
+    list_counts = []
+    sample_list_blocks = []
+    try:
+        with blocks_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                total += 1
+                rec = json.loads(line)
+                meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+                pat = meta.get("pattern") if isinstance(meta.get("pattern"), dict) else {}
+                lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+                if not lf:
+                    missing += 1
+                    continue
+                items = lf.get("list_items") if isinstance(lf.get("list_items"), list) else []
+                if not items:
+                    items = lf.get("list_like_items") if isinstance(lf.get("list_like_items"), list) else []
+                if items:
+                    list_like += 1
+                    list_counts.append(len(items))
+                    if len(sample_list_blocks) < 5:
+                        sample_list_blocks.append(
+                            {"block_id": rec.get("block_id"), "items": items[:8]}
+                        )
+    except Exception:
+        pass
+    avg_count = float(sum(list_counts) / max(1, len(list_counts))) if list_counts else 0.0
+    return {
+        "total_blocks": int(total),
+        "list_like_blocks": int(list_like),
+        "avg_list_feature_count": float(avg_count),
+        "blocks_missing_enriched": int(missing),
+        "sample_list_blocks": sample_list_blocks,
+    }
 

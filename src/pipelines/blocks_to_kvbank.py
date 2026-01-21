@@ -142,6 +142,51 @@ def build_kvbank_from_blocks_jsonl(
             return True
         return False
 
+    def _list_feature_meta(text: str, meta_payload: Dict[str, Any]) -> Dict[str, Any]:
+        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
+        lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+        list_items = lf.get("list_items") if isinstance(lf.get("list_items"), list) else []
+        if not list_items:
+            list_items = lf.get("list_like_items") if isinstance(lf.get("list_like_items"), list) else []
+        list_like = bool(lf.get("is_list_like") or list_items or lf.get("has_bullets") or lf.get("has_enumeration"))
+        list_feature_count = int(len(list_items or []))
+        signals = lf.get("signals") if isinstance(lf.get("signals"), list) else []
+        has_symptom_cue = any("trigger_phrase" in str(s) for s in signals) or any(
+            "clinical" in str(s).lower() or "symptom" in str(s).lower() for s in (pat.get("schema_slots") or [])
+        )
+        has_enum = bool(lf.get("has_bullets") or lf.get("has_enumeration")) or any(
+            "bullet" in str(s) or "numbering" in str(s) for s in signals
+        )
+        list_confidence = min(
+            1.0,
+            0.3 * float(list_feature_count)
+            + (0.1 if has_symptom_cue else 0.0)
+            + (0.1 if has_enum else 0.0),
+        )
+        slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
+        slot_low = [str(s).lower() for s in slots if str(s).strip()]
+        if any("clinical" in s or "symptom" in s for s in slot_low):
+            list_type = "symptom"
+        elif any("clinical_feature" in s for s in slot_low):
+            list_type = "clinical_feature"
+        else:
+            list_type = "other"
+        list_features = []
+        if list_like:
+            list_features.append(
+                {
+                    "type": list_type,
+                    "items": list_items,
+                    "source_span": (text[:200] + "...") if len(text) > 200 else text,
+                }
+            )
+        return {
+            "list_like": bool(list_like),
+            "list_feature_count": int(list_feature_count),
+            "list_features": list_features,
+            "list_confidence": float(list_confidence),
+        }
+
     def _flush_bank(
         *,
         rk: List[np.ndarray],
@@ -250,6 +295,7 @@ def build_kvbank_from_blocks_jsonl(
                 str(s) for s in answerable_slots if isinstance(s, (str, int, float)) and str(s).strip()
             ]
 
+            list_meta = _list_feature_meta(text, meta_payload)
             meta = {
                 "block_id": rec.get("block_id"),
                 "parent_chunk_id": rec.get("parent_chunk_id"),
@@ -269,6 +315,10 @@ def build_kvbank_from_blocks_jsonl(
                 # carry structured metadata (tables/disease/date/paragraph_type, etc.)
                 "metadata": meta_payload,
                 "is_table": bool(is_table),
+                "list_like": bool(list_meta.get("list_like")),
+                "list_feature_count": int(list_meta.get("list_feature_count") or 0),
+                "list_features": list_meta.get("list_features") or [],
+                "list_confidence": float(list_meta.get("list_confidence") or 0.0),
             }
 
             total_written += 1

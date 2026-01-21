@@ -1,0 +1,12 @@
+normalize: {}
+
+split:
+  connectors:
+    - ","
+    - ";"
+    - " and "
+    - " with "
+    - " of "
+
+filter:
+  deny_terms: []

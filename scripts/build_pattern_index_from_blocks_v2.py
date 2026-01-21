@@ -43,18 +43,18 @@ try:
     from external_kv_injection.src.pattern_extraction import (  # type: ignore
         extract_abbreviation_pairs,
         extract_entities,
-        extract_list_like_features,
         infer_block_type,
         infer_schema_slots_from_text,
     )
+    from external_kv_injection.src.evidence.list_feature_extractor import EvidenceListFeatureExtractor  # type: ignore
 except ModuleNotFoundError:
     from src.pattern_extraction import (  # type: ignore
         extract_abbreviation_pairs,
         extract_entities,
-        extract_list_like_features,
         infer_block_type,
         infer_schema_slots_from_text,
     )
+    from src.evidence.list_feature_extractor import EvidenceListFeatureExtractor  # type: ignore
 
 
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -132,6 +132,9 @@ def main() -> None:
     enriched_records: List[Dict[str, Any]] = []
 
     processed = 0
+    rule_dir = Path(__file__).resolve().parents[1] / "config" / "list_feature_rules"
+    list_extractor = EvidenceListFeatureExtractor(str(rule_dir))
+
     for rec in _read_jsonl(in_path):
         processed += 1
         if int(args.max_blocks) > 0 and processed > int(args.max_blocks):
@@ -145,7 +148,7 @@ def main() -> None:
         abbr_pairs = extract_abbreviation_pairs(text, max_pairs=int(args.max_pairs_per_block))
         entities = extract_entities(text, max_entities=int(args.max_entities_per_block))
         slots = infer_schema_slots_from_text(text)
-        list_features = extract_list_like_features(text)
+        list_features = list_extractor.extract(rec).get("list_features")
 
         # aggregate alias map
         for ap in abbr_pairs:

@@ -1,0 +1,12 @@
+semantic_type: drug
+
+signals:
+  trigger_phrases: []
+
+split:
+  delimiters:
+    - ","
+    - ";"
+
+confidence:
+  trigger_phrase: 0.0

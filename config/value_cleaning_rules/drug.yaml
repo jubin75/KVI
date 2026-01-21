@@ -1,0 +1,11 @@
+semantic_type: drug
+
+normalize: {}
+
+split:
+  connectors:
+    - ","
+    - ";"
+
+filter:
+  deny_terms: []

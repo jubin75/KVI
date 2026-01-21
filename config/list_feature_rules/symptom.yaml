@@ -1,0 +1,21 @@
+semantic_type: symptom
+
+signals:
+  trigger_phrases:
+    - "symptoms include"
+    - "clinical features include"
+    - "patients present with"
+    - "manifested by"
+    - "is characterized by"
+    - "are characterized by"
+    - "symptoms such as"
+    - "features such as"
+
+split:
+  delimiters:
+    - ","
+    - ";"
+    - " and "
+
+confidence:
+  trigger_phrase: 0.7

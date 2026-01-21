@@ -14,10 +14,9 @@ Hard constraints (docs/07_KVI_RMI.md):
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -210,7 +209,7 @@ class KVI2Runtime:
                 # retrieve-only retry (no generation)
                 oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
                 rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
-                rr_items = _boost_list_like_items(rr.items, slot_schema)
+                rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr.items, slot_schema)
                 batch: list[Any] = []
                 seen_ids: set[str] = set()
                 for it in rr_items:
@@ -259,6 +258,8 @@ class KVI2Runtime:
                         "oversample_top_k": int(oversample_top_k),
                         "retriever_debug": dict(rr.debug or {}),
                         "rim_retry": True,
+                        "list_rank_debug": rank_debug[: int(self.cfg.top_k)],
+                        "final_rank": final_rank[: int(self.cfg.top_k)],
                         "list_like_candidate_count": int(len(_collect_list_like_ids(rr_items))),
                         "list_like_candidate_ids": _collect_list_like_ids(rr_items)[: int(self.cfg.top_k)],
                         "contract_validation": dict(contract_validation or {}),
@@ -298,7 +299,7 @@ class KVI2Runtime:
         # 4) Semantic-second retrieve + refresh (<=2 rounds)
         oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
         rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
-        rr_items = _boost_list_like_items(rr.items, slot_schema)
+        rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr.items, slot_schema)
         layer_ids = [int(x) for x in self.cfg.layers]
         dtype = next(model.parameters()).dtype
 
@@ -423,6 +424,8 @@ class KVI2Runtime:
             "top_k": int(self.cfg.top_k),
             "oversample_top_k": int(oversample_top_k),
             "retriever_debug": dict(rr.debug or {}),
+            "list_rank_debug": rank_debug[: int(self.cfg.top_k)],
+            "final_rank": final_rank[: int(self.cfg.top_k)],
             "list_like_candidate_count": int(len(_collect_list_like_ids(rr_items))),
             "list_like_candidate_ids": _collect_list_like_ids(rr_items)[: int(self.cfg.top_k)],
             "kv_refresh": {
@@ -462,26 +465,20 @@ class KVI2Runtime:
         if not guard_style and isinstance(gate, dict):
             guard_style = str(gate.get("final_answer_style") or "")
 
-        # LIST_ONLY: extract-only from evidence, no free generation.
+        # LIST_ONLY: deterministic projection of retrieval results.
         if str(guard_style or "").upper() == "LIST_ONLY":
-            items, src_ids, fail_reason = _extract_list_items_from_instances(
+            items, mapping, audit = _project_list_only(
                 semantic_instances=semantic_instances,
-                slot_schema=slot_schema,
+                retrieval_rank=final_rank,
             )
             out["retrieval"]["list_items_extracted"] = items
-            out["retrieval"]["list_items_source_block_ids"] = src_ids
-            if fail_reason:
-                out["retrieval"]["list_extraction_failed_reason"] = fail_reason
+            out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
+            out["retrieval"]["list_only_audit"] = audit
             if not items:
-                if isinstance(chosen_gate_after_validation, dict):
-                    chosen_gate_after_validation["decision"] = "REFUSE"
-                    chosen_gate_after_validation["decision_reason"] = "slot-satisfied-but-not-extractable"
-                    chosen_gate_after_validation["final_answer_style"] = None
-                    chosen_gate_after_validation["allowed_answer_capabilities"] = []
+                out["rim_answer"] = "No list-like evidence found in retrieved sources."
                 out["gate"] = dict(chosen_gate_after_validation or {})
-                out["rim_answer"] = ""
                 return out
-            out["rim_answer"] = "\n".join([f"- {x}" for x in items])
+            out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
             out["gate"] = dict(chosen_gate_after_validation or {})
             return out
         guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
@@ -625,24 +622,31 @@ def _extract_abbr_expansion_from_blocks(
     return ""
 
 
-def _extract_list_items_from_instances(
+def _project_list_only(
     *,
     semantic_instances: Sequence[Dict[str, Any]],
-    slot_schema: Optional[SlotSchema],
-) -> Tuple[List[str], List[str], str]:
+    retrieval_rank: Sequence[str],
+) -> Tuple[List[str], List[Dict[str, str]], Dict[str, Any]]:
     """
-    Extract list items from evidence spans only (no free generation).
-    Returns (items, source_block_ids, fail_reason).
+    LIST_ONLY output is a deterministic projection of retrieval results.
     """
-    if slot_schema is None:
-        return [], [], "no-slot-schema"
-    items: List[str] = []
-    src_ids: List[str] = []
+    block_items: Dict[str, List[str]] = {}
+    block_span: Dict[str, str] = {}
     for inst in semantic_instances or []:
-        slots = inst.get("slots") if isinstance(inst, dict) else None
-        if not isinstance(slots, dict):
+        if not isinstance(inst, dict):
             continue
-        for slot_name, ev_list in slots.items():
+        by_block = inst.get("value_cleaning_by_block") if isinstance(inst.get("value_cleaning_by_block"), dict) else {}
+        for _, blocks in by_block.items():
+            if not isinstance(blocks, dict):
+                continue
+            for bid, payload in blocks.items():
+                if not isinstance(payload, dict):
+                    continue
+                vals = payload.get("cleaned_values") if isinstance(payload.get("cleaned_values"), list) else []
+                if vals:
+                    block_items.setdefault(str(bid), []).extend([str(v).strip() for v in vals if str(v).strip()])
+        slots = inst.get("slots") if isinstance(inst.get("slots"), dict) else {}
+        for _, ev_list in slots.items():
             if not isinstance(ev_list, list):
                 continue
             for ev in ev_list:
@@ -650,27 +654,29 @@ def _extract_list_items_from_instances(
                     continue
                 bid = str(ev.get("evidence_id") or "").strip()
                 span = str(ev.get("span") or "").strip()
-                list_items = ev.get("list_items") if isinstance(ev.get("list_items"), list) else []
-                extracted = [str(x).strip() for x in list_items if str(x).strip()]
-                if not extracted:
-                    if not span:
-                        continue
-                    extracted = _extract_bullet_like_items(span)
-                if extracted:
-                    items.extend(extracted)
-                    if bid:
-                        src_ids.append(bid)
-    # de-dup
-    cleaned: List[str] = []
-    for x in items:
-        y = _normalize_list_item(x)
-        if y:
-            cleaned.append(y)
-    items = list(dict.fromkeys(cleaned))
-    src_ids = list(dict.fromkeys([x for x in src_ids if x]))
-    if not items:
-        return [], src_ids, "no-bullets-in-evidence"
-    return items[:12], src_ids, ""
+                if bid and span and bid not in block_span:
+                    block_span[bid] = span
+
+    output_items: List[str] = []
+    mapping: List[Dict[str, str]] = []
+    dropped = 0
+    for bid in retrieval_rank or []:
+        items = block_items.get(bid) or []
+        if not items:
+            dropped += 1
+            continue
+        item = items[0]
+        mapping.append({"item_text": item, "source_block_id": bid, "source_span": block_span.get(bid, "")})
+        output_items.append(item)
+
+    audit = {
+        "retrieval_rank": list(retrieval_rank or []),
+        "output_order": [m["source_block_id"] for m in mapping],
+        "one_to_one_mapping": True,
+        "dropped_items": int(dropped),
+        "reason": "no_source_span" if any(not m.get("source_span") for m in mapping) else "ok",
+    }
+    return output_items, mapping, audit
 
 
 def _extract_bullet_like_items(text: str) -> List[str]:
@@ -691,93 +697,48 @@ def _extract_bullet_like_items(text: str) -> List[str]:
     return [x for x in out if x]
 
 
-def _normalize_list_item(item: str) -> str:
-    s = " ".join(str(item or "").split())
-    if not s:
-        return ""
-    # Remove leading boilerplate phrases.
-    s = re.sub(
-        r"^(symptoms?|clinical features|clinical manifestations|patients typically present)\s+"
-        r"(include|including|such as|with|are)\s+",
-        "",
-        s,
-        flags=re.IGNORECASE,
-    )
-    s = re.sub(r"^(表现为|症状包括|临床表现为|典型表现为|常见表现为)\s*", "", s)
-    # Drop trailing citations / bracketed refs.
-    s = re.sub(r"\[[^\]]+\]$", "", s).strip()
-    s = re.sub(r"\([^)]+\)$", "", s).strip()
-    # Remove negated symptoms (e.g., "no ...", "without ...", "absence of ...").
-    if re.match(r"^(no|without|absence of|free of)\b", s, flags=re.IGNORECASE):
-        return ""
-    if re.match(r"^(无|未见|没有|否认)\b", s):
-        return ""
-    # Fix split/variant medical terms via regex map.
-    s = _apply_regex_map(s, _SYMPTOM_NORMALIZATION_MAP)
-    # Drop overly long or sentence-like fragments.
-    if len(s) < 2 or len(s) > 60:
-        return ""
-    if re.search(r"[.;:]", s):
-        return ""
-    if re.search(
-        r"\b(symptoms?|include|including|such as|present|presented|characterized|caused)\b",
-        s,
-        flags=re.IGNORECASE,
-    ):
-        return ""
-    return s.strip(" ,;:-")
 
 
-def _apply_regex_map(text: str, mapping: List[Tuple[str, str]]) -> str:
-    out = str(text or "")
-    for pat, repl in mapping:
-        out = re.sub(pat, repl, out, flags=re.IGNORECASE)
-    return out
-
-
-# Minimal, extensible normalization map (regex pattern -> replacement).
-_SYMPTOM_NORMALIZATION_MAP: List[Tuple[str, str]] = [
-    (r"\bthrombo\s+cytopenia\b", "thrombocytopenia"),
-    (r"\bleuko\s+cytopenia\b", "leukocytopenia"),
-    (r"\blympho\s+cytopenia\b", "lymphocytopenia"),
-    (r"\b(decreased|low)\s+(white\s+blood\s+cell|wbc)\b", "leukopenia"),
-    (r"\b(decreased|low)\s+platelet\s+counts?\b", "thrombocytopenia"),
-]
-
-
-def _boost_list_like_items(items: Sequence[Any], slot_schema: Optional[SlotSchema]) -> List[Any]:
+def _apply_list_feature_ranking(
+    items: Sequence[Any],
+    slot_schema: Optional[SlotSchema],
+) -> Tuple[List[Any], List[Dict[str, Any]], List[str]]:
     """
-    Boost list-like evidence for schema queries (non-destructive reordering).
+    Apply frozen list-like ranking formula using KVBank meta.
     """
     if not items:
-        return list(items or [])
-    has_schema = bool(slot_schema) and any(
+        return list(items or []), [], []
+    requires_list_like = bool(slot_schema) and any(
         str(spec.inference_level).lower() == "schema" for spec in (slot_schema.slots or {}).values()
     )
-    if not has_schema:
-        return list(items or [])
-
-    def _score(it: Any) -> float:
-        base = float(getattr(it, "score", 0.0) or 0.0)
+    ranked: List[Tuple[float, Any, Dict[str, Any]]] = []
+    debug: List[Dict[str, Any]] = []
+    for it in items or []:
+        base_raw = float(getattr(it, "score", 0.0) or 0.0)
+        base_score = max(0.0, min(1.0, base_raw))
         meta = getattr(it, "meta", None) or {}
-        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
-        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
-        lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
-        boost = 0.0
-        if lf.get("has_bullets"):
-            boost += 0.25
-        if lf.get("has_enumeration"):
-            boost += 0.2
-        try:
-            dens = float(lf.get("list_density") or 0.0)
-        except Exception:
-            dens = 0.0
-        boost += min(0.3, max(0.0, dens))
-        if isinstance(lf.get("list_like_items"), list) and lf.get("list_like_items"):
-            boost += 0.2
-        return base + boost
-
-    return sorted(list(items), key=_score, reverse=True)
+        bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+        list_like = bool(meta.get("list_like"))
+        lfc = int(meta.get("list_feature_count") or 0)
+        lconf = float(meta.get("list_confidence") or 0.0)
+        boost = 1.0 + 0.15 * min(lfc, 3) + 0.20 * lconf if list_like else 1.0
+        final_score = 0.0 if (requires_list_like and not list_like) else base_score * boost
+        dbg = {
+            "block_id": bid,
+            "base_score": base_score,
+            "list_like": list_like,
+            "list_feature_count": lfc,
+            "list_confidence": lconf,
+            "boost": boost,
+            "final_score": final_score,
+        }
+        debug.append(dbg)
+        if final_score > 0.0:
+            ranked.append((final_score, it, dbg))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    final_items = [it for _, it, _ in ranked]
+    final_rank = [str(getattr(it, "meta", {}).get("block_id") or "") for it in final_items]
+    return final_items, debug, [x for x in final_rank if x]
 
 
 def _collect_list_like_ids(items: Sequence[Any]) -> List[str]:
@@ -787,10 +748,7 @@ def _collect_list_like_ids(items: Sequence[Any]) -> List[str]:
         bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
         if not bid:
             continue
-        meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
-        pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
-        lf = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
-        has_list = bool(lf.get("has_bullets") or lf.get("has_enumeration") or lf.get("list_like_items"))
+        has_list = bool(meta.get("list_like"))
         if has_list:
             ids.append(bid)
     return list(dict.fromkeys(ids))

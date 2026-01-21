@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .pattern_contract import PatternContract
@@ -32,6 +33,7 @@ class SlotSpec:
     min_evidence: int
     inference_level: str  # "hard" | "soft" | "schema"
     slot_type: str = "string"
+    semantic_type: str = "generic"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +43,7 @@ class SlotSpec:
             "min_evidence": int(self.min_evidence),
             "inference_level": str(self.inference_level),
             "type": self.slot_type,
+            "semantic_type": self.semantic_type,
         }
 
 
@@ -153,6 +156,7 @@ class PatternContractLoader:
                 name = str(k or "").strip()
                 if not name:
                     continue
+                sem_type = str(v.get("semantic_type") or "").strip() or _infer_semantic_type_from_slot(name)
                 slots[name] = SlotSpec(
                     name=name,
                     required=bool(v.get("required", False)),
@@ -160,6 +164,7 @@ class PatternContractLoader:
                     min_evidence=int(v.get("min_evidence", 1)),
                     inference_level=str(v.get("inference_level") or "schema"),
                     slot_type=str(v.get("type") or "string"),
+                    semantic_type=sem_type,
                 )
             out.append(
                 PatternSpec(
@@ -203,6 +208,7 @@ class PatternContractLoader:
                 )
             if kind == "schema":
                 slot_name = pid.split(":", 1)[1] if ":" in pid else "schema"
+                sem_type = _infer_semantic_type_from_slot(slot_name)
                 slots[slot_name] = SlotSpec(
                     name=slot_name,
                     required=False,
@@ -210,6 +216,7 @@ class PatternContractLoader:
                     min_evidence=1,
                     inference_level="schema",
                     slot_type="string",
+                    semantic_type=sem_type,
                 )
             out.append(
                 PatternSpec(
@@ -331,7 +338,54 @@ class SemanticInstanceBuilder:
         slots_payload: Dict[str, List[Dict[str, Any]]] = {}
         for name, spec in (slot_schema.slots or {}).items():
             slots_payload[name] = _build_slot_evidence(spec, evidence_blocks, block_text_lookup=block_text_lookup)
-        instances.append({"pattern_id": pattern.pattern_id, "slots": slots_payload})
+        value_cleaning: Dict[str, Any] = {}
+        value_cleaning_by_block: Dict[str, Dict[str, Any]] = {}
+        try:
+            from .semantic.schema_value_cleaner import SchemaValueCleaner  # type: ignore
+
+            rule_dir = Path(__file__).resolve().parents[1] / "config" / "value_cleaning_rules"
+            cleaner = SchemaValueCleaner(str(rule_dir))
+            for name, spec in (slot_schema.slots or {}).items():
+                ev_list = slots_payload.get(name, []) if isinstance(slots_payload.get(name), list) else []
+                raw_values: List[str] = []
+                evidence_ids: List[str] = []
+                by_block: Dict[str, List[str]] = {}
+                for ev in ev_list:
+                    if not isinstance(ev, dict):
+                        continue
+                    bid = str(ev.get("evidence_id") or "")
+                    evidence_ids.append(bid)
+                    items = ev.get("list_items") if isinstance(ev.get("list_items"), list) else []
+                    for it in items:
+                        if str(it).strip():
+                            raw_values.append(str(it).strip())
+                            if bid:
+                                by_block.setdefault(bid, []).append(str(it).strip())
+                value_cleaning[name] = cleaner.clean(
+                    values=raw_values,
+                    semantic_type=str(spec.semantic_type or "generic"),
+                    evidence_ids=[x for x in evidence_ids if x],
+                )
+                per_block: Dict[str, Any] = {}
+                for bid, vals in by_block.items():
+                    per_block[bid] = cleaner.clean(
+                        values=vals,
+                        semantic_type=str(spec.semantic_type or "generic"),
+                        evidence_ids=[bid],
+                    )
+                value_cleaning_by_block[name] = per_block
+        except Exception:
+            value_cleaning = {}
+            value_cleaning_by_block = {}
+
+        instances.append(
+            {
+                "pattern_id": pattern.pattern_id,
+                "slots": slots_payload,
+                "value_cleaning": value_cleaning,
+                "value_cleaning_by_block": value_cleaning_by_block,
+            }
+        )
         return instances
 
 
@@ -446,6 +500,15 @@ def _infer_kind(pattern_id: str, pattern_type: str) -> str:
     if pid.startswith("entity:") or pattern_type in {"entity"}:
         return "entity"
     return "other"
+
+
+def _infer_semantic_type_from_slot(slot_name: str) -> str:
+    s = str(slot_name or "").lower()
+    if "clinical" in s or "symptom" in s:
+        return "symptom"
+    if "treatment" in s or "drug" in s:
+        return "drug"
+    return "generic"
 
 
 def _default_question_skeleton(kind: str, slot_name: str = "") -> List[str]:
@@ -575,7 +638,11 @@ def _build_slot_evidence(
         meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
         pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
         list_features = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
-        list_items = list_features.get("list_like_items") if isinstance(list_features.get("list_like_items"), list) else []
+        list_items = []
+        if isinstance(list_features.get("list_items"), list):
+            list_items = list_features.get("list_items") or []
+        elif isinstance(list_features.get("list_like_items"), list):
+            list_items = list_features.get("list_like_items") or []
         items.append({"evidence_id": bid, "source": source, "span": span, "list_items": list_items})
     return items
 
