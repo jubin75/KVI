@@ -441,6 +441,16 @@ class IntrospectionGate:
         gate["slot_status"] = dict(slot_status or {})
         gate["hard_rationale"] = list(missing_hard or [])
         gate["soft_rationale"] = list(missing_soft or [])
+        schema_slot_missing: List[str] = []
+        if slot_schema is not None:
+            for name, spec in (slot_schema.slots or {}).items():
+                if str(spec.inference_level).lower() != "schema":
+                    continue
+                if str((slot_status or {}).get(name) or "").lower() != "satisfied":
+                    schema_slot_missing.append(str(name))
+        if schema_slot_missing:
+            missing_schema = list(missing_schema or []) + schema_slot_missing
+            gate["rationale"] = "schema-not-yet-instantiated"
         gate["schema_rationale"] = list(missing_schema or [])
 
         allowed = _allowed_capabilities(slot_schema)
