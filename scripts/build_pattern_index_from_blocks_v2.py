@@ -47,6 +47,7 @@ try:
         infer_schema_slots_from_text,
     )
     from external_kv_injection.src.evidence.list_feature_extractor import EvidenceListFeatureExtractor  # type: ignore
+    from external_kv_injection.src.evidence.evidence_enhancer import EvidenceEnhancer  # type: ignore
 except ModuleNotFoundError:
     from src.pattern_extraction import (  # type: ignore
         extract_abbreviation_pairs,
@@ -55,6 +56,7 @@ except ModuleNotFoundError:
         infer_schema_slots_from_text,
     )
     from src.evidence.list_feature_extractor import EvidenceListFeatureExtractor  # type: ignore
+    from src.evidence.evidence_enhancer import EvidenceEnhancer  # type: ignore
 
 
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -134,6 +136,7 @@ def main() -> None:
     processed = 0
     rule_dir = Path(__file__).resolve().parents[1] / "config" / "list_feature_rules"
     list_extractor = EvidenceListFeatureExtractor(str(rule_dir))
+    evidence_enhancer = EvidenceEnhancer()
 
     for rec in _read_jsonl(in_path):
         processed += 1
@@ -148,7 +151,13 @@ def main() -> None:
         abbr_pairs = extract_abbreviation_pairs(text, max_pairs=int(args.max_pairs_per_block))
         entities = extract_entities(text, max_entities=int(args.max_entities_per_block))
         slots = infer_schema_slots_from_text(text)
-        list_features = list_extractor.extract(rec).get("list_features")
+        list_features = list_extractor.extract(rec).get("list_features") or {}
+        evidence_units = evidence_enhancer.build_units(
+            block_id=str(rec.get("block_id") or rec.get("id") or rec.get("chunk_id") or ""),
+            text=text,
+            list_features=list_features if isinstance(list_features, dict) else {},
+            entities=entities,
+        )
 
         # aggregate alias map
         for ap in abbr_pairs:
@@ -171,6 +180,10 @@ def main() -> None:
         if list_features:
             pat_meta["list_features"] = list_features
         meta["pattern"] = pat_meta
+        evidence_meta = meta.get("evidence") if isinstance(meta.get("evidence"), dict) else {}
+        evidence_meta = dict(evidence_meta or {})
+        evidence_meta["evidence_units"] = evidence_units
+        meta["evidence"] = evidence_meta
 
         # add a coarse block_type (do not overwrite if already present)
         if "block_type" not in meta or not str(meta.get("block_type") or "").strip():
