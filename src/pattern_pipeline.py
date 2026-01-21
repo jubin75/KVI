@@ -774,23 +774,31 @@ def _build_slot_evidence(
             span = str(getattr(it, "text") or "")
         meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
         pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
-        list_features = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
-        list_items = []
-        if isinstance(list_features.get("list_items"), list):
-            list_items = list_features.get("list_items") or []
-        elif isinstance(list_features.get("list_like_items"), list):
-            list_items = list_features.get("list_like_items") or []
-        if str(pattern_id) == "schema:clinical_features":
-            allowed, reason, filtered_items = SymptomAwareListFilter.allow_candidate(
-                list_features=list_features,
-                span_text=span,
-                list_items=list_items,
-            )
-            if not allowed:
-                if isinstance(filtered_out, list) and bid:
-                    filtered_out.append({"block_id": bid, "reason": reason})
-                continue
-            list_items = filtered_items
+        evmeta = meta_payload.get("evidence") if isinstance(meta_payload.get("evidence"), dict) else {}
+
+        # Slot filling ONLY from Evidence Units (docs/078_Evidence_extract.md).
+        # For schema slots, use injectability.allowed == true units as list_items.
+        list_items: List[str] = []
+        if str(spec.inference_level).lower() == "schema" and isinstance(evmeta.get("evidence_units"), list):
+            for u in evmeta.get("evidence_units") or []:
+                if not isinstance(u, dict):
+                    continue
+                inj = u.get("injectability") if isinstance(u.get("injectability"), dict) else {}
+                if bool(inj.get("allowed") is True):
+                    txt = str(u.get("text") or "").strip()
+                    if txt:
+                        list_items.append(txt)
+            list_items = list(dict.fromkeys(list_items))
+        else:
+            # Back-compat: non-schema slots can still surface list_features as debug,
+            # but schema slot filling must be from evidence_units.
+            list_features = pat.get("list_features") if isinstance(pat.get("list_features"), dict) else {}
+            if isinstance(list_features.get("list_items"), list):
+                list_items = [str(x) for x in (list_features.get("list_items") or []) if str(x).strip()]
+            elif isinstance(list_features.get("list_like_items"), list):
+                list_items = [str(x) for x in (list_features.get("list_like_items") or []) if str(x).strip()]
+
+        # Optional symptom gating on legacy list_features is removed; units already carry injectability.
         items.append({"evidence_id": bid, "source": source, "span": span, "list_items": list_items})
     return items
 
