@@ -53,6 +53,7 @@ class KVI2Config:
     pattern_index_dir: str = ""
     structured_answer_template: bool = False
     structured_template_text: str = ""
+    debug_retrieved_ids: bool = False
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
     pattern_soft: Sequence[str] = ()
@@ -439,6 +440,9 @@ class KVI2Runtime:
             "slot_status_source": "semantic_instances",
             "slot_status_snapshot": dict(slot_status or {}),
         }
+        if bool(self.cfg.debug_retrieved_ids):
+            retrieved_ids = [_kv_id(it) for it in chosen_items]
+            out["retrieval"]["retrieved_ids"] = [x for x in retrieved_ids if x]
         if any(v == "missing" for v in (slot_status or {}).values()):
             out["retrieval"]["unconsumed_evidence_blocks"] = find_unconsumed_evidence_blocks(
                 chosen_items, slot_schema
@@ -551,6 +555,11 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
         )
         return str(prompt) + guard
     return str(prompt)
+
+
+def _kv_id(it: Any) -> str:
+    meta = getattr(it, "meta", None) or {}
+    return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
 
 
 def _extract_abbr_expansion_from_blocks(

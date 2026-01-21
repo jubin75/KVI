@@ -50,6 +50,7 @@ def main() -> None:
     p.add_argument("--top_k", type=int, default=8)
     p.add_argument("--kv_refresh_rounds", type=int, default=2)
     p.add_argument("--kv_irrelevant_logit_delta_threshold", type=float, default=0.05)
+    p.add_argument("--debug_retrieved_ids", action="store_true")
     p.add_argument("--use_chat_template", action="store_true")
     args = p.parse_args()
 
@@ -71,6 +72,7 @@ def main() -> None:
         kv_refresh_rounds=int(args.kv_refresh_rounds),
         kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
         pattern_index_dir=str(args.pattern_index_dir),
+        debug_retrieved_ids=bool(args.debug_retrieved_ids),
     )
     runtime = KVI2Runtime(cfg=cfg, domain_encoder_model=str(args.domain_encoder_model))
 
