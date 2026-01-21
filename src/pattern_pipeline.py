@@ -12,10 +12,9 @@ This module defines minimal, explicit interfaces to separate concerns:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from pathlib import Path
-import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .pattern_contract import PatternContract
@@ -631,6 +630,14 @@ class SymptomAwareListFilter:
         r"characterized\s+by",
         r"including\s+.*\b(fever|thrombocytopenia|bleeding|fatigue|vomiting|diarrhea)\b",
     ]
+    _SYMPTOM_TERMS = [
+        "fever",
+        "thrombocytopenia",
+        "bleeding",
+        "fatigue",
+        "vomiting",
+        "diarrhea",
+    ]
     _EXCLUDE_PATTERNS = [
         "supplementary",
         "table",
@@ -645,21 +652,27 @@ class SymptomAwareListFilter:
     ]
 
     @classmethod
-    def allow_candidate(cls, *, list_features: Dict[str, Any], span_text: str) -> Tuple[bool, str]:
+    def allow_candidate(
+        cls, *, list_features: Dict[str, Any], span_text: str, list_items: List[str]
+    ) -> Tuple[bool, str, List[str]]:
         text = str(span_text or "")
         text_low = text.lower()
         for pat in cls._EXCLUDE_PATTERNS:
             if pat in text_low:
-                return False, f"excluded:{pat}"
+                return False, f"excluded:{pat}", []
 
         signals = list_features.get("signals") if isinstance(list_features.get("signals"), list) else []
         is_list_like = bool(list_features.get("is_list_like")) or bool(signals)
         if not is_list_like:
-            return False, "missing_structure"
+            return False, "missing_structure", []
 
-        if cls._has_symptom_cue(text):
-            return True, "ok"
-        return False, "missing_symptom_cue"
+        if not cls._has_symptom_cue(text):
+            return False, "missing_symptom_cue", []
+
+        filtered_items = cls._filter_list_items(list_items)
+        if not filtered_items:
+            return False, "list_items_not_symptom", []
+        return True, "ok", filtered_items
 
     @classmethod
     def _has_symptom_cue(cls, text: str) -> bool:
@@ -689,6 +702,31 @@ class SymptomAwareListFilter:
                 except Exception:
                     continue
         return False
+
+    @classmethod
+    def _filter_list_items(cls, list_items: List[str]) -> List[str]:
+        if not list_items:
+            return []
+        kept: List[str] = []
+        for it in list_items:
+            item = str(it or "").strip()
+            if not item:
+                continue
+            item_low = item.lower()
+            if any(cue in item_low for cue in cls._SYMPTOM_CUES):
+                kept.append(item)
+                continue
+            if any(term in item_low for term in cls._SYMPTOM_TERMS):
+                kept.append(item)
+                continue
+            for rx in cls._PATIENT_REGEX:
+                try:
+                    if re.search(rx, item_low, flags=re.IGNORECASE):
+                        kept.append(item)
+                        break
+                except Exception:
+                    continue
+        return list(dict.fromkeys(kept))
 
 
 def _collect_evidence_for_slot(spec: SlotSpec, evidence_blocks: Sequence[Any]) -> List[Any]:
@@ -733,14 +771,16 @@ def _build_slot_evidence(
         elif isinstance(list_features.get("list_like_items"), list):
             list_items = list_features.get("list_like_items") or []
         if str(pattern_id) == "schema:clinical_features":
-            allowed, reason = SymptomAwareListFilter.allow_candidate(
+            allowed, reason, filtered_items = SymptomAwareListFilter.allow_candidate(
                 list_features=list_features,
                 span_text=span,
+                list_items=list_items,
             )
             if not allowed:
                 if isinstance(filtered_out, list) and bid:
                     filtered_out.append({"block_id": bid, "reason": reason})
                 continue
+            list_items = filtered_items
         items.append({"evidence_id": bid, "source": source, "span": span, "list_items": list_items})
     return items
 
