@@ -15,6 +15,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from pathlib import Path
+import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .pattern_contract import PatternContract
@@ -336,8 +337,15 @@ class SemanticInstanceBuilder:
     ) -> List[Dict[str, Any]]:
         instances: List[Dict[str, Any]] = []
         slots_payload: Dict[str, List[Dict[str, Any]]] = {}
+        filtered_out_non_symptom_lists: List[Dict[str, str]] = []
         for name, spec in (slot_schema.slots or {}).items():
-            slots_payload[name] = _build_slot_evidence(spec, evidence_blocks, block_text_lookup=block_text_lookup)
+            slots_payload[name] = _build_slot_evidence(
+                spec,
+                evidence_blocks,
+                pattern_id=str(pattern.pattern_id),
+                block_text_lookup=block_text_lookup,
+                filtered_out=filtered_out_non_symptom_lists,
+            )
         value_cleaning: Dict[str, Any] = {}
         value_cleaning_by_block: Dict[str, Dict[str, Any]] = {}
         try:
@@ -384,6 +392,7 @@ class SemanticInstanceBuilder:
                 "slots": slots_payload,
                 "value_cleaning": value_cleaning,
                 "value_cleaning_by_block": value_cleaning_by_block,
+                "filtered_out_non_symptom_lists": filtered_out_non_symptom_lists,
             }
         )
         return instances
@@ -604,6 +613,84 @@ def _has_valid_abbr_pair(abbr_pairs: List[Any]) -> bool:
     return False
 
 
+class SymptomAwareListFilter:
+    """
+    Filter list-like candidates for schema:clinical_features.
+    """
+
+    _SYMPTOM_CUES = [
+        "symptom",
+        "symptoms",
+        "clinical feature",
+        "clinical features",
+        "manifestation",
+        "manifestations",
+    ]
+    _PATIENT_REGEX = [
+        r"patients?\s+.*present\s+with",
+        r"characterized\s+by",
+        r"including\s+.*\b(fever|thrombocytopenia|bleeding|fatigue|vomiting|diarrhea)\b",
+    ]
+    _EXCLUDE_PATTERNS = [
+        "supplementary",
+        "table",
+        "figure",
+        "statistical analysis",
+        "copyright",
+        "methods",
+        "p value",
+        "confidence interval",
+        "in addition,",
+        "moreover,",
+    ]
+
+    @classmethod
+    def allow_candidate(cls, *, list_features: Dict[str, Any], span_text: str) -> Tuple[bool, str]:
+        text = str(span_text or "")
+        text_low = text.lower()
+        for pat in cls._EXCLUDE_PATTERNS:
+            if pat in text_low:
+                return False, f"excluded:{pat}"
+
+        signals = list_features.get("signals") if isinstance(list_features.get("signals"), list) else []
+        is_list_like = bool(list_features.get("is_list_like")) or bool(signals)
+        if not is_list_like:
+            return False, "missing_structure"
+
+        if cls._has_symptom_cue(text):
+            return True, "ok"
+        return False, "missing_symptom_cue"
+
+    @classmethod
+    def _has_symptom_cue(cls, text: str) -> bool:
+        if not text:
+            return False
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        windows: List[str] = []
+        if not sentences:
+            windows = [text]
+        else:
+            for i in range(len(sentences)):
+                parts = []
+                if i - 1 >= 0:
+                    parts.append(sentences[i - 1])
+                parts.append(sentences[i])
+                if i + 1 < len(sentences):
+                    parts.append(sentences[i + 1])
+                windows.append(" ".join(parts))
+        for w in windows:
+            w_low = w.lower()
+            if any(cue in w_low for cue in cls._SYMPTOM_CUES):
+                return True
+            for rx in cls._PATIENT_REGEX:
+                try:
+                    if re.search(rx, w_low, flags=re.IGNORECASE):
+                        return True
+                except Exception:
+                    continue
+        return False
+
+
 def _collect_evidence_for_slot(spec: SlotSpec, evidence_blocks: Sequence[Any]) -> List[Any]:
     out: List[Any] = []
     wanted = [str(x).strip().lower() for x in (spec.evidence_type or []) if str(x).strip()]
@@ -621,7 +708,9 @@ def _build_slot_evidence(
     spec: SlotSpec,
     evidence_blocks: Sequence[Any],
     *,
+    pattern_id: str = "",
     block_text_lookup: Optional[Dict[str, str]] = None,
+    filtered_out: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     for it in _collect_evidence_for_slot(spec, evidence_blocks):
@@ -643,6 +732,15 @@ def _build_slot_evidence(
             list_items = list_features.get("list_items") or []
         elif isinstance(list_features.get("list_like_items"), list):
             list_items = list_features.get("list_like_items") or []
+        if str(pattern_id) == "schema:clinical_features":
+            allowed, reason = SymptomAwareListFilter.allow_candidate(
+                list_features=list_features,
+                span_text=span,
+            )
+            if not allowed:
+                if isinstance(filtered_out, list) and bid:
+                    filtered_out.append({"block_id": bid, "reason": reason})
+                continue
         items.append({"evidence_id": bid, "source": source, "span": span, "list_items": list_items})
     return items
 
