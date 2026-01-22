@@ -28,7 +28,8 @@ signals:
   # Examples:
   # - "Cangzhou (70 cases)"
   # - "South Korea (12 cases)"
-  paren_cases_capture_regex: "([A-Z][A-Za-z\\-]{2,}(?:\\s+[A-Z][A-Za-z\\-]{2,})*)\\s*\\(\\s*\\d+\\s+cases?\\s*\\)"
+  # Capture the full token including "(N cases)" so downstream can keep or strip counts as needed.
+  paren_cases_capture_regex: "([A-Z][A-Za-z\\-]{2,}(?:\\s+[A-Z][A-Za-z\\-]{2,})*\\s*\\(\\s*\\d+\\s+cases?\\s*\\))"
 
 split:
   delimiters:

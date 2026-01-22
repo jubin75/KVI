@@ -64,6 +64,23 @@ class EvidenceListFeatureExtractor:
         conf_rules = rules.get("confidence", {}) if isinstance(rules.get("confidence"), dict) else {}
 
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+        # High-precision fast-path: if we can directly capture location tokens for "(N cases)"
+        # enumerations, we should prefer that and avoid mixing in low-precision trigger-phrase
+        # splitting results (which often pulls in clause fragments / years).
+        used_paren_cases_capture = False
+        if paren_cases_capture_regex:
+            try:
+                rx2 = re.compile(str(paren_cases_capture_regex), flags=re.IGNORECASE)
+                caps = [c.strip() for c in rx2.findall(text) if str(c).strip()]
+            except Exception:
+                caps = []
+            if caps:
+                signals.append("paren_cases_capture")
+                confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
+                list_items.extend(caps)
+                used_paren_cases_capture = True
+
         if any(ln.startswith(tuple(bullets)) for ln in lines if bullets):
             signals.append("bullet")
             confidence = max(confidence, float(conf_rules.get("bullet") or 0.0))
@@ -83,6 +100,10 @@ class EvidenceListFeatureExtractor:
             if phrase and phrase.lower() in text.lower():
                 signals.append(f"trigger_phrase:{phrase}")
                 confidence = max(confidence, float(conf_rules.get("trigger_phrase") or 0.0))
+                # If capture already hit for location-like enumerations, do NOT extract
+                # additional items from trigger phrases (keeps items clean and explainable).
+                if semantic_type == "location" and used_paren_cases_capture:
+                    continue
                 frag = self._after_phrase(text, phrase)
                 list_items.extend(self._split_frag(frag, delimiters))
 
@@ -90,18 +111,6 @@ class EvidenceListFeatureExtractor:
         # Prefer capture regex when provided (more precise: returns only entity strings).
         # IMPORTANT: If capture hits, DO NOT also run the looser sentence-splitting path, otherwise
         # we pollute list_items with years / clauses (e.g., "2022", ".", "with one case each").
-        used_paren_cases_capture = False
-        if paren_cases_capture_regex:
-            try:
-                rx2 = re.compile(str(paren_cases_capture_regex), flags=re.IGNORECASE)
-                caps = [c.strip() for c in rx2.findall(text) if str(c).strip()]
-            except Exception:
-                caps = []
-            if caps:
-                signals.append("paren_cases_capture")
-                confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
-                list_items.extend(caps)
-                used_paren_cases_capture = True
         # Only run the looser paren_cases splitter when we don't have a configured capture regex.
         # (If capture regex is configured but didn't match, it's safer to return empty than to guess.)
         if (not paren_cases_capture_regex) and (not used_paren_cases_capture) and paren_cases_regex:
@@ -128,6 +137,9 @@ class EvidenceListFeatureExtractor:
                 continue
             # Common pollution: a lone year token from loose splitting.
             if semantic_type == "location" and re.fullmatch(r"\d{4}", s):
+                continue
+            # Common pollution: truncated single-letter tokens like "H".
+            if semantic_type == "location" and re.fullmatch(r"[A-Za-z]", s):
                 continue
             cleaned.append(s)
         list_items = list(dict.fromkeys(cleaned))
