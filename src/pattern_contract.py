@@ -96,7 +96,12 @@ class PatternContractValidator:
     ) -> Dict[str, Any]:
         results = [self.validate(c, evidence_blocks, block_text_lookup=block_text_lookup) for c in (contracts or [])]
 
-        hard_missing = [r["pattern_id"] for r in results if r.get("level") == "hard" and not r.get("satisfied")]
+        # NOTE: schema-kind contracts are planning-only (must NOT cause hard rejection).
+        hard_missing = [
+            r["pattern_id"]
+            for r in results
+            if r.get("level") == "hard" and not r.get("satisfied") and r.get("kind") != "schema"
+        ]
         soft_missing = [r["pattern_id"] for r in results if r.get("level") == "soft" and not r.get("satisfied") and r.get("kind") != "schema"]
         schema_missing = [r["pattern_id"] for r in results if r.get("kind") == "schema" and not r.get("satisfied")]
 

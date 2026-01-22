@@ -160,17 +160,26 @@ class KVI2Runtime:
         # Pattern-first proposes candidates; this layer ranks them so low-info schemas (abbr/definition)
         # cannot hijack high-info queries (time range / spatial / enumeration).
         candidate_schemas = score_candidate_schemas(user_prompt, matched_patterns)
-        score_by_id = {str(c.get("schema_id")): float(c.get("score") or 0.0) for c in candidate_schemas}
-        matched_patterns = sorted(matched_patterns, key=lambda p: score_by_id.get(str(p.pattern_id), 0.0), reverse=True)
-        best_pattern = matched_patterns[0]
+        # IMPORTANT: PatternMatcher output order is NOT decisive; do NOT treat list order as semantics.
+        # Late-bind the selected pattern only after scoring.
+        best_pattern: PatternSpec = matched_patterns[0]
+        if candidate_schemas:
+            best_id = str(candidate_schemas[0].get("schema_id") or "").strip()
+            if best_id:
+                for p in matched_patterns:
+                    if str(p.pattern_id) == best_id:
+                        best_pattern = p
+                        break
         slot_schema = SlotSchema.from_pattern(best_pattern)
         validator = PatternContractValidator()
-        contracts = run_pattern_first(
+        all_contracts = run_pattern_first(
             user_prompt,
             pattern_res,
             hard_pattern_ids=self.cfg.pattern_hard,
             soft_pattern_ids=self.cfg.pattern_soft,
         )
+        # Late binding invariant: only the selected pattern's contract may filter evidence or drive rejection.
+        contracts = [c for c in (all_contracts or []) if str(c.pattern_id) == str(best_pattern.pattern_id)]
 
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
@@ -212,6 +221,7 @@ class KVI2Runtime:
             semantic_instances=[],
         )
         gate["candidate_schemas"] = candidate_schemas
+        gate["active_contract_ids"] = [str(c.pattern_id) for c in (contracts or [])]
         if gate.get("decision") == "REFUSE":
             if gate.get("allow_rim_retry"):
                 # retrieve-only retry (no generation)
