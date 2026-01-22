@@ -44,6 +44,9 @@ class EvidenceListFeatureExtractor:
         numbering_regex = rules.get("signals", {}).get("numbering_regex", []) if isinstance(rules.get("signals"), dict) else []
         trigger_phrases = rules.get("signals", {}).get("trigger_phrases", []) if isinstance(rules.get("signals"), dict) else []
         paren_cases_regex = rules.get("signals", {}).get("paren_cases_regex") if isinstance(rules.get("signals"), dict) else None
+        paren_cases_capture_regex = (
+            rules.get("signals", {}).get("paren_cases_capture_regex") if isinstance(rules.get("signals"), dict) else None
+        )
         delimiters = rules.get("split", {}).get("delimiters", []) if isinstance(rules.get("split"), dict) else []
         conf_rules = rules.get("confidence", {}) if isinstance(rules.get("confidence"), dict) else {}
 
@@ -72,6 +75,17 @@ class EvidenceListFeatureExtractor:
 
         # Location-style enumerations often appear as "X (70 cases), Y (3 cases), ...".
         # If configured, extract the *sentence containing* the first "(N cases)" match and split it.
+        # Prefer capture regex when provided (more precise: returns only entity strings).
+        if paren_cases_capture_regex:
+            try:
+                rx2 = re.compile(str(paren_cases_capture_regex), flags=re.IGNORECASE)
+                caps = [c.strip() for c in rx2.findall(text) if str(c).strip()]
+            except Exception:
+                caps = []
+            if caps:
+                signals.append("paren_cases_capture")
+                confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
+                list_items.extend(caps)
         if paren_cases_regex:
             try:
                 rx = re.compile(str(paren_cases_regex), flags=re.IGNORECASE)

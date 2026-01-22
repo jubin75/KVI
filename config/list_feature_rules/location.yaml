@@ -22,6 +22,9 @@ signals:
     - "报告在"
   # Structural cue for epidemiology enumerations like "Cangzhou (70 cases), ..."
   paren_cases_regex: "\\(\\s*\\d+\\s+cases?\\s*\\)"
+  # Prefer capturing the location token directly (reduces chapter-title pollution).
+  # This extracts only the entity token before "(N cases)".
+  paren_cases_capture_regex: "([A-Za-z][A-Za-z\\-]{2,})\\s*\\(\\s*\\d+\\s+cases?\\s*\\)"
 
 split:
   delimiters:
