@@ -167,19 +167,30 @@ def build_kvbank_from_blocks_jsonl(
             + (0.1 if has_enum else 0.0)
             + (0.1 if has_location_cue else 0.0),
         )
-        slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
-        slot_low = [str(s).lower() for s in slots if str(s).strip()]
-        if any("clinical" in s or "symptom" in s for s in slot_low):
-            list_type = "symptom"
-        elif any("clinical_feature" in s for s in slot_low):
-            list_type = "clinical_feature"
-        elif any(
-            ("geographic" in s) or ("distribution" in s) or ("region" in s) or ("location" in s) or ("epidemiolog" in s)
-            for s in slot_low
-        ):
-            list_type = "location"
+        # Prefer semantic_type inferred by the list_feature extractor (stored inside list_features),
+        # because schema_slots can be absent for many evidence blocks.
+        # This is still "semantic_type-level" and does not encode topic/question specific rules.
+        inferred_list_type = str(lf.get("list_type") or "").strip().lower()
+        if inferred_list_type in {"location", "symptom", "drug", "clinical_feature", "other"}:
+            list_type = inferred_list_type
         else:
-            list_type = "other"
+            slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
+            slot_low = [str(s).lower() for s in slots if str(s).strip()]
+            if any("clinical" in s or "symptom" in s for s in slot_low):
+                list_type = "symptom"
+            elif any("clinical_feature" in s for s in slot_low):
+                list_type = "clinical_feature"
+            elif any(
+                ("geographic" in s)
+                or ("distribution" in s)
+                or ("region" in s)
+                or ("location" in s)
+                or ("epidemiolog" in s)
+                for s in slot_low
+            ):
+                list_type = "location"
+            else:
+                list_type = "other"
         list_features = []
         if list_like:
             list_features.append(
