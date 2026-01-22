@@ -931,15 +931,15 @@ class MultiStepInjector:
                     qv, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text
                 )
                 evidence_texts: List[str] = []
-                    for it in (gr.items or []):
-                        bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
-                        if not bid:
-                            continue
-                        t = self.block_text_lookup(str(bid))
-                        if isinstance(t, str) and t.strip():
-                            src = (it.meta or {}).get("retrieval_source")
-                            if src == "evidence":
-                                evidence_texts.append(t.strip())
+                for it in (gr.items or []):
+                    bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                    if not bid:
+                        continue
+                    t = self.block_text_lookup(str(bid))
+                    if isinstance(t, str) and t.strip():
+                        src = (it.meta or {}).get("retrieval_source")
+                        if src == "evidence":
+                            evidence_texts.append(t.strip())
                 evidence = (
                     _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None)
                     if evidence_texts
