@@ -341,6 +341,10 @@ def build_kvbank_from_blocks_jsonl(
                 "list_feature_count": int(list_meta.get("list_feature_count") or 0),
                 "list_features": list_meta.get("list_features") or [],
                 "list_confidence": float(list_meta.get("list_confidence") or 0.0),
+                # Flattened list feature signals/types for downstream ranking/debug.
+                # (Runtime uses these to boost high-precision signals like paren_cases_capture.)
+                "list_signals": list_meta.get("list_signals") if isinstance(list_meta.get("list_signals"), list) else [],
+                "list_type": str(list_meta.get("list_type") or ""),
             }
 
             total_written += 1
