@@ -715,21 +715,45 @@ def _project_list_only(
 
     output_items: List[str] = []
     mapping: List[Dict[str, str]] = []
-    dropped = 0
+    dropped_blocks_no_items = 0
+    dropped_duplicates = 0
+    seen_items: set[str] = set()
+    # Conservative caps to avoid giant lists, but scale with retrieval size (no per-domain hardcoding).
+    per_block_cap = 4
+    total_cap = max(8, int(len(list(retrieval_rank or [])) * 4))
     for bid in retrieval_rank or []:
         items = block_items.get(bid) or []
         if not items:
-            dropped += 1
+            dropped_blocks_no_items += 1
             continue
-        item = items[0]
-        mapping.append({"item_text": item, "source_block_id": bid, "source_span": block_span.get(bid, "")})
-        output_items.append(item)
+        kept_in_block = 0
+        for item in items:
+            it = str(item or "").strip()
+            if not it:
+                continue
+            key = it.lower()
+            if key in seen_items:
+                dropped_duplicates += 1
+                continue
+            seen_items.add(key)
+            mapping.append({"item_text": it, "source_block_id": str(bid), "source_span": block_span.get(str(bid), "")})
+            output_items.append(it)
+            kept_in_block += 1
+            if kept_in_block >= int(per_block_cap):
+                break
+            if len(output_items) >= int(total_cap):
+                break
+        if len(output_items) >= int(total_cap):
+            break
 
     audit = {
         "retrieval_rank": list(retrieval_rank or []),
         "output_order": [m["source_block_id"] for m in mapping],
-        "one_to_one_mapping": True,
-        "dropped_items": int(dropped),
+        "one_to_one_mapping": False,
+        "per_block_cap": int(per_block_cap),
+        "total_cap": int(total_cap),
+        "dropped_blocks_no_items": int(dropped_blocks_no_items),
+        "dropped_duplicates": int(dropped_duplicates),
         "reason": "no_source_span" if any(not m.get("source_span") for m in mapping) else "ok",
     }
     return output_items, mapping, audit
