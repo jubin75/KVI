@@ -157,11 +157,15 @@ def build_kvbank_from_blocks_jsonl(
         has_enum = bool(lf.get("has_bullets") or lf.get("has_enumeration")) or any(
             "bullet" in str(s) or "numbering" in str(s) for s in signals
         )
+        has_location_cue = any("paren_cases" in str(s) for s in signals) or any(
+            str(s).lower().startswith("trigger_phrase:") for s in signals
+        )
         list_confidence = min(
             1.0,
             0.3 * float(list_feature_count)
             + (0.1 if has_symptom_cue else 0.0)
-            + (0.1 if has_enum else 0.0),
+            + (0.1 if has_enum else 0.0)
+            + (0.1 if has_location_cue else 0.0),
         )
         slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
         slot_low = [str(s).lower() for s in slots if str(s).strip()]
@@ -169,6 +173,11 @@ def build_kvbank_from_blocks_jsonl(
             list_type = "symptom"
         elif any("clinical_feature" in s for s in slot_low):
             list_type = "clinical_feature"
+        elif any(
+            ("geographic" in s) or ("distribution" in s) or ("region" in s) or ("location" in s) or ("epidemiolog" in s)
+            for s in slot_low
+        ):
+            list_type = "location"
         else:
             list_type = "other"
         list_features = []
@@ -185,6 +194,8 @@ def build_kvbank_from_blocks_jsonl(
             "list_feature_count": int(list_feature_count),
             "list_features": list_features,
             "list_confidence": float(list_confidence),
+            "list_signals": [str(s) for s in signals if str(s).strip()],
+            "list_type": str(list_type),
         }
 
     def _flush_bank(

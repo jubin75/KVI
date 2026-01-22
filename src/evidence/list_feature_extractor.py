@@ -124,7 +124,12 @@ class EvidenceListFeatureExtractor:
                 merged.update(v)
                 out[k] = merged
             elif isinstance(v, list) and isinstance(out.get(k), list):
-                out[k] = list(out.get(k) or []) + list(v or [])
+                # IMPORTANT: list_feature_rules is primarily about *signals*.
+                # For semantic_type-specific rules we want true override semantics:
+                # - location.yaml can set bullets: [] to DISABLE bullets inherited from generic.yaml
+                # - symptom.yaml can omit bullets to inherit generic bullets (no need to copy)
+                # Therefore: if specific provides a list (even empty), it overrides generic.
+                out[k] = list(v or [])
             else:
                 out[k] = v
         return out

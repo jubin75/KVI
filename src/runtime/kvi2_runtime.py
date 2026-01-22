@@ -791,6 +791,11 @@ def _apply_list_feature_ranking(
     requires_list_like = bool(slot_schema) and any(
         str(spec.inference_level).lower() == "schema" for spec in (slot_schema.slots or {}).values()
     )
+    # For location-like schema slots, list-like should mean *structural location enumerations*,
+    # not generic "key points" bullets.
+    requires_location_list = bool(slot_schema) and any(
+        str(getattr(spec, "semantic_type", "") or "").lower() == "location" for spec in (slot_schema.slots or {}).values()
+    )
     ranked: List[Tuple[float, Any, Dict[str, Any]]] = []
     debug: List[Dict[str, Any]] = []
     for it in items or []:
@@ -802,6 +807,17 @@ def _apply_list_feature_ranking(
         lfc = int(meta.get("list_feature_count") or 0)
         lconf = float(meta.get("list_confidence") or 0.0)
         boost = 1.0 + 0.15 * min(lfc, 3) + 0.20 * lconf if list_like else 1.0
+        # Location-aware shaping (semantic_type-level): prefer paren_cases_capture/paren_cases/trigger_phrase
+        # and demote bullet/numbering noise.
+        signals = meta.get("list_signals") if isinstance(meta.get("list_signals"), list) else []
+        sigs = [str(s) for s in signals if str(s).strip()]
+        if requires_location_list and list_like:
+            if any(s == "paren_cases_capture" or s == "paren_cases" for s in sigs):
+                boost *= 1.25
+            if any(str(s).startswith("trigger_phrase:") for s in sigs):
+                boost *= 1.10
+            if any(s in {"bullet", "numbering"} for s in sigs):
+                boost *= 0.80
         final_score = 0.0 if (requires_list_like and not list_like) else base_score * boost
         dbg = {
             "block_id": bid,
@@ -809,6 +825,7 @@ def _apply_list_feature_ranking(
             "list_like": list_like,
             "list_feature_count": lfc,
             "list_confidence": lconf,
+            "list_signals": sigs,
             "boost": boost,
             "final_score": final_score,
         }
