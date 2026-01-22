@@ -758,6 +758,9 @@ def _enumeration_items_from_sentence(text: str) -> List[str]:
     t2 = re.sub(r"\b(and|or)\b", ",", t2, flags=re.IGNORECASE)
     parts = [p.strip(" .;:,") for p in re.split(r"[;,]", t2) if p and p.strip()]
     items = [p for p in parts if 2 <= len(p) <= 60]
+    # For schema:clinical_features we only want symptom-like items. Reuse the minimal
+    # symptom-aware filter to drop trailing non-symptom clauses like "with a mortality rate...".
+    items = SymptomAwareListFilter._filter_list_items(items)
     return list(dict.fromkeys(items))
 
 
