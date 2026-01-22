@@ -1152,7 +1152,7 @@ class MultiStepInjector:
             top_k=int(top_k),
             min_len_reached=(0 >= int(min_new_tokens)),
             eos_id=eos_id if isinstance(eos_id, int) else None,
-        )
+        ) # [1, V]
         if bool(do_sample):
             probs0 = torch.softmax(logits0, dim=-1)
             next_token = torch.multinomial(probs0, num_samples=1)
