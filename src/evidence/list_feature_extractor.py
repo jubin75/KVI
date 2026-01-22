@@ -43,6 +43,7 @@ class EvidenceListFeatureExtractor:
         bullets = rules.get("signals", {}).get("bullets", []) if isinstance(rules.get("signals"), dict) else []
         numbering_regex = rules.get("signals", {}).get("numbering_regex", []) if isinstance(rules.get("signals"), dict) else []
         trigger_phrases = rules.get("signals", {}).get("trigger_phrases", []) if isinstance(rules.get("signals"), dict) else []
+        paren_cases_regex = rules.get("signals", {}).get("paren_cases_regex") if isinstance(rules.get("signals"), dict) else None
         delimiters = rules.get("split", {}).get("delimiters", []) if isinstance(rules.get("split"), dict) else []
         conf_rules = rules.get("confidence", {}) if isinstance(rules.get("confidence"), dict) else {}
 
@@ -68,6 +69,21 @@ class EvidenceListFeatureExtractor:
                 confidence = max(confidence, float(conf_rules.get("trigger_phrase") or 0.0))
                 frag = self._after_phrase(text, phrase)
                 list_items.extend(self._split_frag(frag, delimiters))
+
+        # Location-style enumerations often appear as "X (70 cases), Y (3 cases), ...".
+        # If configured, extract the *sentence containing* the first "(N cases)" match and split it.
+        if paren_cases_regex:
+            try:
+                rx = re.compile(str(paren_cases_regex), flags=re.IGNORECASE)
+                m = rx.search(text)
+            except Exception:
+                m = None
+            if m is not None:
+                sent = self._sentence_containing(text, m.start())
+                if sent:
+                    signals.append("paren_cases")
+                    confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
+                    list_items.extend(self._split_frag(sent, delimiters))
 
         list_items = list(dict.fromkeys([x for x in list_items if x]))
         return {
@@ -105,6 +121,8 @@ class EvidenceListFeatureExtractor:
         pat = meta.get("pattern") if isinstance(meta.get("pattern"), dict) else {}
         slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
         slots_low = [str(s).lower() for s in slots if str(s).strip()]
+        text = str(block.get("text") or "")
+        text_low = text.lower()
         if any(
             ("geographic" in s)
             or ("distribution" in s)
@@ -114,6 +132,12 @@ class EvidenceListFeatureExtractor:
             or ("epidemiolog" in s)
             for s in slots_low
         ):
+            return "location"
+        # Heuristic fallback (semantic_type-level, not topic-level):
+        # Detect epidemiology-style enumerations even when schema_slots are missing.
+        if re.search(r"\(\s*\d+\s+cases?\s*\)", text_low):
+            return "location"
+        if any(kw in text_low for kw in [" were reported in ", " was reported in ", "reported in ", " distributed in ", "occurred in "]):
             return "location"
         if any("clinical" in s or "symptom" in s for s in slots_low):
             return "symptom"
@@ -149,6 +173,27 @@ class EvidenceListFeatureExtractor:
             if j > 0:
                 frag = frag[:j].strip()
                 break
+        return frag
+
+    @staticmethod
+    def _sentence_containing(text: str, idx: int) -> str:
+        """
+        Return a rough sentence/segment containing character position idx.
+        This is a lightweight heuristic for extracting one enumerative sentence.
+        """
+        if not text:
+            return ""
+        n = len(text)
+        i = max(0, min(int(idx), n - 1))
+        # Sentence boundary chars (both EN/ZH); also treat newlines as hard breaks.
+        seps = set([".", ";", "\n", "。", "；", "!", "！", "?", "？"])
+        l = i
+        while l > 0 and text[l - 1] not in seps:
+            l -= 1
+        r = i
+        while r < n and text[r] not in seps:
+            r += 1
+        frag = text[l:r].strip()
         return frag
 
     @staticmethod

@@ -20,6 +20,8 @@ signals:
     - "发生在"
     - "报告于"
     - "报告在"
+  # Structural cue for epidemiology enumerations like "Cangzhou (70 cases), ..."
+  paren_cases_regex: "\\(\\s*\\d+\\s+cases?\\s*\\)"
 
 split:
   delimiters:
@@ -34,4 +36,5 @@ split:
 
 confidence:
   trigger_phrase: 0.55
+  paren_cases: 0.6
 
