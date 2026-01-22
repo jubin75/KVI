@@ -1,0 +1,37 @@
+semantic_type: location
+
+signals:
+  bullets: []
+  numbering_regex: []
+  # Trigger phrases for location enumerations (generic epidemiology phrasing).
+  trigger_phrases:
+    - "were reported in"
+    - "was reported in"
+    - "reported in"
+    - "were found in"
+    - "was found in"
+    - "found in"
+    - "occurred in"
+    - "occur in"
+    - "distributed in"
+    - "distribution in"
+    - "分布于"
+    - "分布在"
+    - "发生在"
+    - "报告于"
+    - "报告在"
+
+split:
+  delimiters:
+    - ","
+    - ";"
+    - " and "
+    - "、"
+    - "，"
+    - "；"
+    - "及"
+    - "以及"
+
+confidence:
+  trigger_phrase: 0.55
+

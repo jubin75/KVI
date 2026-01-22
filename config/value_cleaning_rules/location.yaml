@@ -13,6 +13,9 @@ normalize:
 
   # Strip tails that are clearly not location names.
   strip_suffixes:
+    # Drop parentheses counts like "Cangzhou (70 cases)".
+    - "\\s*\\(\\s*\\d+\\s+cases?\\s*\\)\\s*$"
+    - "\\s*\\(\\s*n\\s*=\\s*\\d+\\s*\\)\\s*$"
     - "\\s+with\\s+one\\s+case\\s+each\\.?$"
     - "\\s+with\\s+\\d+\\s+cases?\\b.*$"
     - "\\s+\\(with\\s+\\d+\\s+cases?\\)\\b.*$"

@@ -105,6 +105,16 @@ class EvidenceListFeatureExtractor:
         pat = meta.get("pattern") if isinstance(meta.get("pattern"), dict) else {}
         slots = pat.get("schema_slots") if isinstance(pat.get("schema_slots"), list) else []
         slots_low = [str(s).lower() for s in slots if str(s).strip()]
+        if any(
+            ("geographic" in s)
+            or ("distribution" in s)
+            or ("region" in s)
+            or ("location" in s)
+            or ("area" in s)
+            or ("epidemiolog" in s)
+            for s in slots_low
+        ):
+            return "location"
         if any("clinical" in s or "symptom" in s for s in slots_low):
             return "symptom"
         if any("treatment" in s or "drug" in s for s in slots_low):
@@ -132,7 +142,14 @@ class EvidenceListFeatureExtractor:
         idx = text.lower().find(phrase.lower())
         if idx < 0:
             return ""
-        return text[idx + len(phrase) :].strip()
+        frag = text[idx + len(phrase) :].strip()
+        # Stop at the first sentence boundary to avoid pulling unrelated trailing clauses.
+        for sep in [".", ";", "\n", "。", "；", "!", "！", "?", "？"]:
+            j = frag.find(sep)
+            if j > 0:
+                frag = frag[:j].strip()
+                break
+        return frag
 
     @staticmethod
     def _split_frag(frag: str, delimiters: List[str]) -> List[str]:

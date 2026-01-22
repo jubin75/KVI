@@ -52,6 +52,9 @@ def main() -> None:
     p.add_argument("--kv_irrelevant_logit_delta_threshold", type=float, default=0.05)
     p.add_argument("--debug_retrieved_ids", action="store_true")
     p.add_argument("--use_chat_template", action="store_true")
+    # Output controls: baseline is frequently hallucinated; keep it opt-in.
+    p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")
+    p.add_argument("--final_only", action="store_true", help="Print only final_answer (rim_answer) and exit")
     args = p.parse_args()
 
     try:
@@ -86,6 +89,15 @@ def main() -> None:
         block_text_lookup=block_text_lookup,
         sidecar_dir=str(args.sidecar_dir),
     )
+    final_answer = str(out.get("rim_answer", "") or "").strip()
+    out["final_answer"] = final_answer
+    if not bool(args.show_baseline):
+        # Avoid visual pollution: baseline is debug-only unless explicitly requested.
+        if "baseline_answer" in out:
+            del out["baseline_answer"]
+    if bool(args.final_only):
+        print(final_answer)
+        return
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
