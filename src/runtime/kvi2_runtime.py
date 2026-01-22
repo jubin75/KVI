@@ -265,12 +265,32 @@ class KVI2Runtime:
                     semantic_instances=temp_instances,
                 )
                 gate_retry["candidate_schemas"] = candidate_schemas
+                gate_retry["active_contract_ids"] = [str(c.pattern_id) for c in (contracts or [])]
+
+                # Deterministic output for retrieve-only retry:
+                # If the gate selects LIST_ONLY, project list items from semantic_instances instead of generating.
+                rim_answer_retry = ""
+                guard_style_retry = str(gate_retry.get("final_answer_style") or "")
+                if str(guard_style_retry).upper() == "LIST_ONLY":
+                    items, mapping, audit = _project_list_only(
+                        semantic_instances=temp_instances,
+                        retrieval_rank=final_rank,
+                    )
+                    if items:
+                        rim_answer_retry = "\n".join([f"- {m['item_text']}" for m in mapping])
+                    else:
+                        # Must never return empty output on LIST_ONLY.
+                        rim_answer_retry = "现有证据不足以回答该问题。"
+                else:
+                    # No generation is allowed in retrieve-only retry; fail closed with a short refusal.
+                    rim_answer_retry = "现有证据不足以回答该问题。"
+
                 out: Dict[str, Any] = {
                     "baseline_answer": baseline.strip(),
                     "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),
                     "gate": gate_retry,
                     "retrieve_more": False,
-                    "rim_answer": "",
+                    "rim_answer": str(rim_answer_retry or "").strip(),
                     "retrieval": {
                         "kv_dir": str(kv_dir),
                         "top_k": int(self.cfg.top_k),
@@ -287,6 +307,15 @@ class KVI2Runtime:
                         "slot_status_snapshot": dict(slot_status or {}),
                     },
                 }
+                # Attach LIST_ONLY audit when applicable (debug-only, no effect on downstream logic).
+                if str(guard_style_retry).upper() == "LIST_ONLY":
+                    items, mapping, audit = _project_list_only(
+                        semantic_instances=temp_instances,
+                        retrieval_rank=final_rank,
+                    )
+                    out["retrieval"]["list_items_extracted"] = items
+                    out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
+                    out["retrieval"]["list_only_audit"] = audit
                 if any(v == "missing" for v in (slot_status or {}).values()):
                     out["retrieval"]["unconsumed_evidence_blocks"] = find_unconsumed_evidence_blocks(
                         batch, slot_schema

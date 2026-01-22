@@ -161,6 +161,8 @@ def main() -> None:
     p.add_argument("--model", required=True, help="HF model name or local path")
     p.add_argument("--prompt", required=True, help="User question")
     p.add_argument("--use_chat_template", action="store_true", help="Use tokenizer.apply_chat_template if available")
+    # Output controls: baseline is often hallucinated; keep it opt-in to avoid polluting logs.
+    p.add_argument("--show_baseline", action="store_true", help="Print base LLM (no RIM) answer for debugging")
 
     p.add_argument("--kv_dir", default=None, help="Path to KVBank dir (manifest.json etc.)")
     p.add_argument("--topic", default=None, help="Optional topic mode (any string; resolves <topic_work_dir>/<topic>/kvbank_blocks)")
@@ -317,8 +319,9 @@ def main() -> None:
             block_text_lookup=block_text_by_id or None,
             sidecar_dir=str(args.sidecar_dir or "").strip(),
         )
-        print("\n=== 无 RIM（Base LLM）===\n")
-        print(str(out.get("baseline_answer", "")).strip())
+        if bool(getattr(args, "show_baseline", False)):
+            print("\n=== 无 RIM（Base LLM）===\n")
+            print(str(out.get("baseline_answer", "")).strip())
         print("\n=== Pattern-first（non-semantic）===\n")
         print(json.dumps(out.get("pattern_first", {}), ensure_ascii=False, indent=2))
         print("\n=== Introspection Gate ===\n")
