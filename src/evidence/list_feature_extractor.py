@@ -30,7 +30,8 @@ class EvidenceListFeatureExtractor:
         self.rule_dir = str(rule_dir)
 
     def extract(self, block: Dict[str, Any]) -> Dict[str, Any]:
-        text = str(block.get("text") or "")
+        raw_text = str(block.get("text") or "")
+        text = self._normalize_text(raw_text)
         if not text:
             return {
                 "list_features": {
@@ -71,11 +72,14 @@ class EvidenceListFeatureExtractor:
         used_paren_cases_capture = False
         if paren_cases_capture_regex:
             try:
-                rx2 = re.compile(str(paren_cases_capture_regex), flags=re.IGNORECASE)
-                caps = [c.strip() for c in rx2.findall(text) if str(c).strip()]
+                # NOTE: keep this case-sensitive to avoid capturing conjunctions like "and Hengshui".
+                rx2 = re.compile(str(paren_cases_capture_regex))
+                caps = [str(c).strip() for c in rx2.findall(text) if str(c).strip()]
             except Exception:
                 caps = []
             if caps:
+                # Strip leading conjunctions if they sneak in via formatting.
+                caps = [re.sub(r"^(?:and|or)\s+", "", c, flags=re.IGNORECASE).strip() for c in caps]
                 signals.append("paren_cases_capture")
                 confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
                 list_items.extend(caps)
@@ -141,6 +145,11 @@ class EvidenceListFeatureExtractor:
             # Common pollution: truncated single-letter tokens like "H".
             if semantic_type == "location" and re.fullmatch(r"[A-Za-z]", s):
                 continue
+            # If capture regex extracts "... (N cases)" for location, keep only those tokens.
+            # This removes accidental “(N cases)” items about bacteria/fungi when semantic_type=location
+            # is inferred from schema slots / strong location cues.
+            if semantic_type == "location" and used_paren_cases_capture and (not rx_cases.search(s)):
+                continue
             cleaned.append(s)
         list_items = list(dict.fromkeys(cleaned))
         return {
@@ -155,6 +164,21 @@ class EvidenceListFeatureExtractor:
                 "confidence": float(confidence),
             }
         }
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """
+        Normalize PDF/OCR artifacts that break regex captures.
+        - soft hyphen / zero-width chars can split tokens (e.g. "C\u00adangzhou")
+        - NBSP
+        """
+        if not text:
+            return ""
+        # Remove soft hyphen and zero-width characters.
+        text = re.sub(r"[\u00ad\u200b\u200c\u200d\u2060]", "", text)
+        # Normalize NBSP to regular space.
+        text = text.replace("\u00a0", " ")
+        return text
 
     def _load_rules(self, semantic_type: str) -> Dict[str, Any]:
         base = Path(self.rule_dir)
@@ -200,11 +224,41 @@ class EvidenceListFeatureExtractor:
         ):
             return "location"
         # Heuristic fallback (semantic_type-level, not topic-level):
-        # Detect epidemiology-style enumerations even when schema_slots are missing.
-        if re.search(r"\(\s*\d+\s+cases?\s*\)", text_low):
-            return "location"
-        if any(kw in text_low for kw in [" were reported in ", " was reported in ", "reported in ", " distributed in ", "occurred in "]):
-            return "location"
+        # DO NOT treat "(N cases)" alone as location — it also occurs in microbiology/drug resistance contexts.
+        # Require additional geo/admin cues or explicit epidemiology/location phrasing.
+        has_cases = bool(re.search(r"\(\s*\d+\s+cases?\s*\)", text_low))
+        if has_cases:
+            geo_cues_en = [
+                "province",
+                "city",
+                "county",
+                "counties",
+                "prefecture",
+                "district",
+                "region",
+                "areas",
+                "cities",
+                "town",
+                "village",
+            ]
+            geo_cues_zh = ["省", "市", "县", "区", "州", "地区"]
+            epi_phrases = [
+                " were reported in ",
+                " was reported in ",
+                "reported in ",
+                " were found in ",
+                " was found in ",
+                "found in ",
+                "occurred in ",
+                "occur in ",
+                " distributed in ",
+                "distribution in ",
+            ]
+            if any(k in text_low for k in geo_cues_en) or any(k in text for k in geo_cues_zh) or any(p in text_low for p in epi_phrases):
+                return "location"
+        else:
+            if any(kw in text_low for kw in [" were reported in ", " was reported in ", "reported in ", " distributed in ", "occurred in "]):
+                return "location"
         if any("clinical" in s or "symptom" in s for s in slots_low):
             return "symptom"
         if any("treatment" in s or "drug" in s for s in slots_low):
