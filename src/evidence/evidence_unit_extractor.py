@@ -82,6 +82,7 @@ class EvidenceUnitExtractor:
         units: List[Dict[str, Any]] = []
 
         # STEP 1 — sentence-level enumerative (PRIMARY)
+        # Always output sentence-derived units (injectable or not).
         sent_units: List[Dict[str, Any]] = []
         for s in sentences or []:
             sid = str(s.get("sentence_id") or "")
@@ -94,16 +95,16 @@ class EvidenceUnitExtractor:
             else:
                 # still output a non-injectable sentence fragment for traceability
                 sent_units.append(self._unit(block_id, sid, "fragment", stxt, "non_fact", 0.2, ["non_enumerative"]))
-        # keep only the TRUE sentence_enumerative units as "primary wins"
-        primary = [u for u in sent_units if u.get("unit_type") == "sentence_enumerative"]
-        if primary:
-            return primary
+        has_primary = any(u.get("unit_type") == "sentence_enumerative" for u in sent_units)
+        if has_primary:
+            # STEP 2 is skipped if any valid sentence-level enumerative unit exists in block.
+            return sent_units
 
         # STEP 2 — list-like / fragment (SECONDARY, only if no valid sentence-level unit)
         blocking = self._blocking_reasons_for_block(section_type=section_type, text=full_text)
         if blocking:
             # output minimal blocked fragment unit (still traceable)
-            return [self._unit(block_id, None, "fragment", full_text, "non_fact", 0.1, blocking)]
+            return sent_units + [self._unit(block_id, None, "fragment", full_text, "non_fact", 0.1, blocking)]
 
         # Use list_features-derived items if present; otherwise fallback to a single fragment.
         items = self._list_items(list_features)
@@ -116,12 +117,12 @@ class EvidenceUnitExtractor:
                 br = self._blocking_reasons_for_item(itxt, role)
                 conf = 0.65 if role == "enumerative_fact" and not br else 0.25
                 units.append(self._unit(block_id, None, "list_item", itxt, role, conf, br))
-            return units
+            return sent_units + units
 
         # no list items; output a single fragment
         role = "descriptive_fact" if self._looks_factual(full_text) else "non_fact"
         br = ["insufficient_specificity"] if role != "descriptive_fact" else ["non_enumerative"]
-        return [self._unit(block_id, None, "fragment", full_text, role, 0.2, br)]
+        return sent_units + [self._unit(block_id, None, "fragment", full_text, role, 0.2, br)]
 
     # ---------- internals ----------
 

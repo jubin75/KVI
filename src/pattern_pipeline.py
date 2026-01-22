@@ -739,6 +739,28 @@ class SymptomAwareListFilter:
         return list(dict.fromkeys(kept))
 
 
+def _enumeration_items_from_sentence(text: str) -> List[str]:
+    """
+    Extract enumerated tail items from a sentence-like unit.
+    This stays within Evidence Unit traceability: items are derived from unit.text.
+    """
+    t = str(text or "").strip()
+    if not t:
+        return []
+    # strip leading clause
+    t2 = re.sub(
+        r"^.*?\b(with|including|include|present with|characterized by)\b",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    ).strip()
+    # normalize conjunctions
+    t2 = re.sub(r"\b(and|or)\b", ",", t2, flags=re.IGNORECASE)
+    parts = [p.strip(" .;:,") for p in re.split(r"[;,]", t2) if p and p.strip()]
+    items = [p for p in parts if 2 <= len(p) <= 60]
+    return list(dict.fromkeys(items))
+
+
 def _collect_evidence_for_slot(spec: SlotSpec, evidence_blocks: Sequence[Any]) -> List[Any]:
     out: List[Any] = []
     wanted = [str(x).strip().lower() for x in (spec.evidence_type or []) if str(x).strip()]
@@ -786,7 +808,24 @@ def _build_slot_evidence(
                 inj = u.get("injectability") if isinstance(u.get("injectability"), dict) else {}
                 if bool(inj.get("allowed") is True):
                     txt = str(u.get("text") or "").strip()
-                    if txt:
+                    if not txt:
+                        continue
+                    # schema:clinical_features expects symptom-like evidence units
+                    if str(spec.semantic_type or "").lower() == "symptom":
+                        allowed, _, filtered = SymptomAwareListFilter.allow_candidate(
+                            list_features={"is_list_like": True, "signals": ["unit"]},
+                            span_text=txt,
+                            list_items=[txt],
+                        )
+                        if not allowed:
+                            continue
+                        # Prefer enumerated items from sentence_enumerative units; fallback to raw unit text.
+                        unit_type = str(u.get("unit_type") or "")
+                        if unit_type == "sentence_enumerative":
+                            list_items.extend(_enumeration_items_from_sentence(txt) or filtered)
+                        else:
+                            list_items.extend(filtered)
+                    else:
                         list_items.append(txt)
             list_items = list(dict.fromkeys(list_items))
         else:
