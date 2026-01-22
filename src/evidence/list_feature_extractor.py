@@ -32,9 +32,22 @@ class EvidenceListFeatureExtractor:
     def extract(self, block: Dict[str, Any]) -> Dict[str, Any]:
         text = str(block.get("text") or "")
         if not text:
-            return {"list_features": {"is_list_like": False, "list_items": [], "signals": [], "confidence": 0.0}}
+            return {
+                "list_features": {
+                    "is_list_like": False,
+                    "list_items": [],
+                    # canonical field name used by downstream (`blocks_to_kvbank.py`)
+                    "signals": [],
+                    # backward/diagnostic aliases (handy for quick probes on blocks.enriched.jsonl)
+                    "list_signals": [],
+                    "list_type": "other",
+                    "confidence": 0.0,
+                }
+            }
 
         semantic_type = self._infer_semantic_type(block)
+        # Align with KVBank meta conventions: generic -> other; keep semantic types as-is.
+        list_type = semantic_type if semantic_type != "generic" else "other"
         rules = self._load_rules(semantic_type=semantic_type)
         signals: List[str] = []
         list_items: List[str] = []
@@ -74,8 +87,10 @@ class EvidenceListFeatureExtractor:
                 list_items.extend(self._split_frag(frag, delimiters))
 
         # Location-style enumerations often appear as "X (70 cases), Y (3 cases), ...".
-        # If configured, extract the *sentence containing* the first "(N cases)" match and split it.
         # Prefer capture regex when provided (more precise: returns only entity strings).
+        # IMPORTANT: If capture hits, DO NOT also run the looser sentence-splitting path, otherwise
+        # we pollute list_items with years / clauses (e.g., "2022", ".", "with one case each").
+        used_paren_cases_capture = False
         if paren_cases_capture_regex:
             try:
                 rx2 = re.compile(str(paren_cases_capture_regex), flags=re.IGNORECASE)
@@ -86,7 +101,10 @@ class EvidenceListFeatureExtractor:
                 signals.append("paren_cases_capture")
                 confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
                 list_items.extend(caps)
-        if paren_cases_regex:
+                used_paren_cases_capture = True
+        # Only run the looser paren_cases splitter when we don't have a configured capture regex.
+        # (If capture regex is configured but didn't match, it's safer to return empty than to guess.)
+        if (not paren_cases_capture_regex) and (not used_paren_cases_capture) and paren_cases_regex:
             try:
                 rx = re.compile(str(paren_cases_regex), flags=re.IGNORECASE)
                 m = rx.search(text)
@@ -99,12 +117,29 @@ class EvidenceListFeatureExtractor:
                     confidence = max(confidence, float(conf_rules.get("paren_cases") or 0.0))
                     list_items.extend(self._split_frag(sent, delimiters))
 
-        list_items = list(dict.fromkeys([x for x in list_items if x]))
+        # Lightweight de-noising before downstream cleaners kick in.
+        cleaned: List[str] = []
+        for x in list_items:
+            s = str(x).strip()
+            if not s:
+                continue
+            # Drop pure punctuation / separators.
+            if not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", s):
+                continue
+            # Common pollution: a lone year token from loose splitting.
+            if semantic_type == "location" and re.fullmatch(r"\d{4}", s):
+                continue
+            cleaned.append(s)
+        list_items = list(dict.fromkeys(cleaned))
         return {
             "list_features": {
                 "is_list_like": bool(signals),
                 "list_items": list_items,
+                # canonical field name
                 "signals": signals,
+                # aliases for quick debugging on blocks
+                "list_signals": signals,
+                "list_type": str(list_type),
                 "confidence": float(confidence),
             }
         }
