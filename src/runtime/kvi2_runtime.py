@@ -30,6 +30,7 @@ from ..pattern_pipeline import (
     PatternSpec,
     SemanticInstanceBuilder,
     SlotSchema,
+    score_candidate_schemas,
     compute_slot_status_from_instances,
     find_unconsumed_evidence_blocks,
 )
@@ -155,7 +156,12 @@ class KVI2Runtime:
             }
             return out
 
-        # Use best pattern (highest match score)
+        # Candidate schema scoring (docs/079_pattern_roles.md):
+        # Pattern-first proposes candidates; this layer ranks them so low-info schemas (abbr/definition)
+        # cannot hijack high-info queries (time range / spatial / enumeration).
+        candidate_schemas = score_candidate_schemas(user_prompt, matched_patterns)
+        score_by_id = {str(c.get("schema_id")): float(c.get("score") or 0.0) for c in candidate_schemas}
+        matched_patterns = sorted(matched_patterns, key=lambda p: score_by_id.get(str(p.pattern_id), 0.0), reverse=True)
         best_pattern = matched_patterns[0]
         slot_schema = SlotSchema.from_pattern(best_pattern)
         validator = PatternContractValidator()
@@ -205,6 +211,7 @@ class KVI2Runtime:
             question_intent=best_pattern.question_intent,
             semantic_instances=[],
         )
+        gate["candidate_schemas"] = candidate_schemas
         if gate.get("decision") == "REFUSE":
             if gate.get("allow_rim_retry"):
                 # retrieve-only retry (no generation)
@@ -247,6 +254,7 @@ class KVI2Runtime:
                     question_intent=best_pattern.question_intent,
                     semantic_instances=temp_instances,
                 )
+                gate_retry["candidate_schemas"] = candidate_schemas
                 out: Dict[str, Any] = {
                     "baseline_answer": baseline.strip(),
                     "pattern_first": _pattern_to_json(pattern_res, matched_patterns, matched_skeletons),

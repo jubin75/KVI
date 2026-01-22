@@ -287,6 +287,86 @@ class PatternMatcher:
         return result, matched, matched_skeletons
 
 
+def score_candidate_schemas(
+    query: str, patterns: Sequence[PatternSpec]
+) -> List[Dict[str, Any]]:
+    """
+    Candidate Schema Scoring (docs/079_pattern_roles.md).
+
+    Pattern-first only proposes candidates; this layer ranks them using question-structure signals
+    (time range, spatial constraint, enumeration intent, definition intent), not trigger word lists.
+    """
+    q = str(query or "").strip()
+    ql = q.lower()
+
+    has_time = bool(
+        re.search(r"\b(19|20)\d{2}\b", q)
+        and (re.search(r"[-–~—到至]", q) or re.search(r"\bto\b", ql) or "from" in ql)
+    )
+    has_space = bool(
+        re.search(r"(地区|区域|地域|省|市|我国|中国|国内|分布|流行)", q)
+        or re.search(r"\b(geographic|distribution|region|where)\b", ql)
+    )
+    is_enum = bool(re.search(r"(有哪些|哪里|哪些|分布|主要)", q) or re.search(r"\b(which|where)\b", ql))
+    is_def = bool(re.search(r"(是什么|全称|意思)", q) or re.search(r"\b(what is|stand for)\b", ql))
+
+    out: List[Dict[str, Any]] = []
+    for p in patterns or []:
+        pid = str(p.pattern_id or "")
+        kind = _infer_kind(pid, "schema" if pid.startswith("schema:") else ("abbr" if pid.startswith("abbr:") else "other"))
+        slot_names = [str(k).strip().lower() for k in (p.slots or {}).keys() if str(k).strip()]
+        schema_slot = pid.split(":", 1)[1] if pid.startswith("schema:") and ":" in pid else ""
+
+        score = 0.0
+        rationale: List[str] = []
+
+        # Base preference: schema > other > abbr (abbr is low-info auxiliary schema).
+        if kind == "schema":
+            score += 0.6
+            rationale.append("base:schema")
+        elif kind == "abbr":
+            score += 0.15
+            rationale.append("base:abbr_low_info")
+        else:
+            score += 0.3
+            rationale.append("base:other")
+
+        # Definition intent boosts abbr/definition-like; enumeration/time/space penalize abbr.
+        if is_def and kind == "abbr":
+            score += 0.35
+            rationale.append("intent:def_boost_abbr")
+
+        if (has_time or has_space or is_enum) and kind == "abbr":
+            score -= 0.7
+            rationale.append("structure:time/space/enum_penalty_abbr")
+
+        if kind == "schema":
+            if has_time:
+                score += 0.25
+                rationale.append("structure:time_range")
+            if has_space:
+                score += 0.25
+                rationale.append("structure:spatial_constraint")
+            if is_enum:
+                score += 0.15
+                rationale.append("structure:enumerative")
+
+            # Encourage distribution/epi schemas when time/space present (no trigger map; schema_id is the contract id).
+            if schema_slot in {"geographic_distribution", "epidemiology"} and (has_time or has_space):
+                score += 0.2
+                rationale.append("schema:distribution_like")
+
+        # If query mentions any schema slot name literally, boost matching schema patterns.
+        if slot_names and any(sn in ql for sn in slot_names) and kind == "schema":
+            score += 0.2
+            rationale.append("literal_slot_mention")
+
+        out.append({"schema_id": pid, "score": float(score), "rationale": rationale})
+
+    out.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    return out
+
+
 @dataclass
 class SlotSchema:
     """
