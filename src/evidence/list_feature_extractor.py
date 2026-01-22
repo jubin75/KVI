@@ -53,6 +53,8 @@ class EvidenceListFeatureExtractor:
         signals: List[str] = []
         list_items: List[str] = []
         confidence = 0.0
+        # Shared helper regexes for lightweight de-noising.
+        rx_cases = re.compile(r"\(\s*\d+\s+cases?\s*\)", flags=re.IGNORECASE)
 
         bullets = rules.get("signals", {}).get("bullets", []) if isinstance(rules.get("signals"), dict) else []
         numbering_regex = rules.get("signals", {}).get("numbering_regex", []) if isinstance(rules.get("signals"), dict) else []
