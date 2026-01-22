@@ -1,0 +1,41 @@
+semantic_type: location
+
+# Goal: turn sentence-like fragments into clean location entities for LIST_ONLY outputs.
+# Rules are intentionally data-driven; no per-pattern hardcoding in Python.
+
+normalize:
+  # Strip common sentence prefixes that leak into extracted list items.
+  strip_prefixes:
+    - "^(the\\s+imported\\s+cases\\s+were\\s+distributed\\s+in\\s+)"
+    - "^(the\\s+cases\\s+were\\s+distributed\\s+in\\s+)"
+    - "^(imported\\s+cases\\s+were\\s+distributed\\s+in\\s+)"
+    - "^(cases\\s+were\\s+distributed\\s+in\\s+)"
+
+  # Strip tails that are clearly not location names.
+  strip_suffixes:
+    - "\\s+with\\s+one\\s+case\\s+each\\.?$"
+    - "\\s+with\\s+\\d+\\s+cases?\\b.*$"
+    - "\\s+\\(with\\s+\\d+\\s+cases?\\)\\b.*$"
+
+split:
+  # Location lists are usually comma/and separated; avoid generic "with/of" splitting.
+  connectors:
+    - ","
+    - ";"
+    - " and "
+    - "、"
+    - "，"
+    - "；"
+    - "及"
+    - "以及"
+
+filter:
+  # If any of these terms survive normalization, it's probably still a sentence fragment.
+  deny_terms:
+    - "distributed"
+    - "imported"
+    - "cases"
+    - "case "
+    - "one case"
+    - "each"
+

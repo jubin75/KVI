@@ -606,6 +606,16 @@ def _infer_semantic_type_from_slot(slot_name: str) -> str:
         return "symptom"
     if "treatment" in s or "drug" in s:
         return "drug"
+    # Geographic / distribution-like slots should be cleaned as locations (not generic strings).
+    if (
+        "geographic" in s
+        or "distribution" in s
+        or "region" in s
+        or "location" in s
+        or "area" in s
+        or "epidemiolog" in s
+    ):
+        return "location"
     return "generic"
 
 

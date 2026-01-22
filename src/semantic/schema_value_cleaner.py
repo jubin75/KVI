@@ -25,6 +25,41 @@ def _dedup(values: List[str]) -> List[str]:
     return list(dict.fromkeys([v for v in values if v]))
 
 
+def _apply_regex_subs(value: str, subs: List[Dict[str, Any]]) -> str:
+    """
+    Apply regex substitutions described by:
+      - pattern: regex pattern
+      - repl: replacement string (default: "")
+      - flags: optional list of strings (e.g., ["IGNORECASE"])
+    This is intentionally generic and purely rule-driven (no per-slot logic).
+    """
+    import re
+
+    out = str(value)
+    for it in subs or []:
+        if not isinstance(it, dict):
+            continue
+        pat = str(it.get("pattern") or "").strip()
+        if not pat:
+            continue
+        repl = str(it.get("repl") or "")
+        flags_list = it.get("flags") if isinstance(it.get("flags"), list) else []
+        flags = 0
+        for f in flags_list:
+            f2 = str(f or "").upper()
+            if f2 == "IGNORECASE":
+                flags |= re.IGNORECASE
+            elif f2 == "MULTILINE":
+                flags |= re.MULTILINE
+            elif f2 == "DOTALL":
+                flags |= re.DOTALL
+        try:
+            out = re.sub(pat, repl, out, flags=flags)
+        except Exception:
+            continue
+    return out
+
+
 @dataclass
 class SchemaValueCleaner:
     rule_dir: str
@@ -87,14 +122,40 @@ class SchemaValueCleaner:
         normalization_map: Dict[str, str],
     ) -> str:
         norm_rules = rules.get("normalize") if isinstance(rules.get("normalize"), dict) else {}
-        vlow = value.lower()
+        # Optional regex-based normalization (data-driven):
+        # - normalize.regex_subs: list[{pattern,repl,flags}]
+        # - normalize.strip_prefixes: list[regex]
+        # - normalize.strip_suffixes: list[regex]
+        # These help remove sentence-fragments/tails for LIST_ONLY projection without hardcoding slot logic.
+        regex_subs = norm_rules.get("regex_subs") if isinstance(norm_rules.get("regex_subs"), list) else []
+        strip_prefixes = norm_rules.get("strip_prefixes") if isinstance(norm_rules.get("strip_prefixes"), list) else []
+        strip_suffixes = norm_rules.get("strip_suffixes") if isinstance(norm_rules.get("strip_suffixes"), list) else []
+
+        v0 = str(value)
+        if regex_subs:
+            v0 = _apply_regex_subs(v0, regex_subs)
+        if strip_prefixes:
+            prefix_subs = [{"pattern": str(p), "repl": "", "flags": ["IGNORECASE"]} for p in strip_prefixes if str(p).strip()]
+            v0 = _apply_regex_subs(v0, prefix_subs)
+        if strip_suffixes:
+            suffix_subs = [{"pattern": str(p), "repl": "", "flags": ["IGNORECASE"]} for p in strip_suffixes if str(p).strip()]
+            v0 = _apply_regex_subs(v0, suffix_subs)
+        v0 = v0.strip()
+
+        # Exact-match normalization map (canonical/variants)
+        vlow = v0.lower()
         for canonical, variants in norm_rules.items():
+            # Skip meta keys used for regex normalization.
+            if str(canonical) in {"regex_subs", "strip_prefixes", "strip_suffixes"}:
+                continue
             cand = [str(canonical)] + [str(x) for x in (variants or [])]
             for it in cand:
                 if vlow == str(it).lower():
                     normalization_map[value] = str(canonical)
                     return str(canonical)
-        return value
+        if v0 != value:
+            normalization_map[value] = v0
+        return v0
 
     @staticmethod
     def _split_values(
