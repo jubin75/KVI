@@ -281,13 +281,62 @@ def _looks_like_drug(value: str) -> bool:
     if re.search(r"\b(treatment|therapy|therapeutic|approved|approval|fda)\b", vlow):
         return False
 
-    # Allow 1-3 tokens of letters/hyphen/slash (e.g., "favipiravir", "ribavirin", "IFN-alpha").
-    if re.fullmatch(r"[A-Za-z][A-Za-z0-9\-\+/]*(?:\s+[A-Za-z][A-Za-z0-9\-\+/]*){0,2}", v):
-        # Prefer typical drug suffixes but don't require them.
-        if re.search(r"(vir|mab|nib|ciclovir|statin|mycin|pril|sartan)$", vlow):
+    # Discourse / connector tokens that often appear after splitting, not drugs.
+    stop = {
+        "therefore",
+        "however",
+        "currently",
+        "among",
+        "of",
+        "them",
+        "including",
+        "and",
+        "or",
+        "in",
+        "this",
+        "study",
+        "the",
+        "specimens",
+        "oral",
+        "sera",
+    }
+    if vlow in stop:
+        return False
+
+    # Multi-token phrases are almost never drug names; treat them as noise (deletion-only).
+    if " " in v.strip():
+        return False
+
+    # Avoid lab/clinical abnormalities being misclassified as drugs.
+    if re.search(r"(penia|cytopenia)$", vlow):
+        return False
+
+    # IFN-α / IFN-alpha etc. (very common therapeutic reference).
+    if re.fullmatch(r"(ifn|interferon)[\-\s]?(alpha|beta|gamma|λ|lambda)?", vlow):
+        return True
+    if re.fullmatch(r"ifn[\-\s]?(α|β|γ|lambda|λ)", vlow):
+        return True
+
+    # Allow single-token drug-like strings (letters/digits/hyphen/plus/slash) with drug morphology.
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9\-\+/]*", v):
+        # Strong suffix cues.
+        if re.search(
+            r"(vir|mab|nib|ciclovir|statin|mycin|pril|sartan|azole|caine|prazole|dine|dronate)$",
+            vlow,
+        ):
             return True
-        # Still accept shorter single-token proper names (common in papers).
-        return len(v) >= 4
+        # Small allowlist for common antivirals/therapeutics mentioned in papers (not topic-specific).
+        allow = {
+            "ribavirin",
+            "favipiravir",
+            "remdesivir",
+            "oseltamivir",
+            "baloxavir",
+            "acyclovir",
+        }
+        if vlow in allow:
+            return True
+        return False
 
     return False
 
