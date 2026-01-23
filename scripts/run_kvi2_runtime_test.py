@@ -54,9 +54,9 @@ def main() -> None:
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument(
         "--answer_mode",
-        choices=["list_only", "narrative", "llm"],
+        choices=["list_only", "narrative", "llm", "llm_prose"],
         default="list_only",
-        help="How to render LIST_ONLY answers: list_only (deterministic bullets) / narrative (LLM summary constrained to extracted items) / llm (disable LIST_ONLY and force KV-injected generative answer).",
+        help="Answer rendering: list_only / narrative / llm (bypass LIST_ONLY) / llm_prose (bypass LIST_ONLY + force prose, no bullets).",
     )
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
     p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")

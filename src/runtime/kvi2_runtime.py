@@ -59,6 +59,7 @@ class KVI2Config:
     # - "list_only": deterministic bullet list projection (default, safest)
     # - "narrative": run a constrained second-pass LLM summary using extracted items as the only facts
     # - "llm": disable LIST_ONLY projection and force KV-injected generative answering
+    # - "llm_prose": like llm, but forces a prose paragraph (no bullet list) via a style guard
     answer_mode: str = "list_only"
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
@@ -535,7 +536,8 @@ class KVI2Runtime:
         if str(guard_style or "").upper() == "LIST_ONLY":
             # If user explicitly requests LLM narrative answering, bypass LIST_ONLY entirely.
             # This keeps injection behavior intact but trades determinism for fluency.
-            if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "llm":
+            am = str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower()
+            if am in {"llm", "llm_prose"}:
                 guard_style = ""
             else:
                 items, mapping, audit = _project_list_only(
@@ -581,6 +583,9 @@ class KVI2Runtime:
                     out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
                 out["gate"] = dict(chosen_gate_after_validation or {})
                 return out
+        am2 = str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower()
+        if am2 == "llm_prose":
+            guard_style = "PROSE"
         guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
         rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
@@ -648,6 +653,15 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
             "Provide a structural explanation only (no factual assertions, "
             "no specific entity names). If evidence is insufficient, return only: "
             "'现有证据不足以回答该问题。'\n"
+        )
+        return str(prompt) + guard
+    if style == "PROSE":
+        guard = (
+            "\n\n[STYLE_GUARD]\n"
+            "Answer in Chinese prose paragraphs (1–2 short paragraphs). "
+            "DO NOT use bullet lists or numbered lists. "
+            "Be grounded in the injected evidence; do not invent facts. "
+            "If evidence is insufficient, return only: '现有证据不足以回答该问题。'\n"
         )
         return str(prompt) + guard
     return str(prompt)
