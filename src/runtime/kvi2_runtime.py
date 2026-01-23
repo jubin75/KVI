@@ -55,6 +55,10 @@ class KVI2Config:
     structured_answer_template: bool = False
     structured_template_text: str = ""
     debug_retrieved_ids: bool = False
+    # How to render LIST_ONLY answers:
+    # - "list_only": deterministic bullet list projection (default, safest)
+    # - "narrative": run a constrained second-pass LLM summary using extracted items as the only facts
+    answer_mode: str = "list_only"
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
     pattern_soft: Sequence[str] = ()
@@ -277,7 +281,17 @@ class KVI2Runtime:
                         retrieval_rank=final_rank,
                     )
                     if items:
-                        rim_answer_retry = "\n".join([f"- {m['item_text']}" for m in mapping])
+                        if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "narrative":
+                            narrative_prompt = _build_list_only_narrative_prompt(
+                                user_prompt=user_prompt,
+                                items=[m["item_text"] for m in mapping],
+                                max_items=16,
+                            )
+                            # NOTE: retrieve-only retry does not allow generation by design; keep fail-closed.
+                            # Fall back to deterministic list for this branch.
+                            rim_answer_retry = "\n".join([f"- {m['item_text']}" for m in mapping])
+                        else:
+                            rim_answer_retry = "\n".join([f"- {m['item_text']}" for m in mapping])
                     else:
                         # Must never return empty output on LIST_ONLY.
                         rim_answer_retry = "现有证据不足以回答该问题。"
@@ -529,7 +543,27 @@ class KVI2Runtime:
                 out["rim_answer"] = "No list-like evidence found in retrieved sources."
                 out["gate"] = dict(chosen_gate_after_validation or {})
                 return out
-            out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
+            # Optional: narrative rendering (still grounded; items are the only allowed facts).
+            if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "narrative":
+                narrative_prompt = _build_list_only_narrative_prompt(
+                    user_prompt=user_prompt,
+                    items=[m["item_text"] for m in mapping],
+                    max_items=16,
+                )
+                rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompt=narrative_prompt,
+                    device=device,
+                    past_key_values=chosen_pkv,
+                    max_new_tokens=min(256, int(self.cfg.max_new_tokens_rim)),
+                    no_repeat_ngram_size=12,
+                    repetition_penalty=1.08,
+                )
+                # Always include the item list at the end for traceability.
+                out["rim_answer"] = (rim_answer.strip() + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
+            else:
+                out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
             out["gate"] = dict(chosen_gate_after_validation or {})
             return out
         guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
@@ -602,6 +636,28 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
         )
         return str(prompt) + guard
     return str(prompt)
+
+
+def _build_list_only_narrative_prompt(*, user_prompt: str, items: Sequence[str], max_items: int = 16) -> str:
+    """
+    Build a constrained prompt for narrative rendering of LIST_ONLY answers.
+    The model is allowed to write fluent text, but MUST NOT introduce new facts beyond `items`.
+    """
+    it = [str(x).strip() for x in (items or []) if str(x).strip()]
+    it = it[: max(1, int(max_items))]
+    bullet = "\n".join([f"- {x}" for x in it]) if it else ""
+    return (
+        str(user_prompt).strip()
+        + "\n\n[INJECTED_LIST_ITEMS]\n"
+        + bullet
+        + "\n\n[STYLE_GUARD]\n"
+        + "Write a concise clinical summary in Chinese using ONLY the items above as factual content. "
+        + "Do NOT add any new symptoms, mechanisms, locations, drugs, numbers, or approvals not present in the list. "
+        + "If the list is empty, output only: '现有证据不足以回答该问题。'\n"
+        + "Output format:\n"
+        + "1) 1–3 sentences summary.\n"
+        + "2) A bullet list repeating the same items (verbatim).\n"
+    )
 
 
 def _kv_id(it: Any) -> str:

@@ -52,6 +52,12 @@ def main() -> None:
     p.add_argument("--kv_irrelevant_logit_delta_threshold", type=float, default=0.05)
     p.add_argument("--debug_retrieved_ids", action="store_true")
     p.add_argument("--use_chat_template", action="store_true")
+    p.add_argument(
+        "--answer_mode",
+        choices=["list_only", "narrative"],
+        default="list_only",
+        help="How to render LIST_ONLY answers: list_only (deterministic bullets) or narrative (LLM summary constrained to extracted items).",
+    )
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
     p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")
     p.add_argument("--final_only", action="store_true", help="Print only final_answer (rim_answer) and exit")
@@ -76,6 +82,7 @@ def main() -> None:
         kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
         pattern_index_dir=str(args.pattern_index_dir),
         debug_retrieved_ids=bool(args.debug_retrieved_ids),
+        answer_mode=str(args.answer_mode),
     )
     runtime = KVI2Runtime(cfg=cfg, domain_encoder_model=str(args.domain_encoder_model))
 
