@@ -1,0 +1,924 @@
+{
+  "pattern_first": {
+    "recall_size": 6,
+    "debug": {
+      "literal_hits": 4,
+      "structure_hits": 2,
+      "block_hits": 0
+    },
+    "patterns": [
+      {
+        "pattern_id": "abbr:SFTSV",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 是什么",
+            "X 的全称是什么",
+            "What is X",
+            "What does X stand for"
+          ]
+        },
+        "slots": {
+          "abbr": {
+            "name": "abbr",
+            "required": true,
+            "evidence_type": [
+              "abbreviation"
+            ],
+            "min_evidence": 1,
+            "inference_level": "soft",
+            "type": "string",
+            "semantic_type": "generic"
+          },
+          "full_name": {
+            "name": "full_name",
+            "required": false,
+            "evidence_type": [
+              "definition",
+              "abbreviation"
+            ],
+            "min_evidence": 1,
+            "inference_level": "soft",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": ""
+      },
+      {
+        "pattern_id": "schema:clinical_features",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的clinical_features是什么",
+            "X 有哪些clinical_features"
+          ]
+        },
+        "slots": {
+          "clinical_features": {
+            "name": "clinical_features",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "symptom"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些clinical_features"
+      },
+      {
+        "pattern_id": "schema:pathogenesis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的pathogenesis是什么",
+            "X 有哪些pathogenesis"
+          ]
+        },
+        "slots": {
+          "pathogenesis": {
+            "name": "pathogenesis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些pathogenesis"
+      },
+      {
+        "pattern_id": "schema:diagnosis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的diagnosis是什么",
+            "X 有哪些diagnosis"
+          ]
+        },
+        "slots": {
+          "diagnosis": {
+            "name": "diagnosis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些diagnosis"
+      },
+      {
+        "pattern_id": "schema:transmission",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的transmission是什么",
+            "X 有哪些transmission"
+          ]
+        },
+        "slots": {
+          "transmission": {
+            "name": "transmission",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些transmission"
+      },
+      {
+        "pattern_id": "schema:treatment",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的treatment是什么",
+            "X 有哪些treatment"
+          ]
+        },
+        "slots": {
+          "treatment": {
+            "name": "treatment",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "drug"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些treatment"
+      },
+      {
+        "pattern_id": "schema:prevention",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的prevention是什么",
+            "X 有哪些prevention"
+          ]
+        },
+        "slots": {
+          "prevention": {
+            "name": "prevention",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些prevention"
+      },
+      {
+        "pattern_id": "schema:geographic_distribution",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的geographic_distribution是什么",
+            "X 有哪些geographic_distribution"
+          ]
+        },
+        "slots": {
+          "geographic_distribution": {
+            "name": "geographic_distribution",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "location"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些geographic_distribution"
+      },
+      {
+        "pattern_id": "schema:prognosis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的prognosis是什么",
+            "X 有哪些prognosis"
+          ]
+        },
+        "slots": {
+          "prognosis": {
+            "name": "prognosis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些prognosis"
+      },
+      {
+        "pattern_id": "schema:epidemiology",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的epidemiology是什么",
+            "X 有哪些epidemiology"
+          ]
+        },
+        "slots": {
+          "epidemiology": {
+            "name": "epidemiology",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "location"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些epidemiology"
+      },
+      {
+        "pattern_id": "schema:complications",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的complications是什么",
+            "X 有哪些complications"
+          ]
+        },
+        "slots": {
+          "complications": {
+            "name": "complications",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些complications"
+      },
+      {
+        "pattern_id": "schema:disease_full_name",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的disease_full_name是什么",
+            "X 有哪些disease_full_name"
+          ]
+        },
+        "slots": {
+          "disease_full_name": {
+            "name": "disease_full_name",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些disease_full_name"
+      }
+    ]
+  },
+  "gate": {
+    "retrieve_more": true,
+    "reject_current_kv": false,
+    "confidence": 0.7,
+    "rationale": "semantic-shift",
+    "cos_dist": 0.4244472354978239,
+    "tau": 0.35,
+    "pattern_id": "schema:clinical_features",
+    "matched_skeleton": "X 有哪些clinical_features",
+    "matched_intent": "legacy",
+    "slot_status": {
+      "clinical_features": "satisfied"
+    },
+    "hard_rationale": [],
+    "soft_rationale": [],
+    "schema_rationale": [],
+    "decision": "ALLOW",
+    "decision_reason": "schema-slot-satisfied; limit-style",
+    "allowed_answer_capabilities": [
+      "EXPLANATION",
+      "LIST_ONLY"
+    ],
+    "final_answer_style": "LIST_ONLY",
+    "slot_schema": {
+      "clinical_features": {
+        "name": "clinical_features",
+        "required": false,
+        "evidence_type": [
+          "schema"
+        ],
+        "min_evidence": 1,
+        "inference_level": "schema",
+        "type": "string",
+        "semantic_type": "symptom"
+      }
+    },
+    "candidate_schemas": [
+      {
+        "schema_id": "schema:clinical_features",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:pathogenesis",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:diagnosis",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:transmission",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:treatment",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:prevention",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:geographic_distribution",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:prognosis",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:epidemiology",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:complications",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:disease_full_name",
+        "score": 0.75,
+        "rationale": [
+          "base:schema",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "abbr:SFTSV",
+        "score": -0.5499999999999999,
+        "rationale": [
+          "base:abbr_low_info",
+          "structure:time/space/enum_penalty_abbr"
+        ]
+      }
+    ],
+    "active_contract_ids": []
+  },
+  "retrieve_more": false,
+  "rim_answer": "- reported in China,\n- known to affect at least 23 provinces\n- China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,\n- Myanmar,3–6\n- laboratory parameters for SFTS diagnosis or prognostic factors in cats.\n- fever\n- thrombocytopenia\n- gastrointestinal symptoms\n- neurological symptoms",
+  "retrieval": {
+    "kv_dir": "/home/jb/topics/SFTSV/work/kvbank_blocks",
+    "top_k": 8,
+    "oversample_top_k": 24,
+    "retriever_debug": {
+      "top_k": 24,
+      "shards": 6,
+      "per_shard_top_k": 24,
+      "candidates": 144,
+      "size": 5325,
+      "dim": 384,
+      "shard_debug": [
+        {
+          "shard": 0,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00000",
+          "top_k": 24,
+          "k_searched": 120,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 1,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00001",
+          "top_k": 24,
+          "k_searched": 120,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 2,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00002",
+          "top_k": 24,
+          "k_searched": 120,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 3,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00003",
+          "top_k": 24,
+          "k_searched": 120,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 4,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00004",
+          "top_k": 24,
+          "k_searched": 120,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        }
+      ]
+    },
+    "rim_retry": true,
+    "list_rank_debug": [
+      {
+        "block_id": "10.3892_ijmm.2025.5610_chunk0_t0-4096_t960-1216",
+        "base_score": 0.4586499333381653,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+        "base_score": 0.4279366135597229,
+        "list_like": true,
+        "list_feature_count": 2,
+        "list_confidence": 0.7999999999999999,
+        "list_signals": [
+          "numbering"
+        ],
+        "boost": 1.46,
+        "final_score": 0.6247874557971954
+      },
+      {
+        "block_id": "10.1371_journal.pntd.0011654_chunk0_t0-4096_t2688-2944",
+        "base_score": 0.427345335483551,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1371_journal.pntd.0011654_chunk0_t0-4096_t2496-2752",
+        "base_score": 0.42619386315345764,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1186_s12985-025-02665-2_chunk1_t3840-5432_t576-832",
+        "base_score": 0.4212910234928131,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+        "base_score": 0.413180410861969,
+        "list_like": true,
+        "list_feature_count": 1,
+        "list_confidence": 0.4,
+        "list_signals": [
+          "bullet"
+        ],
+        "boost": 1.23,
+        "final_score": 0.5082119053602219
+      },
+      {
+        "block_id": "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "base_score": 0.4123242497444153,
+        "list_like": true,
+        "list_feature_count": 2,
+        "list_confidence": 0.7999999999999999,
+        "list_signals": [
+          "trigger_phrase:reported in"
+        ],
+        "boost": 1.46,
+        "final_score": 0.6019934046268463
+      },
+      {
+        "block_id": "10.1007_s00253-025-13436-y_chunk0_t0-4096_t576-832",
+        "base_score": 0.4113764762878418,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      }
+    ],
+    "final_rank": [
+      "10.3390_v15122403_chunk0_t0-3872_t3264-3520",
+      "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.1007_s44231-023-00035-6_chunk0_t0-4096_t1728-1984",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+      "10.1186_s12985-025-02772-0_chunk0_t0-4096_t3648-3904",
+      "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+    ],
+    "list_like_candidate_count": 9,
+    "list_like_candidate_ids": [
+      "10.3390_v15122403_chunk0_t0-3872_t3264-3520",
+      "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.1007_s44231-023-00035-6_chunk0_t0-4096_t1728-1984",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+      "10.1186_s12985-025-02772-0_chunk0_t0-4096_t3648-3904",
+      "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+    ],
+    "contract_validation": {
+      "fulfilled": true,
+      "score": 1.0,
+      "violations": [],
+      "results": [],
+      "hard_missing": [],
+      "soft_missing": [],
+      "schema_missing": [],
+      "hard_fulfilled": true,
+      "soft_fulfilled": true
+    },
+    "semantic_instances": [
+      {
+        "pattern_id": "schema:clinical_features",
+        "slots": {
+          "clinical_features": [
+            {
+              "evidence_id": "10.3390_v15122403_chunk0_t0-3872_t3264-3520",
+              "source": "10.3390_v15122403",
+              "span": "SV in Thailand.\nAt least three human cases have already been reported in Thailand and many dogs in Thailand possessed anti-SFTSV antibodies, indicating that SFTSV has already spread in Thailand and more human cases will occur in the future, similar to in other Asian countries [5–11]. Furthermore, Thailand people, especially veterinarians, should keep in mind that SFTSV can directly transmit from SFTS dogs to their owners or veterinarians without tick-bites . In addition, all seven cats owned by the first reported SFTS patient in Thailand died in over a week , indicating the possibility that direct transmission of SFTSV occurred from the cats to the patient. To assist with prevention of SFTSV infection in Thailand, it is necessary to conduct further surveillance of SFTSV infection in animals.\nSupplementary Materials: The following supporting information can be downloaded at: https:\n//www.mdpi.com/article/10.3390/v15122403/s1, Figure S1: Map of the provinces in which dog serum samples were collected in this study.\nAuthor Contributions: Collection of samples, T.P., N.N., P.P., B.K., T.C., J.S., A.K., N.P., S.J",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+              "source": "10.1371_journal.pntd.0012024",
+              "span": " PCR assay is the preferred choice for detecting the nucleic acid of viruses due to its high accuracy, faster testing time and lower cost.\nIt was also found that there was only one commercially available kit for testing target nucleic acids of SFTSV. Therefore, in order to quickly diagnose these zoonotic diseases caused by SFGR, SFTSV and HTNV in central China, we established a rapid, convenient and accurate all-in-one real-time PCR assay following the evaluation of clinical performances.\n2. Materials and methods 2.1 Ethics statement All samples were collected as part of public health diagnostic activities for SF, SFTS,and HFRS were pre-existing relative to the start of the study, and were examined as anonymous samples.\nIn accordance with the medical research regulations in China, the research scheme was authorized by the medical Ethics Committee of Zhongnan Hospital of Wuhan University (No.\n2023052K).\n2.2 Serum or nucleic acid samples A total of 321 serum or nucleic acid samples were collected in the present study. Of them, 17 SFGR DNA-positive nucleic acid samples were obtained from Beijing Center for Disease Control and Prevention (CDC) (n = 9) and State Key Laboratory",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+              "source": "10.2147_JIR.S444398",
+              "span": " reported in China, and known to affect at least 23 provinces of China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam, and Myanmar,3–6 and has once been included in the World Health Organization’s (WHO) List of Blueprint priority diseases.7 The causative pathogen of the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne, and occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations of high temperature, a decrease in platelet count, reduced white blood cell count,1 and sometimes can lead to the rapid development of multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks.\nJournal of Inflammation Research 2024:17 211–222 211 © 2024 Xu et al. This work is published and licensed by Dove Medical Press Limited. The full terms of this license are available at https://www.dovepress.com/terms.php and incorporate the Creative Commons Attribution – Non Commercial (unported, v3.0) License (http://creativecommons.org/licenses",
+              "list_items": [
+                "reported in China, and known to affect at least 23 provinces of China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam, and Myanmar,3–6 and has once been included in the World Health Organization’s (WHO) List of Blueprint priority diseases.7 The causative pathogen of the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne, and occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations of high temperature, a decrease in platelet count, reduced white blood cell count,1 and sometimes can lead to the rapid development of multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks."
+              ]
+            },
+            {
+              "evidence_id": "10.1007_s44231-023-00035-6_chunk0_t0-4096_t1728-1984",
+              "source": "10.1007_s44231-023-00035-6",
+              "span": "SV strain can be divided into 6 genotypes, which are called genotypes A to F . The prevalence of SFTSV genotypes is also different in different countries. Recently, Yun et al. have proved in the laboratory that genotype B can be further subdivided into three different gene subtypes, Bmuri 1, Bmai 2 and Bmi 3 . There are at least 9 different recombinant genes in Korea and 7 SFTSV recombinant genes reported in China, which indicates that the SFTSV virus strain is undergoing continuous evolution in nature . Reported SFTS case fatality rates vary widely in affected countries in East Asia, which is estimated to be related to different genotypes of human infection. At present, it is reported that the high mortality rates in Japan and South Korea are 27% and 23.3% respectively. By contrast, the mortality rate of SFTSV in China is about 10–30% . Some virologists further subdivided the most popular genotypes in Japan and Korea as Bmur2,\n\n175 Intensive Care Research (2023) 3:172–181 1 3 with an incidence",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+              "source": "10.1186_s12985-023-02155-3",
+              "span": "-to-person transmission of SFTSV A case-control study of the 49 close contacts of the Index patient was conducted to explore the factors contributing to person-to-person transmission of SFTSV. Three STFS cases were compared to 46 uninfected controls (Table 3).\nNo risk factors were found to be associated with SFTS.\nA second case-control analysis compared 8 IgM-posi tive cases and 41 IgM-negative controls (Table 4). No risk factors were found to be related to SFTS upon univari ate analysis (Table 4), but analysis by χ2 test showed that cases were more likely to be exposed to poor ventilation where the corpse was stored (χ2 = 5.49, P = 0.019) and to be in contact with the Index patient’s contaminated items (χ2 = 15.77, P < 0.001) (Table 4).\n\nPage 6 of 7 Liu et al. Virology Journal (2023) 20:199 Discussion SFTS is a common infectious disease that is transmit ted primarily by",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.1186_s12985-025-02772-0_chunk0_t0-4096_t3648-3904",
+              "source": "10.1186_s12985-025-02772-0",
+              "span": "0), respectively. The consistency of the developed assay with PCR was 89.13% (41/46) (Table 2).\nThese results suggest that the developed detection reac tion presented specific specificity for SFTSV and did not cross-react with other RNA samples.\nDiscussion SFTS, which is induced by SFTSV, is among the top ten priority infectious diseases that demand immediate med ical intervention. Despite the critical need for treatment, no effective therapeutic agents have been reported thus far . As a novel member of the Bunyaviridae family, SFTSV has high pathogenicity, accompanied by a mor tality rate of approximately 30%. This situation poses a profound threat to human health in the daily lives of individuals . In China, the nationwide average annual fatality rate of SFTS is 5.2%, and a total of 13,824 cases were documented between 2010 and 2019 . There fore, the available method for diagnosing SFTSV has been critical for collecting information for prospective prevention and control strategies for policymakers.\nThe traditional methods for SFTSV diagnosis include ELISA and quantitative real-time RT‒PCR .\nAlthough these methods offer outstanding sensitivity",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+              "source": "10.3390_v16060874",
+              "span": " data). However, currently, no detailed information is available on the clinical manifestations and laboratory parameters for SFTS diagnosis or prognostic factors in cats. Veterinarians and cat owners sometimes have difficulty in confirming the diagnosis in cases of suspected SFTS in cats, and our laboratory has received numerous requests for laboratory confirmation of the diagnosis. Therefore, in this study, we aimed to identify biomarkers for SFTS diagnosis and clinical outcomes using samples from cats with suspected SFTS provided by several veterinary hospitals in Nagasaki Prefecture. This study identified biomarkers for SFTSV infection, contributing to the protection of owners, surrounding persons, veterinarians, and healthcare professionals from the risk of SFTSV infection in cats.\n2. Materials and Methods 2.1. Cat Specimens We obtained serum and swab specimens from 221 cats with suspected SFTS from animal hospitals in Nagasaki Prefecture between March 2018 and January 2024. Among them, the necessary information was not available in 34 cases; therefore, the analysis included 187 cases that were sampled within 7 days from onset of clinical signs and were identified as SFTSV-positive or -negative. The specimens, including sera, oral",
+              "list_items": [
+                "However, currently, no detailed information is available on the clinical manifestations and laboratory parameters for SFTS diagnosis or prognostic factors in cats."
+              ]
+            },
+            {
+              "evidence_id": "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+              "source": "10.1007_s00253-025-13530-1",
+              "span": ". 2019;\nWin et al. 2020; Zohaib et al. 2020). In the USA, an infection with heartland virus, which is similar to SFTSV, has been reported (McMullan et al. 2012). The term “SFTSV” is more widely mentioned in the research community to refer to the virus, despite its recent renaming as Bandavirus dabieense by the International Committee on Taxonomy of Viruses in 2022 (International Committee on Taxonomy of Viruses 2022). SFTS has some major clinical manifestations, including fever, thrombocytopenia, leukocytopenia, gastrointestinal symptoms, neurological symptoms, and bleeding tendency, with a mortality rate of up to 30% (Cao et al. 2021;\nCasel et al. 2021; Li et al. 2021; Zhang et al. 2013). It is transmitted by a primary host vector such as ticks and can subsequently infect various animals and humans (Luo et al.\n2015). In addition,",
+              "list_items": [
+                "fever",
+                "thrombocytopenia",
+                "gastrointestinal symptoms",
+                "neurological symptoms",
+                "bleeding tendency"
+              ]
+            }
+          ]
+        },
+        "value_cleaning": {
+          "clinical_features": {
+            "cleaned_values": [
+              "reported in China,",
+              "known to affect at least 23 provinces",
+              "China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,",
+              "Myanmar,3–6",
+              "has once been included in the World Health Organization’s (WHO) List",
+              "Blueprint priority diseases.7 The causative pathogen",
+              "the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne,",
+              "occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations",
+              "high temperature, a decrease in platelet count, reduced white blood cell count,1",
+              "sometimes can lead to the rapid development",
+              "multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks.",
+              "laboratory parameters for SFTS diagnosis or prognostic factors in cats.",
+              "fever",
+              "thrombocytopenia",
+              "gastrointestinal symptoms",
+              "neurological symptoms",
+              "bleeding tendency"
+            ],
+            "removed_values": [
+              "However, currently, no detailed information is available on the clinical manifestations"
+            ],
+            "normalization_map": {
+              "thrombocytopenia": "thrombocytopenia"
+            },
+            "split_map": {
+              "reported in China, and known to affect at least 23 provinces of China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam, and Myanmar,3–6 and has once been included in the World Health Organization’s (WHO) List of Blueprint priority diseases.7 The causative pathogen of the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne, and occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations of high temperature, a decrease in platelet count, reduced white blood cell count,1 and sometimes can lead to the rapid development of multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks.": [
+                "reported in China,",
+                "known to affect at least 23 provinces",
+                "China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,",
+                "Myanmar,3–6",
+                "has once been included in the World Health Organization’s (WHO) List",
+                "Blueprint priority diseases.7 The causative pathogen",
+                "the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne,",
+                "occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations",
+                "high temperature, a decrease in platelet count, reduced white blood cell count,1",
+                "sometimes can lead to the rapid development",
+                "multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks."
+              ],
+              "However, currently, no detailed information is available on the clinical manifestations and laboratory parameters for SFTS diagnosis or prognostic factors in cats.": [
+                "However, currently, no detailed information is available on the clinical manifestations",
+                "laboratory parameters for SFTS diagnosis or prognostic factors in cats."
+              ]
+            },
+            "debug": {
+              "semantic_type": "symptom",
+              "evidence_ids": [
+                "10.3390_v15122403_chunk0_t0-3872_t3264-3520",
+                "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+                "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+                "10.1007_s44231-023-00035-6_chunk0_t0-4096_t1728-1984",
+                "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+                "10.1186_s12985-025-02772-0_chunk0_t0-4096_t3648-3904",
+                "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+                "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+              ]
+            }
+          }
+        },
+        "value_cleaning_by_block": {
+          "clinical_features": {
+            "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216": {
+              "cleaned_values": [
+                "reported in China,",
+                "known to affect at least 23 provinces",
+                "China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,",
+                "Myanmar,3–6",
+                "has once been included in the World Health Organization’s (WHO) List",
+                "Blueprint priority diseases.7 The causative pathogen",
+                "the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne,",
+                "occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations",
+                "high temperature, a decrease in platelet count, reduced white blood cell count,1",
+                "sometimes can lead to the rapid development",
+                "multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "reported in China, and known to affect at least 23 provinces of China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam, and Myanmar,3–6 and has once been included in the World Health Organization’s (WHO) List of Blueprint priority diseases.7 The causative pathogen of the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne, and occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations of high temperature, a decrease in platelet count, reduced white blood cell count,1 and sometimes can lead to the rapid development of multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks.": [
+                  "reported in China,",
+                  "known to affect at least 23 provinces",
+                  "China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,",
+                  "Myanmar,3–6",
+                  "has once been included in the World Health Organization’s (WHO) List",
+                  "Blueprint priority diseases.7 The causative pathogen",
+                  "the disease is Dabie bandavirus, formerly referred to as SFTS virus (SFTSV), which is usually tick-borne,",
+                  "occasionally transmitted between individuals through oral or ocular mucous membrane contact.8 SFTS commonly have clinical manifestations",
+                  "high temperature, a decrease in platelet count, reduced white blood cell count,1",
+                  "sometimes can lead to the rapid development",
+                  "multiple organ dysfunction syndrome (MODS) ultimately resulting in death within two weeks."
+                ]
+              },
+              "debug": {
+                "semantic_type": "symptom",
+                "evidence_ids": [
+                  "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216"
+                ]
+              }
+            },
+            "10.3390_v16060874_chunk0_t0-4096_t1536-1792": {
+              "cleaned_values": [
+                "laboratory parameters for SFTS diagnosis or prognostic factors in cats."
+              ],
+              "removed_values": [
+                "However, currently, no detailed information is available on the clinical manifestations"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "However, currently, no detailed information is available on the clinical manifestations and laboratory parameters for SFTS diagnosis or prognostic factors in cats.": [
+                  "However, currently, no detailed information is available on the clinical manifestations",
+                  "laboratory parameters for SFTS diagnosis or prognostic factors in cats."
+                ]
+              },
+              "debug": {
+                "semantic_type": "symptom",
+                "evidence_ids": [
+                  "10.3390_v16060874_chunk0_t0-4096_t1536-1792"
+                ]
+              }
+            },
+            "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024": {
+              "cleaned_values": [
+                "fever",
+                "thrombocytopenia",
+                "gastrointestinal symptoms",
+                "neurological symptoms",
+                "bleeding tendency"
+              ],
+              "removed_values": [],
+              "normalization_map": {
+                "thrombocytopenia": "thrombocytopenia"
+              },
+              "split_map": {},
+              "debug": {
+                "semantic_type": "symptom",
+                "evidence_ids": [
+                  "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+                ]
+              }
+            }
+          }
+        },
+        "filtered_out_non_symptom_lists": []
+      }
+    ],
+    "slot_status_source": "semantic_instances",
+    "slot_status_snapshot": {
+      "clinical_features": "satisfied"
+    },
+    "list_items_extracted": [
+      "reported in China,",
+      "known to affect at least 23 provinces",
+      "China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,",
+      "Myanmar,3–6",
+      "laboratory parameters for SFTS diagnosis or prognostic factors in cats.",
+      "fever",
+      "thrombocytopenia",
+      "gastrointestinal symptoms",
+      "neurological symptoms"
+    ],
+    "list_items_source_block_ids": [
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+      "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+      "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+    ],
+    "list_only_audit": {
+      "retrieval_rank": [
+        "10.3390_v15122403_chunk0_t0-3872_t3264-3520",
+        "10.1371_journal.pntd.0012024_chunk0_t0-4096_t2304-2560",
+        "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "10.1007_s44231-023-00035-6_chunk0_t0-4096_t1728-1984",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t192-448",
+        "10.1186_s12985-025-02772-0_chunk0_t0-4096_t3648-3904",
+        "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+        "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640"
+      ],
+      "output_order": [
+        "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "10.2147_JIR.S444398_chunk0_t0-4096_t960-1216",
+        "10.3390_v16060874_chunk0_t0-4096_t1536-1792",
+        "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+        "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+        "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024",
+        "10.1007_s00253-025-13530-1_chunk0_t0-4096_t768-1024"
+      ],
+      "one_to_one_mapping": false,
+      "per_block_cap": 4,
+      "total_cap": 36,
+      "dropped_blocks_no_items": 6,
+      "dropped_duplicates": 0,
+      "reason": "ok"
+    }
+  },
+  "final_answer": "- reported in China,\n- known to affect at least 23 provinces\n- China.2 SFTS has also been reported in several other countries, including Korea, Japan, Vietnam,\n- Myanmar,3–6\n- laboratory parameters for SFTS diagnosis or prognostic factors in cats.\n- fever\n- thrombocytopenia\n- gastrointestinal symptoms\n- neurological symptoms"
+}

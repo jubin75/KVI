@@ -309,6 +309,13 @@ def score_candidate_schemas(
     )
     is_enum = bool(re.search(r"(有哪些|哪里|哪些|分布|主要)", q) or re.search(r"\b(which|where)\b", ql))
     is_def = bool(re.search(r"(是什么|全称|意思)", q) or re.search(r"\b(what is|stand for)\b", ql))
+    # Intent cues for high-information schema selection (non-topic-specific).
+    # These are used ONLY to break ties among schema candidates to prevent "enumerative" questions
+    # from defaulting to unrelated schemas.
+    has_drug_intent = bool(
+        re.search(r"(药物|用药|治疗|疗法|用什么药|获批|批准|适应症)", q)
+        or re.search(r"\b(drug|treat|therapy|therapeutic|approved|approval|fda)\b", ql)
+    )
 
     out: List[Dict[str, Any]] = []
     for p in patterns or []:
@@ -350,6 +357,15 @@ def score_candidate_schemas(
             if is_enum:
                 score += 0.15
                 rationale.append("structure:enumerative")
+
+            # Drug/treatment intent: strongly favor schema:treatment (semantic_type=drug) over other schemas.
+            if has_drug_intent:
+                if schema_slot in {"treatment"}:
+                    score += 0.45
+                    rationale.append("intent:drug_treatment")
+                elif schema_slot in {"clinical_features", "geographic_distribution", "epidemiology"}:
+                    score -= 0.15
+                    rationale.append("intent:drug_demote_non_treatment")
 
             # Encourage distribution/epi schemas when time/space present (no trigger map; schema_id is the contract id).
             if schema_slot in {"geographic_distribution", "epidemiology"} and (has_time or has_space):
@@ -1027,17 +1043,47 @@ def compute_slot_status_from_instances(
     if slot_schema is None:
         return status
     slots_payload: Dict[str, List[Dict[str, Any]]] = {}
+    value_cleaning_by_block: Dict[str, Dict[str, Any]] = {}
     for inst in semantic_instances or []:
-        if isinstance(inst, dict) and isinstance(inst.get("slots"), dict):
+        if not isinstance(inst, dict):
+            continue
+        if isinstance(inst.get("slots"), dict):
             for k, v in inst["slots"].items():
                 if isinstance(v, list):
                     slots_payload.setdefault(str(k), []).extend(v)
+        # Prefer value-cleaning results to judge whether a schema slot is substantively fillable.
+        if isinstance(inst.get("value_cleaning_by_block"), dict):
+            for k, v in inst["value_cleaning_by_block"].items():
+                if isinstance(v, dict):
+                    value_cleaning_by_block.setdefault(str(k), {}).update(v)
     for name, spec in (slot_schema.slots or {}).items():
         items = slots_payload.get(name, []) if isinstance(slots_payload.get(name), list) else []
-        if len(items) >= int(spec.min_evidence):
-            status[name] = "satisfied"
+        min_ev = int(spec.min_evidence)
+        if str(spec.inference_level).lower() == "schema":
+            # For schema-level slots, consider the slot satisfied only if cleaned values exist.
+            # This prevents "wrong evidence -> wrong extraction -> cleaner formats noise -> slot satisfied"
+            # from promoting LIST_ONLY on unrelated content.
+            by_block = value_cleaning_by_block.get(name) if isinstance(value_cleaning_by_block.get(name), dict) else {}
+            cleaned_blocks = 0
+            cleaned_total = 0
+            removed_total = 0
+            for payload in (by_block or {}).values():
+                if not isinstance(payload, dict):
+                    continue
+                cv = payload.get("cleaned_values") if isinstance(payload.get("cleaned_values"), list) else []
+                rv = payload.get("removed_values") if isinstance(payload.get("removed_values"), list) else []
+                c = len([x for x in cv if str(x).strip()])
+                r = len([x for x in rv if str(x).strip()])
+                cleaned_total += c
+                removed_total += r
+                if c > 0:
+                    cleaned_blocks += 1
+            # Fail-closed: if cleaning removes most values or nothing remains, treat as missing.
+            denom = max(1, cleaned_total + removed_total)
+            keep_ratio = float(cleaned_total) / float(denom)
+            status[name] = "satisfied" if (cleaned_blocks >= max(1, min_ev) and keep_ratio >= 0.34) else "missing"
         else:
-            status[name] = "missing"
+            status[name] = "satisfied" if len(items) >= min_ev else "missing"
     return status
 
 

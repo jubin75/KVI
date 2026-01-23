@@ -173,6 +173,125 @@ def _looks_like_location(value: str) -> bool:
     return False
 
 
+def _looks_like_symptom(value: str) -> bool:
+    """
+    Conservative semantic_type=symptom guardrail (deletion-only).
+
+    We do NOT use any external medical dictionary. We only filter out obvious non-symptom
+    fragments (locations, methods, taxonomy, discourse tails) and keep short symptom-like tokens.
+    """
+    import re
+
+    v = str(value or "").strip()
+    if not v:
+        return False
+    if len(v) > 80:
+        return False
+
+    vlow = v.lower()
+
+    # Obvious non-symptom artifacts / discourse.
+    if any(x in vlow for x in ["http", "www", "doi", "figure", "table", "supplementary", "copyright"]):
+        return False
+    if re.search(r"\d", v) and "covid" not in vlow:
+        # most symptom tokens shouldn't carry digits (avoid years, case counts, p-values)
+        return False
+    if any(ch in v for ch in [":", ";"]):
+        return False
+    if re.search(r"\b(p\s*<|p\s*=|ci\b|confidence interval)\b", vlow):
+        return False
+
+    # Strong location cues -> not a symptom.
+    if re.search(r"(reported in|distributed in|found in|occurred in)\b", vlow):
+        return False
+    if re.search(r"(地区|区域|地域|省|市|我国|中国|国内|分布|流行)", v):
+        return False
+    if re.search(r"\b(province|city|county|district|state|region|prefecture)\b", vlow):
+        return False
+
+    # Taxonomy / biology / methods noise.
+    if re.search(r"\b(genotype|lineage|clade|family|phenuiviridae|bunyaviridae|nairoviridae)\b", vlow):
+        return False
+    if re.search(r"\b(pcr|elisa|assay|kit|diagnos|specimen|samples?)\b", vlow):
+        return False
+
+    # Keep common symptom morphology / minimal cue list (very small).
+    symptom_cues = [
+        "fever",
+        "thrombocytopenia",
+        "leukocytopenia",
+        "bleeding",
+        "hemorrhag",
+        "vomit",
+        "diarrhea",
+        "fatigue",
+        "headache",
+        "nausea",
+        "rash",
+        "pain",
+        "myalgia",
+        "cough",
+        "dyspnea",
+        "neurolog",
+        "gastro",
+        "thrombo",
+        "leuko",
+    ]
+    if any(c in vlow for c in symptom_cues):
+        return True
+
+    # Generic symptom suffix patterns (still conservative).
+    if re.search(r"(itis|emia|osis|algia|uria|pathy|pnea|rrhea)$", vlow):
+        return True
+
+    # If it's a short phrase without verbs/punctuation, accept.
+    if len(v.split()) <= 4 and not re.search(r"\b(is|are|was|were|be|been|being|have|has|had)\b", vlow):
+        return True
+
+    return False
+
+
+def _looks_like_drug(value: str) -> bool:
+    """
+    Conservative semantic_type=drug guardrail (deletion-only).
+
+    Keep plausible drug names; drop locations/symptoms/sentence fragments.
+    """
+    import re
+
+    v = str(value or "").strip()
+    if not v:
+        return False
+    if len(v) > 64:
+        return False
+
+    vlow = v.lower()
+    if any(x in vlow for x in ["http", "www", "doi", "figure", "table", "supplementary"]):
+        return False
+    if any(ch in v for ch in [":", ";", "。", "，"]):
+        return False
+    if re.search(r"\b(reported in|distributed in|province|city|county|region)\b", vlow):
+        return False
+    if re.search(r"(地区|省|市|我国|中国|分布)", v):
+        return False
+    # Avoid symptom words in drug slot.
+    if any(x in vlow for x in ["fever", "symptom", "thrombocytopenia", "bleeding", "diarrhea", "vomit"]):
+        return False
+    # Avoid generic therapy phrases.
+    if re.search(r"\b(treatment|therapy|therapeutic|approved|approval|fda)\b", vlow):
+        return False
+
+    # Allow 1-3 tokens of letters/hyphen/slash (e.g., "favipiravir", "ribavirin", "IFN-alpha").
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9\-\+/]*(?:\s+[A-Za-z][A-Za-z0-9\-\+/]*){0,2}", v):
+        # Prefer typical drug suffixes but don't require them.
+        if re.search(r"(vir|mab|nib|ciclovir|statin|mycin|pril|sartan)$", vlow):
+            return True
+        # Still accept shorter single-token proper names (common in papers).
+        return len(v) >= 4
+
+    return False
+
+
 @dataclass
 class SchemaValueCleaner:
     rule_dir: str
@@ -200,6 +319,22 @@ class SchemaValueCleaner:
             kept: List[str] = []
             for v in cleaned:
                 if _looks_like_location(v):
+                    kept.append(v)
+                else:
+                    removed_values.append(v)
+            cleaned = kept
+        if str(semantic_type or "").strip().lower() == "symptom":
+            kept = []
+            for v in cleaned:
+                if _looks_like_symptom(v):
+                    kept.append(v)
+                else:
+                    removed_values.append(v)
+            cleaned = kept
+        if str(semantic_type or "").strip().lower() == "drug":
+            kept = []
+            for v in cleaned:
+                if _looks_like_drug(v):
                     kept.append(v)
                 else:
                     removed_values.append(v)
