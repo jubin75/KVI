@@ -931,15 +931,15 @@ class MultiStepInjector:
                     qv, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text
                 )
                 evidence_texts: List[str] = []
-                for it in (gr.items or []):
-                    bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
-                    if not bid:
-                        continue
-                    t = self.block_text_lookup(str(bid))
-                    if isinstance(t, str) and t.strip():
-                        src = (it.meta or {}).get("retrieval_source")
-                        if src == "evidence":
-                            evidence_texts.append(t.strip())
+                    for it in (gr.items or []):
+                        bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
+                        if not bid:
+                            continue
+                        t = self.block_text_lookup(str(bid))
+                        if isinstance(t, str) and t.strip():
+                            src = (it.meta or {}).get("retrieval_source")
+                            if src == "evidence":
+                                evidence_texts.append(t.strip())
                 evidence = (
                     _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None)
                     if evidence_texts
@@ -1157,7 +1157,7 @@ class MultiStepInjector:
             probs0 = torch.softmax(logits0, dim=-1)
             next_token = torch.multinomial(probs0, num_samples=1)
         else:
-            next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
+        next_token = torch.argmax(logits0, dim=-1, keepdim=True)  # [1,1]
         generated = [next_token]
         attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 
@@ -1207,7 +1207,7 @@ class MultiStepInjector:
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
             else:
-                next_token = torch.argmax(logits, dim=-1, keepdim=True)
+            next_token = torch.argmax(logits, dim=-1, keepdim=True)
             generated.append(next_token)
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token)], dim=1)
 

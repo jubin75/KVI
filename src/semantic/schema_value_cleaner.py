@@ -60,6 +60,119 @@ def _apply_regex_subs(value: str, subs: List[Dict[str, Any]]) -> str:
     return out
 
 
+def _looks_like_location(value: str) -> bool:
+    """
+    Conservative semantic_type=location guardrail.
+
+    Purpose: prevent non-location sentence fragments (methods/statistics/biology/tails) from
+    entering LIST_ONLY projection. This is deletion-only (no inference).
+    """
+    import re
+
+    v = str(value or "").strip()
+    if not v:
+        return False
+    if len(v) > 64:
+        return False
+
+    vlow = v.lower()
+
+    # Obvious non-entities / discourse / section markers.
+    bad_exact = {
+        "however",
+        "moreover",
+        "in addition",
+        "since currently",
+        "method",
+        "methods",
+        "results",
+        "discussion",
+        "abstract",
+        "keywords",
+        "introduction",
+        "conclusion",
+        "figure",
+        "fig",
+        "table",
+        "supplementary",
+        "copyright",
+        "p.r.",  # common split artifact
+    }
+    if vlow in bad_exact:
+        return False
+
+    # Drop anything that still looks like a clause/sentence fragment.
+    if any(ch in v for ch in [".", ":", ";", "?", "!", "／", "/", "\\", "http", "www"]):
+        return False
+    if re.search(r"\d", v):
+        return False
+
+    # Drop fragments starting with conjunctions/prepositions.
+    if re.match(r"^(and|or|but|while|with|without|including|such as)\b", vlow):
+        return False
+
+    # Verb-heavy / analytic phrases are not locations.
+    verb_noise = [
+        " is ",
+        " are ",
+        " was ",
+        " were ",
+        " be ",
+        " been ",
+        " being ",
+        " have ",
+        " has ",
+        " had ",
+        " show",
+        " indicate",
+        " suggest",
+        " report",
+        " distribute",
+        " occur",
+        " detect",
+        " classify",
+        " carry",
+        " transmit",
+        " analyze",
+        " investigation",
+        " surveillance",
+        " prevalence",
+        " genotype",
+        " virus",
+        " tick",
+        " antibody",
+        " clinical",
+        " symptom",
+    ]
+    if any(w in vlow for w in verb_noise):
+        return False
+
+    # If it contains CJK chars, accept if it looks like a place token.
+    if re.search(r"[\u4e00-\u9fff]", v):
+        # Common Chinese place suffixes.
+        if re.search(r"(省|市|县|区|州|盟|旗|镇|乡|村|岛|山|湖|河)$", v):
+            return True
+        # Otherwise require it to be short (avoid long CJK sentences).
+        return len(v) <= 12
+
+    # For Latin script, require at least one uppercase letter (reject "longicornis").
+    if not re.search(r"[A-Z]", v):
+        return False
+
+    # Accept common English location suffixes.
+    if re.search(
+        r"\b(province|city|county|district|state|region|prefecture|municipality|island|islands|mountain|mountains)\b",
+        vlow,
+    ):
+        return True
+
+    # Accept compact proper-name patterns: 1-4 capitalized words (e.g., "South Korea", "Cangzhou").
+    if re.fullmatch(r"[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){0,3}", v.strip()):
+        return True
+
+    return False
+
+
 @dataclass
 class SchemaValueCleaner:
     rule_dir: str
@@ -82,6 +195,15 @@ class SchemaValueCleaner:
         normalized = [self._normalize_value(v, rules, normalization_map) for v in raw_values]
         split_values = self._split_values(normalized, rules, split_map)
         cleaned = self._filter_values(split_values, rules, removed_values)
+        # Semantic-type level guardrails (deletion-only).
+        if str(semantic_type or "").strip().lower() == "location":
+            kept: List[str] = []
+            for v in cleaned:
+                if _looks_like_location(v):
+                    kept.append(v)
+                else:
+                    removed_values.append(v)
+            cleaned = kept
         cleaned = _dedup(cleaned)
 
         return {

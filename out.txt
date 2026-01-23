@@ -1,0 +1,2745 @@
+{
+  "pattern_first": {
+    "recall_size": 2,
+    "debug": {
+      "literal_hits": 2,
+      "structure_hits": 0,
+      "block_hits": 0
+    },
+    "patterns": [
+      {
+        "pattern_id": "abbr:SFTSV",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 是什么",
+            "X 的全称是什么",
+            "What is X",
+            "What does X stand for"
+          ]
+        },
+        "slots": {
+          "abbr": {
+            "name": "abbr",
+            "required": true,
+            "evidence_type": [
+              "abbreviation"
+            ],
+            "min_evidence": 1,
+            "inference_level": "soft",
+            "type": "string",
+            "semantic_type": "generic"
+          },
+          "full_name": {
+            "name": "full_name",
+            "required": false,
+            "evidence_type": [
+              "definition",
+              "abbreviation"
+            ],
+            "min_evidence": 1,
+            "inference_level": "soft",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": ""
+      },
+      {
+        "pattern_id": "schema:clinical_features",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的clinical_features是什么",
+            "X 有哪些clinical_features"
+          ]
+        },
+        "slots": {
+          "clinical_features": {
+            "name": "clinical_features",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "symptom"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些clinical_features"
+      },
+      {
+        "pattern_id": "schema:pathogenesis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的pathogenesis是什么",
+            "X 有哪些pathogenesis"
+          ]
+        },
+        "slots": {
+          "pathogenesis": {
+            "name": "pathogenesis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些pathogenesis"
+      },
+      {
+        "pattern_id": "schema:diagnosis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的diagnosis是什么",
+            "X 有哪些diagnosis"
+          ]
+        },
+        "slots": {
+          "diagnosis": {
+            "name": "diagnosis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些diagnosis"
+      },
+      {
+        "pattern_id": "schema:transmission",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的transmission是什么",
+            "X 有哪些transmission"
+          ]
+        },
+        "slots": {
+          "transmission": {
+            "name": "transmission",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些transmission"
+      },
+      {
+        "pattern_id": "schema:treatment",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的treatment是什么",
+            "X 有哪些treatment"
+          ]
+        },
+        "slots": {
+          "treatment": {
+            "name": "treatment",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "drug"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些treatment"
+      },
+      {
+        "pattern_id": "schema:prevention",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的prevention是什么",
+            "X 有哪些prevention"
+          ]
+        },
+        "slots": {
+          "prevention": {
+            "name": "prevention",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些prevention"
+      },
+      {
+        "pattern_id": "schema:geographic_distribution",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的geographic_distribution是什么",
+            "X 有哪些geographic_distribution"
+          ]
+        },
+        "slots": {
+          "geographic_distribution": {
+            "name": "geographic_distribution",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "location"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些geographic_distribution"
+      },
+      {
+        "pattern_id": "schema:prognosis",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的prognosis是什么",
+            "X 有哪些prognosis"
+          ]
+        },
+        "slots": {
+          "prognosis": {
+            "name": "prognosis",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些prognosis"
+      },
+      {
+        "pattern_id": "schema:epidemiology",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的epidemiology是什么",
+            "X 有哪些epidemiology"
+          ]
+        },
+        "slots": {
+          "epidemiology": {
+            "name": "epidemiology",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "location"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些epidemiology"
+      },
+      {
+        "pattern_id": "schema:complications",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的complications是什么",
+            "X 有哪些complications"
+          ]
+        },
+        "slots": {
+          "complications": {
+            "name": "complications",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些complications"
+      },
+      {
+        "pattern_id": "schema:disease_full_name",
+        "question_skeleton": {
+          "intent": "legacy",
+          "surface_forms": [
+            "X 的disease_full_name是什么",
+            "X 有哪些disease_full_name"
+          ]
+        },
+        "slots": {
+          "disease_full_name": {
+            "name": "disease_full_name",
+            "required": false,
+            "evidence_type": [
+              "schema"
+            ],
+            "min_evidence": 1,
+            "inference_level": "schema",
+            "type": "string",
+            "semantic_type": "generic"
+          }
+        },
+        "answer_style": "factual",
+        "matched_skeleton": "X 有哪些disease_full_name"
+      }
+    ]
+  },
+  "gate": {
+    "retrieve_more": true,
+    "reject_current_kv": false,
+    "confidence": 0.7,
+    "rationale": "semantic-shift",
+    "cos_dist": 0.5043956660065245,
+    "tau": 0.35,
+    "pattern_id": "schema:geographic_distribution",
+    "matched_skeleton": "X 有哪些geographic_distribution",
+    "matched_intent": "legacy",
+    "slot_status": {
+      "geographic_distribution": "satisfied"
+    },
+    "hard_rationale": [],
+    "soft_rationale": [],
+    "schema_rationale": [],
+    "decision": "ALLOW",
+    "decision_reason": "schema-slot-satisfied; limit-style",
+    "allowed_answer_capabilities": [
+      "EXPLANATION",
+      "LIST_ONLY"
+    ],
+    "final_answer_style": "LIST_ONLY",
+    "slot_schema": {
+      "geographic_distribution": {
+        "name": "geographic_distribution",
+        "required": false,
+        "evidence_type": [
+          "schema"
+        ],
+        "min_evidence": 1,
+        "inference_level": "schema",
+        "type": "string",
+        "semantic_type": "location"
+      }
+    },
+    "candidate_schemas": [
+      {
+        "schema_id": "schema:geographic_distribution",
+        "score": 1.2,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative",
+          "schema:distribution_like"
+        ]
+      },
+      {
+        "schema_id": "schema:epidemiology",
+        "score": 1.2,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative",
+          "schema:distribution_like"
+        ]
+      },
+      {
+        "schema_id": "schema:clinical_features",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:pathogenesis",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:diagnosis",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:transmission",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:treatment",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:prevention",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:prognosis",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:complications",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "schema:disease_full_name",
+        "score": 1.0,
+        "rationale": [
+          "base:schema",
+          "structure:spatial_constraint",
+          "structure:enumerative"
+        ]
+      },
+      {
+        "schema_id": "abbr:SFTSV",
+        "score": -0.5499999999999999,
+        "rationale": [
+          "base:abbr_low_info",
+          "structure:time/space/enum_penalty_abbr"
+        ]
+      }
+    ],
+    "active_contract_ids": []
+  },
+  "retrieve_more": false,
+  "rim_answer": "- Baoding\n- Tangshan\n- Hengshui\n- Langfang\n- longicornis\n- altitude had a greater effect\n- while the distribution of H.\n- which had a lower elevation\n- The cluster reported in this study occurred in Xinchang County\n- Shaoxing City\n- Zhe jiang Province\n- and involved household\n- South Korea\n- Japan\n- Vietnam\n- Pakistan in recent years (Yu et al\n- LCMV could be carried by 4 species of ticks\n- Shaanxi Provinces.\n- CCHFV was discovered early\n- classified into three genotypes: Asian\n- associated with climatic factors\n- including light\n- humidity\n- and temperature (Pérez et al.\n- (A) Nairoviridae\n- (B) Phenuiviridae\n- (C) Flaviviridae\n- (D) Paramyxoviridae\n- However\n- there was no information on the clinical symptoms\n- if any\n- in the dogs at this shelter around February 2022.\n- 21 of the 34 provinces in China\n- as well as in other Asian countries such as Korea\n- and Pakistan\n- a total of 12 states in the Eastern\n- many dogs in Thailand possessed anti-SFTSV antibodies\n- indicating that SFTSV has already spread in Thailand\n- similar to in other Asian countries [5–11].\n- Since currently\n- only RT-PCR approach was used for clinical diagnosis of SFTS\n- but it is not yet widely used in rural areas\n- especially with limited medical resources.\n- bei Province\n- we conducted a multidisciplinary investigation integrating epidemiological surveillance\n- molecular characterization of SFTSV\n- seroprevalence analysis.\n- with a high prevalence in Shandong\n- Liaoning Provinces\n- partially overlapping with SFTSV.\n- It was also found in forested\n- ihai Center for Disease Control\n- Prevention\n- Weihai\n- Shandong Province\n- Subgenotype B-1\n- which was predomi nant in Gyeonggi province\n- was detected in all cities or areas of interest.\n- Phenuiviridae\n- and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)\n- and was identified as the causative pathogen of the disease\n- was first isolated from the serum samples of a patient with SFTS in China in 2009 .\n- ended at the end of the third quarter\n- August.\n- There has been a recent increase in the populations of feral cats\n- and they share habitats with wildlife\n- domestic animals\n- and humans.\n- When the city or area of presumed exposure was not known\n- the city or area where the patient resided was used in the analysis.\n- en mortality via elevated viral loads\n- early immunosuppression\n- organ damage.\n- stray\n- These cities were categorized into four geographical regions\n- namely the northern\n- central\n- Names of area or cities are shown at the left\n- and the bars indicate the number of patients.\n- SFTSV can also be trans ferred person-to-person through contact with blood\n- secretions or mucous of a patient with SFTS .\n- When we examined the Index patient’s close contacts\n- 16.3% (8/49) were positive for virus-specific IgM",
+  "retrieval": {
+    "kv_dir": "/home/jb/topics/SFTSV/work/kvbank_blocks",
+    "top_k": 30,
+    "oversample_top_k": 90,
+    "retriever_debug": {
+      "top_k": 90,
+      "shards": 6,
+      "per_shard_top_k": 90,
+      "candidates": 540,
+      "size": 5325,
+      "dim": 384,
+      "shard_debug": [
+        {
+          "shard": 0,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00000",
+          "top_k": 90,
+          "k_searched": 450,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 1,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00001",
+          "top_k": 90,
+          "k_searched": 450,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 2,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00002",
+          "top_k": 90,
+          "k_searched": 450,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 3,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00003",
+          "top_k": 90,
+          "k_searched": 450,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        },
+        {
+          "shard": 4,
+          "dir": "/home/jb/topics/SFTSV/work/kvbank_blocks/shards/00004",
+          "top_k": 90,
+          "k_searched": 450,
+          "filtered_out": 0,
+          "size": 1024,
+          "dim": 384,
+          "metric": "ip",
+          "normalize": true
+        }
+      ]
+    },
+    "rim_retry": true,
+    "list_rank_debug": [
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk1_t3840-7936_t384-640",
+        "base_score": 0.41700607538223267,
+        "list_like": true,
+        "list_feature_count": 1,
+        "list_confidence": 0.4,
+        "list_signals": [
+          "numbering"
+        ],
+        "boost": 0.984,
+        "final_score": 0.41033397817611694
+      },
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk0_t0-4096_t3072-3328",
+        "base_score": 0.36366212368011475,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk0_t0-4096_t3456-3712",
+        "base_score": 0.3605610728263855,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk1_t3840-7936_t192-448",
+        "base_score": 0.3459291458129883,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3389_fvets.2023.1268440_chunk3_t11520-15379_t576-832",
+        "base_score": 0.2921452522277832,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1186_s13071-024-06341-2_chunk1_t3840-7740_t192-448",
+        "base_score": 0.28506040573120117,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3389_fvets.2023.1268440_chunk3_t11520-15379_t1152-1408",
+        "base_score": 0.2837570905685425,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1186_s13071-024-06341-2_chunk1_t3840-7740_t1344-1600",
+        "base_score": 0.28337153792381287,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3892_ijmm.2025.5610_chunk1_t3840-7936_t0-256",
+        "base_score": 0.27916133403778076,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3840-4096",
+        "base_score": 0.27916133403778076,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk0_t0-4096_t2880-3136",
+        "base_score": 0.277794748544693,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_vetsci11020090_chunk0_t0-4096_t1344-1600",
+        "base_score": 0.2743588089942932,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_v15122338_chunk0_t0-4096_t2880-3136",
+        "base_score": 0.26866430044174194,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3389_fvets.2023.1268440_chunk3_t11520-15379_t1344-1600",
+        "base_score": 0.2634810209274292,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3346_jkms.2023.38.e156_chunk1_t3840-7936_t2880-3136",
+        "base_score": 0.2625453472137451,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_vetsci11020090_chunk0_t0-4096_t1536-1792",
+        "base_score": 0.2580811083316803,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1371_journal.pntd.0011654_chunk1_t3840-7936_t1536-1792",
+        "base_score": 0.2562246322631836,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_vetsci11020090_chunk0_t0-4096_t1152-1408",
+        "base_score": 0.2555729150772095,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+        "base_score": 0.25507116317749023,
+        "list_like": true,
+        "list_feature_count": 7,
+        "list_confidence": 1.0,
+        "list_signals": [
+          "trigger_phrase:occurred in",
+          "trigger_phrase:distributed in"
+        ],
+        "boost": 1.815,
+        "final_score": 0.4629541611671448
+      },
+      {
+        "block_id": "10.1292_jvms.22-0427_chunk1_t3840-7344_t2880-3136",
+        "base_score": 0.2478567361831665,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_microorganisms12040823_chunk0_t0-4096_t3264-3520",
+        "base_score": 0.2463395744562149,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3389_fvets.2023.1268440_chunk1_t3840-7936_t3648-3904",
+        "base_score": 0.24305614829063416,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "base_score": 0.24067750573158264,
+        "list_like": true,
+        "list_feature_count": 6,
+        "list_confidence": 1.0,
+        "list_signals": [
+          "paren_cases_capture",
+          "trigger_phrase:distributed in"
+        ],
+        "boost": 2.2687500000000003,
+        "final_score": 0.5460370911285282
+      },
+      {
+        "block_id": "10.1016_j.virs.2023.08.004_chunk0_t0-3494_t1536-1792",
+        "base_score": 0.23940327763557434,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1016_j.imj.2023.04.005_chunk0_t0-2222_t1536-1792",
+        "base_score": 0.23581095039844513,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.1,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1292_jvms.22-0427_chunk1_t3840-7344_t2688-2944",
+        "base_score": 0.23450613021850586,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.1292_jvms.22-0427_chunk1_t3840-7344_t2496-2752",
+        "base_score": 0.23392166197299957,
+        "list_like": false,
+        "list_feature_count": 0,
+        "list_confidence": 0.0,
+        "list_signals": [],
+        "boost": 1.0,
+        "final_score": 0.0
+      },
+      {
+        "block_id": "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "base_score": 0.23183506727218628,
+        "list_like": true,
+        "list_feature_count": 4,
+        "list_confidence": 1.0,
+        "list_signals": [
+          "trigger_phrase:found in",
+          "trigger_phrase:distributed in"
+        ],
+        "boost": 1.815,
+        "final_score": 0.4207806470990181
+      },
+      {
+        "block_id": "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "base_score": 0.22899691760540009,
+        "list_like": true,
+        "list_feature_count": 7,
+        "list_confidence": 1.0,
+        "list_signals": [
+          "trigger_phrase:reported in",
+          "trigger_phrase:occurred in"
+        ],
+        "boost": 1.815,
+        "final_score": 0.41562940545380117
+      },
+      {
+        "block_id": "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "base_score": 0.22741387784481049,
+        "list_like": true,
+        "list_feature_count": 1,
+        "list_confidence": 0.5,
+        "list_signals": [
+          "trigger_phrase:distributed in"
+        ],
+        "boost": 1.375,
+        "final_score": 0.3126940820366144
+      }
+    ],
+    "final_rank": [
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3390_v17060854_chunk0_t0-4096_t1536-1792",
+      "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t384-640",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.3390_v15122403_chunk0_t0-3872_t2688-2944",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.3390_v17060854_chunk0_t0-4096_t1344-1600",
+      "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+      "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+      "10.3390_microorganisms12040823_chunk0_t0-4096_t3648-3904",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+      "10.3390_v17060854_chunk1_t3840-5438_t192-448"
+    ],
+    "list_like_candidate_count": 34,
+    "list_like_candidate_ids": [
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3390_v17060854_chunk0_t0-4096_t1536-1792",
+      "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t384-640",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.3390_v15122403_chunk0_t0-3872_t2688-2944",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.3390_v17060854_chunk0_t0-4096_t1344-1600",
+      "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+      "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+      "10.3390_microorganisms12040823_chunk0_t0-4096_t3648-3904",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+      "10.3390_v17060854_chunk1_t3840-5438_t192-448"
+    ],
+    "contract_validation": {
+      "fulfilled": true,
+      "score": 1.0,
+      "violations": [],
+      "results": [],
+      "hard_missing": [],
+      "soft_missing": [],
+      "schema_missing": [],
+      "hard_fulfilled": true,
+      "soft_fulfilled": true
+    },
+    "semantic_instances": [
+      {
+        "pattern_id": "schema:geographic_distribution",
+        "slots": {
+          "geographic_distribution": [
+            {
+              "evidence_id": "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+              "source": "10.3390_v17060854",
+              "span": "angzhou (70 cases), Baoding (3 cases), Tangshan (2 cases), Langfang (1 case), Shijiazhuang (1 case), Qinhuangdao (1 case) and Hengshui (1 case). The imported cases were distributed in Baoding, Tangshan, Hengshui and Langfang, with one case each.\nThe local cases were mainly distributed in Cangzhou City, which accounted for 92.0%\n\nViruses 2025, 17, 854 6 of 13 (69/75), and Baoding, Shijiazhuang, Tangshan and Qinhuangdao City, with one case each (Figure 2C). At the town level, the number of locally reported regions endemic for SFTS in Cangzhou increased from two (2022) to five towns (2024), showing significant regional clusters (Figure 2D). Especially, the largest number of cases were distributed in Yanshan and Haixing Counties of Cangzhou City, with 40 and 20 cases reported, respectively.\n3.2.3. SFTS Population Distribution During the observed period,",
+              "list_items": [
+                "The imported cases were distributed in Baoding, Tangshan, Hengshui and Langfang, with one case each."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v17060854_chunk0_t0-4096_t1536-1792",
+              "source": "10.3390_v17060854",
+              "span": " 2021, all SFTS cases were imported. Local cases were first reported in 2022, and then the number of reported cases has increased significantly (Figure 2A).\n3.2. Epidemiological Characteristics of SFTS Cases 3.2.1. Temporal Distribution According to the overall incidence from 2015 to 2024, the SFTS cases occurred between March and October, but were mainly distributed between May and October (97.5%, 77/79), peaking in August (Figure 2B). The cases reported from August to October accounted for 55.7% (44/79), showing significant seasonal characteristics.\n3.2.2. Regional Distribution From 2015 to 2024, 79 cases of SFTS (including both local and imported cases) were reported in Cangzhou (70 cases), Baoding (3 cases), Tangshan (2 cases), Langfang (1 case), Shijiazhuang (1 case), Qinhuangdao (1 case) and Hengshui (1 case). The imported cases were distributed in Baoding, Tangshan, H",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+              "source": "10.3390_v17060854",
+              "span": "), showing significant regional clusters (Figure 2D). Especially, the largest number of cases were distributed in Yanshan and Haixing Counties of Cangzhou City, with 40 and 20 cases reported, respectively.\n3.2.3. SFTS Population Distribution During the observed period, the youngest case was a 27-year-old male and the oldest case was an 87-year-old male, with an average age of 64 years. The majority of cases occurred in middle-aged and elderly individuals. Among them, the 50–84-year-old age group accounted for 88.6% (70/79) of the total SFTS cases (Figure 3). Among the SFTS cases, there were 47 males and 32 females, with an overall male-to-female ratio of 1.47:1.\nThe SFTS occupational distribution showed that 87.3% (69/79) were farmers, followed by the unemployed (6.4%).\n\nViruses 2025, 17, 854 7 of 13 0 3 6 9 12 15",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+              "source": "10.3389_fmicb.2024.1309698",
+              "span": " XUAR to carry SGLV and transmit it to humans was noteworthy because SGLV had been found in local rodents. In a prediction model of SFTSV, the number of H. longicornis and altitude had a greater effect, with lower altitude resulting in more SFTSV cases, while the distribution of H. longicornis was related to precipitation and mean annual temperature. This might be related to the fact that SFTSV cases were mainly in central China, which had a lower elevation and higher precipitation than the northwestern and southwestern China (Miao et al., 2020). H. longicornis was distributed throughout Shaanxi Province where the precipitation and climate were also similar to central China, the reason for fewer reports of SFTSV in Shaanxi Province might be  the high altitude. The occurrence of TBEV was closely related to meteorological factors, such as the presence of I. persulcatus and mixed broadleaf-conifer forest (Sun RX et al., 2017). In agreement with previous studies, the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain, the Lesser Khingan Mountains, the Changbai",
+              "list_items": [
+                "longicornis and altitude had a greater effect, with lower altitude resulting in more SFTSV cases, while the distribution of H.",
+                "This might be related to the fact that SFTSV cases were mainly in central China, which had a lower elevation and higher precipitation than the northwestern and southwestern China (Miao et al., 2020).",
+                "persulcatus and mixed broadleaf-conifer forest (Sun RX et al., 2017).",
+                "In agreement with previous studies, the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain, the Lesser Khingan Mountains, the Changbai"
+              ]
+            },
+            {
+              "evidence_id": "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+              "source": "10.1186_s12889-025-24608-w",
+              "span": " who did not have direct contact with the blood of Case A fell ill. The difference in attack rates between the two groups was statistically significant (P = 0.01).\nDiscussion China is the most severely affected country by SFTS, which primarily occurs in mountainous and hilly areas.\nAlthough the disease is mainly sporadic, several clusters of SFTS transmitted through close contact among family members have been reported, with few documented hos pital infection events . The cluster reported in this study occurred in Xinchang County, Shaoxing City, Zhe jiang Province, and involved household and nosocomial transmission, which is relatively uncommon. In addition, we have analyzed the epidemiology, clinical features, and etiology of the outbreak, and also demonstrated the route of transmission from tick bite infection to secondary human-to-human transmission.\nIn this study, the index case had been deceased for two weeks when the outbreak was identified, precluding labo ratory confirmation of SFTSV infection through serum Table 2  Epidemiological, clinical and laboratory data of a cluster patients with SFTS Patient Case A (Index patient) Case B Case C Case D Case E Case F Case G Case H Personal information Gender female female male female female female",
+              "list_items": [
+                "The cluster reported in this study occurred in Xinchang County, Shaoxing City, Zhe jiang Province, and involved household and nosocomial transmission, which is relatively uncommon."
+              ]
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+              "source": "10.3389_fmicb.2024.1309698",
+              "span": " named it Antu virus (Li et al., 2023).\n3.2 Phenuiviridae The family Phenuiviridae in this study included four TBVs, of which the most widely distributed in China was SFTSV of the genus Bandavirus. SFTSV is a new virus of the order Bunyavirus discovered in China in 2011. The first strain was isolated from a man in Henan Province, and researchers subsequently detected SFTSV in several febrile patients, as well as in H. longicornis collected from domestic animals in the area where the patients lived. SFTSV was also reported in South Korea, Japan, Vietnam and Pakistan in recent years (Yu et al., 2011; Han et al., 2018; Kim et al., 2018; Zohaib et al., 2020; Fujikawa et al., 2021; Tran et al., 2022). H. longicornis was the most common vector of SFTSV, and it was found that SFTSV could be transmitted vertically in H. longicornis.",
+              "list_items": [
+                "South Korea",
+                "Japan",
+                "Vietnam",
+                "Pakistan in recent years (Yu et al",
+                "China was SFTSV of the genus Bandavirus"
+              ]
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+              "source": "10.3389_fmicb.2024.1309698",
+              "span": ").\nPIV5 was detected only in Mohe City and Yichun City in Heilongjiang Province (Figure  2D; Supplementary Figure S4A).\nLCMV could be carried by 4 species of ticks, which were densely distributed in the XUAR and Shaanxi Provinces. LCMVs were detected only in the forested areas of the Greater Khingan Mountains and the Changbai Mountains (Figure 2D; Supplementary Figure S4B).\n3.6 Phylogenetic analysis of tick-borne viruses Phylogenetic analyses of the sequences collected in NCBI from different areas of China were performed to analyze the genetic relationships among the viruses. CCHFV was discovered early and classified into three genotypes: Asian, European and African (Serretiello et al., 2020). CCHFV in China was divided into two Asian aggregation branches. Strains from XUAR clustered together with two strains detected from Hy. asiaticum in Inner Mongolia Province.\nAlthough the strains found in XUAR had various host species, they remained genetically clustered. The other branch was a cluster of two strains detected in Hy. asiaticum in XUAR and strains from Pakistan (Figure 3",
+              "list_items": [
+                "LCMV could be carried by 4 species of ticks, which were densely distributed in the XUAR and Shaanxi Provinces.",
+                "CCHFV was discovered early and classified into three genotypes: Asian, European and African (Serretiello et al., 2020)."
+              ]
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+              "source": "10.3389_fmicb.2025.1622394",
+              "span": " associated with climatic factors, including light, humidity, and temperature (Pérez et al., 2024). For example, H. hystricis prefers warm and humid environments, while H. longicornis exhibits stronger environmental adaptability, widely distributed in rural landscapes and urban areas (Miao et al., 2020).\nChanges in environmental factors, particularly climatic-ecological and geographical landscape factors, may provide suitable ecological conditions for natural tick population growth, contributing to the seasonal variation characteristics of SFTSV infections. Furthermore, host animals carrying ticks expand their survival range through natural migration, further accelerating cross-regional transmission of SFTSV (Ji et al., 2024).\nThe reported cases of SFTS are mainly concentrated in East Asia.\nSFTS was first reported in central China between March and July 2009, with subsequent cases reported across various provinces. Japan reported its first case in 2012, primarily in eastern and southern regions, while South Korea reported its first fatal case in 2013, although infections likely occurred earlier (Liu et al., 2014). Most cases are concentrated in China, South Korea, and Japan",
+              "list_items": [
+                "associated with climatic factors, including light, humidity, and temperature (Pérez et al., 2024).",
+                "hystricis prefers warm and humid environments, while H.",
+                "longicornis exhibits stronger environmental adaptability, widely distributed in rural landscapes and urban areas (Miao et al., 2020).",
+                "Changes in environmental factors, particularly climatic-ecological and geographical landscape factors, may provide suitable ecological conditions for natural tick population growth, contributing to the seasonal variation characteristics of SFTSV infections.",
+                "SFTS was first reported in central China between March and July 2009, with subsequent cases reported across various provinces.",
+                "Most cases are concentrated in China, South Korea, and Japan"
+              ]
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+              "source": "10.3389_fmicb.2024.1309698",
+              "span": " of Yunnan and Guizhou Provinces. Two ticks of Rhipicephalus spp. and H. longicornis were the vectors for DTV (Figure 2B; Supplementary Figure S2B). TcTV-2 is currently distributed in XUAR, clustered around the Tianshan Mountains, and has the same vectors and distribution characteristics as TcTV-1, although they are not in the same family (Figure 2B;\nSupplementary Figure S2C).\nJMTV was the most widely distributed virus in our study. It was dispersed in 14 provinces of China, from Mohe City in Heilongjiang FIGURE 2 Mapping of tick-borne viruses by family. China’s land cover map was used as a background map. (A) Nairoviridae, (B) Phenuiviridae, (C) Flaviviridae, (D) Paramyxoviridae and Arenaviridae. Different colors were used in each figure to denote different viruses.\n\nWu et al.\n10.3389/fmicb.2024.1309698 Frontiers in Microbiology 09 frontiersin",
+              "list_items": [
+                "(A) Nairoviridae, (B) Phenuiviridae, (C) Flaviviridae, (D) Paramyxoviridae and Arenaviridae."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+              "source": "10.3390_v15122403",
+              "span": " also indicated that SFTSV has been spreading in many districts in Thailand.\nThe seroprevalence among dogs in Thailand (16.6%) was more similar to those reported in China and Korea than that reported in Japan . The nucleotide sequences of SFTSV determined in this study are more closely related to the sequences of SFTSV in China than those in Japan. The prevalence of SFTSV infection among the dog population in Thailand may be similar to those in endemic regions of China.\nThe SFTSV viral RNA was detected in only one sample collected from a healthy dog at the shelter in Sattahip in February 2022. Surprisingly, more than 70% of the serum samples collected at this shelter possessed anti-SFTSV antibodies. However, there was no information on the clinical symptoms, if any, in the dogs at this shelter around February 2022. SFTSV in Thailand might not cause severe disease in dogs. Further investigation is necessary to clarify the pathogenesis of SFTSV in Thailand.\nTo our knowledge, this is the first report on of all three segments of the SFTSV genome in Thailand. The nucleotide sequence of the S segment of SFTSV detected from the dog in Thailand",
+              "list_items": [
+                "However, there was no information on the clinical symptoms, if any, in the dogs at this shelter around February 2022."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+              "source": "10.3390_microorganisms12040823",
+              "span": " effective than ploidy analysis.\nSFTSV is an emerging tick-borne phlebovirus first described in China in 2009, transmitted by H. longicornis. Between 2011 and 2018, cases of SFTS were reported in 21 of the 34 provinces in China, as well as in other Asian countries such as Korea, Japan, Vietnam, and Pakistan . HRTV was identified and isolated from two patients in the United States in 2012. H. longicornis has been found in a total of 12 states in the Eastern and Central United States, and HRTV shares genetic similarities with SFTSV . After injecting SFTSV ticks with HRTV, high levels of viral RNA were detected in H. longicornis, indicating that HRTV could be obtained by the ticks. Given that H. longicornis has been identified in most states in the Eastern and Central United States, there is a potential risk of the tick spreading along with HRTV.\nH. longicornis is related to the spread of blood parasites (Theileria Oriental) throughout the Asian–Pacific region. It is reported that H. longicornis",
+              "list_items": [
+                "21 of the 34 provinces in China",
+                "as well as in other Asian countries such as Korea",
+                "Japan",
+                "Vietnam",
+                "and Pakistan",
+                "a total of 12 states in the Eastern",
+                "Central United States",
+                "and HRTV shares genetic similarities with SFTSV"
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+              "source": "10.3390_v15122403",
+              "span": " not cause severe disease in dogs. Further investigation is necessary to clarify the pathogenesis of SFTSV in Thailand.\nTo our knowledge, this is the first report on of all three segments of the SFTSV genome in Thailand. The nucleotide sequence of the S segment of SFTSV detected from the dog in Thailand was closely related to that isolated from patients in Thailand (Figure 1). In addition, the SFTSV sequence was detected in the dog in Sattahip district, Chonburi Province. Two of three SFTS patients in Thailand lived in Chachoengsao Province next to Chonburi Province . It was presumed that SFTSV has been spreading in these areas.\nThe nucleotide sequences of M and L segments of the SFTSV isolated in Thailand were the most similar to those in China. Nonetheless, further information on the genomes of SFTSV strains is required to clarify the origin of the SFTSV in Thailand.\nAt least three human cases have already been reported in Thailand and many dogs in Thailand possessed anti-SFTSV antibodies, indicating that SFTSV has already spread in Thailand and more human cases will occur in the future, similar to in other Asian countries [5–11]. Furthermore, Thailand people,",
+              "list_items": [
+                "At least three human cases have already been reported in Thailand and many dogs in Thailand possessed anti-SFTSV antibodies, indicating that SFTSV has already spread in Thailand and more human cases will occur in the future, similar to in other Asian countries [5–11]."
+              ]
+            },
+            {
+              "evidence_id": "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+              "source": "10.1128_spectrum.02144-23",
+              "span": " | | --- | --- | --- | | | Positive | Negative |\n\nDISCUSSION As an emerging infectious disease, SFTS has been reported in central and eastern China, Korea, and Japan (1, 33–35). Recently, similar cases were also reported in Vietnam (9).\nThe global epidemiology regarding the incidence rate of SFTS over the last decade remains elusive. A meta-analysis showed that the overall pooled seroprevalence of SFTSV antibodies was 4.3%, based on 21 studies from 7 provinces in China. The pooled prevalence among farmers was 6.1% and among others it was 3.3% (36). Nevertheless, between 2010 and 2019, only 13,824 SFTS cases were reported, with a yearly escalating trend (37). It is estimated that 8.3% of SFTS cases was missed in SFTS high-endemic provinces in China (38). Since currently, only RT-PCR approach was used for clinical diagnosis of SFTS, but it is not yet widely used in rural areas, especially with limited medical resources. Nevertheless, those SFTS high-endemic provinces",
+              "list_items": [
+                "Since currently, only RT-PCR approach was used for clinical diagnosis of SFTS, but it is not yet widely used in rural areas, especially with limited medical resources."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+              "source": "10.3390_v17060854",
+              "span": "bei Province, we conducted a multidisciplinary investigation integrating epidemiological surveillance, molecular characterization of SFTSV and seroprevalence analysis. Our findings conclusively demonstrate that Hebei Province has evolved into a newly established endemic focus for SFTSV transmission.\nIn China, SFTS cases have been predominantly reported in mountainous and hilly rural regions of seven high-incidence provinces . However, our study revealed a striking epidemiological divergence. In total, 69 out of 75 locally acquired SFTS cases (92.0%) were clustered in Cangzhou City, a coastal alluvial–lacustrine plain in southeastern Hebei Province. Cangzhou City is characterized by the absence of traditional topographic risk factors and has no mountains or hills in the city. Yanshan and Haixing Counties, with the largest number of cases of Cangzhou city, are geographically adjacent to Dezhou and Binzhou cities of Shandong Province. As one of the high-incidence provinces for SFTS, Shandong Province has exhibited northward spatial diffusion of its epidemic focus .\nSome scholars believe that the migration of ticks and the small animals that carry SFTSV may facilitate SFTSV viral range expansion, potentially increasing the",
+              "list_items": [
+                "bei Province, we conducted a multidisciplinary investigation integrating epidemiological surveillance, molecular characterization of SFTSV and seroprevalence analysis.",
+                "In China, SFTS cases have been predominantly reported in mountainous and hilly rural regions of seven high-incidence provinces .",
+                "Cangzhou City is characterized by the absence of traditional topographic risk factors and has no mountains or hills in the city.",
+                "Yanshan and Haixing Counties, with the largest number of cases of Cangzhou city, are geographically adjacent to Dezhou and Binzhou cities of Shandong Province."
+              ]
+            },
+            {
+              "evidence_id": "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+              "source": "10.3389_fmicb.2024.1309698",
+              "span": "12 provinces, with Xinyang City in Henan Province having the highest number of cases, and Hubei, Anhui, Zhejiang, and Shandong Provinces all having high prevalence of SFTSV (Miao et al., 2020). The vectors of SFTSV included five species of ticks, H. longicornis was its confirmed vector, but SFTSV were also detected in H. conicinna, H. japonica, I. persulcatus, and R. microplus. However, most of the SFTSVs were still clustered in the H. longicornis distribution areas (Figure 2B; Supplementary Figure S2A). DTV is now distributed in six provinces of China, with a high prevalence in Shandong and Liaoning Provinces, partially overlapping with SFTSV. It was also found in forested and shrub-covered areas of Yunnan and Guizhou Provinces. Two ticks of Rhipicephalus spp. and H. longicornis were the vectors for DTV (Figure 2B; Supplementary Figure S2B). TcTV-2 is currently distributed in XUAR, clustered around the Tianshan",
+              "list_items": [
+                "DTV is now distributed in six provinces of China, with a high prevalence in Shandong and Liaoning Provinces, partially overlapping with SFTSV.",
+                "It was also found in forested and shrub-covered areas of Yunnan and Guizhou Provinces."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v15122403_chunk0_t0-3872_t2688-2944",
+              "source": "10.3390_v15122403",
+              "span": "SV HB2014-31; and the L segment showed a 99.2% similarity in identity to that of Chinese SFTSV HB147. Phylogenetic analysis also indicated that this dog SFTSV was closely related to those of genotype J3 (Figure 1).\n\nViruses 2023, 15, 2403 6 of 9 4. Discussion In 2019, Ongkittikul et al. reported the first case of a human infected with SFTSV in Thailand . Other reports in 2019 and 2020 also indicated that SFTSV has been spreading in Thailand . Our study showed that at least 16.6% of dogs in Thailand were seropositive for SFTSV infection, and the SFTSV-positive dogs were found in several districts (Table 1).\nThese results also indicated that SFTSV has been spreading in many districts in Thailand.\nThe seroprevalence among dogs in Thailand (16.6%) was more similar to those reported in China and Korea than that reported in Japan . The nucleotide sequences of SFTSV determined in this study are more closely related to",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+              "source": "10.1186_s12985-024-02387-x",
+              "span": "ihai Center for Disease Control and Prevention, Weihai, Shandong Province, P.R. China 3Department of Infectious Disease Control, Wendeng Center for Disease Control and Prevention, Weihai, Shandong Province, P.R. China 4Weihai Health Commission, Weihai, Shandong Province, P.R. China Abstract Background  Severe fever with thrombocytopenia syndrome (SFTS) is an emerging infectious disease. SFTS virus (SFTSV) is transmitted by tick bites and contact with the blood or body fluids of SFTS patients. Animal-to-human transmission of SFTS has been reported in Japan, but not in China. In this study, the possible transmission route of two patients who fed and cared for farm-raised fur animals in a mink farm was explored.\nMethod  An epidemiological investigation and a genetic analysis of patients, animals and working environment were carried out.\nResults  It was found that two patients had not been bitten by ticks and had no contact with patients infected with SFTS virus, but both of them had skinned the dying animals. 54.55% (12/22) of the farm workers were",
+              "list_items": [
+                "ihai Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.",
+                "China 3Department of Infectious Disease Control, Wendeng Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.",
+                "China 4Weihai Health Commission, Weihai, Shandong Province, P.R.",
+                "SFTS virus (SFTSV) is transmitted by tick bites and contact with the blood or body fluids of SFTS patients.",
+                "Method  An epidemiological investigation and a genetic analysis of patients, animals and working environment were carried out."
+              ]
+            },
+            {
+              "evidence_id": "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+              "source": "10.1007_s00705-025-06411-5",
+              "span": " of time and with a larger sample size.\nGeographical distribution of SFTSV genotypes The location where exposure to SFTSV was presumed to have occurred in each case was tabulated, and the number of cases involving each genotype is summarized for each location in Fig. 2. Subgenotype B-1, which was predomi nant in Gyeonggi province, was detected in all cities or areas of interest. Interestingly, subgenotype B-2 and geno type F appear to be restricted to the eastern and central part of Gyeonggi province, respectively. This implies that ticks carrying distinct genotypes of SFTSV are present in certain areas of Gyeonggi province. Although there is no concrete evidence that any specific genotype is more virulent than the others, this information is nevertheless important for estab lishing health policies to prevent tick-borne diseases caused by certain genotypes of SFTSV.\nCase-fatality rates by age group The high case-fatality rate of SFTS implies the need for public health attention in South Korea. Twenty (15.9%) deaths were confirmed among the 126 SFTSV-positive patients, and all of these patients were over 60 years old, consistent with other reports",
+              "list_items": [
+                "Subgenotype B-1, which was predomi nant in Gyeonggi province, was detected in all cities or areas of interest."
+              ]
+            },
+            {
+              "evidence_id": "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+              "source": "10.1371_journal.pntd.0012216",
+              "span": " Phenuiviridae, and genus Bandavirus (https://talk.ictvonline.org/taxonomy/), and was identified as the causative pathogen of the disease and was first isolated from the serum samples of a patient with SFTS in China in 2009 . SFTSV was mainly prevalent in central and eastern China, Japan and South Korea, where reported human cases confirmed with SFTSV infection . Serological evidence also suggested SFTSV prevalence and occurrence of human exposure in Pakistan and Vietnam , indicating that the virus may be widely distributed in East Asia. Haemaphysalis longicornis is considered the primary vector of SFTSV due to reports with a history of tick bites or outdoor activities and ticks collected from the vicinity of patient’s residence tested positive for the virus . SFTSV can also be transmitted from human-tohuman, particularly within families where caregivers often lack protective gear . Additionally, there have been documented cases of SFTS in humans who have been in contact with SFTSV-infected cats . After the identification of SFTSV, a viral pathogen closely related to SFTSV was identified in the United States from febrile patients with clinical symptoms similar to SFTS and was named Heartland virus",
+              "list_items": [
+                "Phenuiviridae, and genus Bandavirus (https://talk.ictvonline.org/taxonomy/), and was identified as the causative pathogen of the disease and was first isolated from the serum samples of a patient with SFTS in China in 2009 .",
+                "SFTSV was mainly prevalent in central and eastern China, Japan and South Korea, where reported human cases confirmed with SFTSV infection .",
+                "Serological evidence also suggested SFTSV prevalence and occurrence of human exposure in Pakistan and Vietnam , indicating that the virus may be widely distributed in East Asia."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v17060854_chunk0_t0-4096_t1344-1600",
+              "source": "10.3390_v17060854",
+              "span": ".9. Statistical Analysis Chi-squared tests were conducted to analyze differences in socio-demographic characteristics of patients with SFTS and antibody detection rates in healthy individuals’ serum samples, with significance defined as p < 0.05.\n3. Results 3.1. Overview of SFTS in Hebei Province From 2015 to 2024, a total of 79 SFTS cases involving 70 lab-confirmed cases and 9 clinically diagnosed cases were reported in six cities of Hebei Province, with four deaths.\nThe average annual fatality rate was 5.06% across the entire province. The number of SFTS cases showed an increasing trend between 2015 (2 cases) and 2024 (54 cases). The first SFTS case in Hebei Province was reported in 2015. From 2015 to 2021, all SFTS cases were imported. Local cases were first reported in 2022, and then the number of reported cases has increased significantly (Figure 2A).\n3.2. Epidemiological Characteristics of SFTS Cases 3.2.1. Temporal Distribution",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+              "source": "10.1016_j.idm.2024.01.003",
+              "span": " < 0.05.\n3. Results 3.1. SFTS cases From January 2013 to December 2020, a total of 4174 confirmed cases of SFTS were reported in Shandong Province. The monthly confirmed SFTS cases are shown in Fig. 2. The peak of cases began at the beginning of the second quarter and ended at the end of the third quarter, with cases mainly concentrated between May and August.\n3.2. Prediction models 3.2.1. SARIMA To determine the appropriate SARIMA model, the augmented Dickey-Fuller test was conducted to assess the stationarity of the original time series. The test results indicated that the time series was not stationary (P ¼ 0.313). After applying a round of differencing, the time series became stationary (P < 0.001). The parameters of p and q in the SARIMA model were preliminarily determined based on the autocorrelation function (ACF) and partial autocorrelation function (PACF) plots (Fig. 3). The final SARIMA model was selected based on the minimum Akaike information criterion (AIC)",
+              "list_items": [
+                "The peak of cases began at the beginning of the second quarter and ended at the end of the third quarter, with cases mainly concentrated between May and August."
+              ]
+            },
+            {
+              "evidence_id": "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+              "source": "10.1371_journal.pntd.0012306",
+              "span": " the existence of various serovars in each province cannot be ruled out.\nSince its first identification in China, SFTSV has been primarily detected in Asia [74–78].\nDue to its associated high mortality rate, there is significant interest in SFTSV . In the present study, the infection rate of SFTSV in A. agrarius was 5.8%, and this is the first report to describe SFTSV infection in A. agrarius in the ROK. Our results were significantly lower than those reported in China (32.3%) . Compared with the infection rates reported in other animals in the ROK, the prevalence of SFTSV in rodents was similar to that in wild boars (5.2%) and ticks (6.0%) , but higher than that in cats (4.0%) , dogs (2.9%) , pigs (1.7%) , black goats (2.4%) , and wild animals (3.3%) . However, the prevalence of SFTSV was the highest in feral cats (17.5%) in the ROK . There has been a recent increase in the populations of feral cats, and they share habitats with wildlife, domestic animals, and humans.",
+              "list_items": [
+                "There has been a recent increase in the populations of feral cats, and they share habitats with wildlife, domestic animals, and humans."
+              ]
+            },
+            {
+              "evidence_id": "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+              "source": "10.1007_s00705-025-06411-5",
+              "span": "022 During the six-year study period, a total of 1,299 serum specimens from patients with suspected SFTSV infections were tested. SFTSV was detected in 126 serum samples, for an average positivity rate of 10.2% (Table 2).\n\nH.-G. Cho et al.\nDistribution of SFTSV genotypes in northern Gyeonggi province To analyze the local distribution of SFTSV, the location of presumed exposure of the SFTS patients to the virus was identified (Fig. 2). When the city or area of presumed exposure was not known, the city or area where the patient resided was used in the analysis. The results showed that subgenotype B-1 was dominant in all cities or areas of northern Gyeonggi province (i.e., Namyangju [26/28], Pocheon [16/18], and Paju [7/8]). For subgenotype B-2, the geographical distribution appeared to be restricted to the eastern part of Gyeonggi province (i.e., Gapyeong [4/6], Namyangju [2/28], and Yangpyeong [5/10",
+              "list_items": [
+                "When the city or area of presumed exposure was not known, the city or area where the patient resided was used in the analysis."
+              ]
+            },
+            {
+              "evidence_id": "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+              "source": "10.3892_ijmm.2025.5610",
+              "span": "en mortality via elevated viral loads, early immunosuppression and organ damage. Regional genotype variations and host factors like age also impact outcomes. Further research is essential to clarify these associations.\n3. Epidemiological characteristics SFTS distribution Time distribution. From 2010 to 2023, the incidence of SFTS in China showed a significant upward trend. In the early years (2010‑2016), the number of cases rose rapidly, peaking in 2016. There was a temporary decline in certain regions between 2017 and 2019, but the incidence increased again in recent years. By 2023, the national incidence had increased by 35 times compared to 2010 (52) (Table I). SFTS cases occur throughout the year but are seasonal, primarily from April to October, with a peak from May to July, coinciding with tick activity (53,54). Japan and South Korea, like China, have temperate and subtropical monsoon climates, leading to similar SFTS seasonality (55,56). Most Japanese cases occur from April to October, while in South",
+              "list_items": [
+                "en mortality via elevated viral loads, early immunosuppression and organ damage."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_microorganisms12040823_chunk0_t0-4096_t3648-3904",
+              "source": "10.3390_microorganisms12040823",
+              "span": " 0 17.34% 0.00% 0.00% Guizhou 52 0 2.35% 0.00% 0.00% Guangdong 40 0 1.81% 0.00% 0.00% Total 2214 1328 100.00% 100.00% 59.98% Figure 1. Geographical distribution of ticks collected in China. (A) Tick collection and distribution.\nThe colored areas are the provinces where ticks were collected. Bright yellow areas are the provinces where Haemaphysalis longicornis were collected, while dark yellow ones are the provinces where they were not. (B) Percentage of H. longicornis collected in total ticks in each province. ‘Others’ represent ticks that are not H. longicornis. The numbers in parentheses after each province represent the total number of ticks collected in that province.\n3.2. Geographical Distribution of Bisexual and Parthenogenetic H. longicornis We determined the reproductive patterns of 271 H. longicornis using flow cyt",
+              "list_items": []
+            },
+            {
+              "evidence_id": "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+              "source": "10.3390_v15122338",
+              "span": " stray and domesticated animals in each species (dog or cat) was carried out. Overall, stray dogs (53.9%, 55/102) exhibited a significantly higher prevalence compared to domesticated dogs (17.1%, 56/327).\nOn the other hand, the SFTSV RNA prevalence was statistically no different (p = 0.158) between domesticated cats (17.2%, 37/215) and stray cats (24.2%, 22/91).\n3.3. The Geographical Distribution of SFTSV in Dogs and Cats Given the transmissible nature of SFTSV and the relatively confined area of Taiwan (covering 36,194 km2), a comprehensive grouping strategy was employed for the nine cities/counties where the samples were collected. These cities were categorized into four geographical regions, namely the northern, central, southern, and eastern regions, alongside the inclusion of a fifth western island (Kinmen) (Figure 1). This systematic approach allowed us to explore potential geographical correlations with SFTSV prevalence.\nThe sample numbers, based on this regional classification, are illustrated in Table 3.\nSignificant variations in S",
+              "list_items": [
+                "stray and domesticated animals in each species (dog or cat) was carried out.",
+                "These cities were categorized into four geographical regions, namely the northern, central, southern, and eastern regions, alongside the inclusion of a fifth western island (Kinmen) (Figure 1).",
+                "The sample numbers, based on this regional classification, are illustrated in Table 3."
+              ]
+            },
+            {
+              "evidence_id": "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+              "source": "10.1007_s00705-025-06411-5",
+              "span": "34 80–99 years old 8 (34.8) 11 (47.8) 4 (17.4) 23 Total 20 (15.9) 84 (66.7) 22 (17.5) 126 *N/A, not available Fig. 2  Local distribution of SFTSV genotypes in northern Gyeonggi province, South Korea, from 2017 to 2022. The number of SFTS patients in each area in northern Gyeonggi province is shown as a stacked bar chart with different patterns for the different genotypes.\nNames of area or cities are shown at the left, and the bars indicate the number of patients. N/A, not available. A map of Gyeonggi province (grey) is shown at the right. The blue box shows a map of South Korea, with Gyeonggi province circled in red\n\nH.-G. Cho et al.\ncase-fatality rate in SFTS patients could still be discerned (Table 5), and this was also consistent with previous reports . Although an increase in case-fatality rate with",
+              "list_items": [
+                "Names of area or cities are shown at the left, and the bars indicate the number of patients."
+              ]
+            },
+            {
+              "evidence_id": "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+              "source": "10.1186_s12985-023-02155-3",
+              "span": "5.77, P < 0.001) (Table 4).\n\nPage 6 of 7 Liu et al. Virology Journal (2023) 20:199 Discussion SFTS is a common infectious disease that is transmit ted primarily by tick bite . SFTSV can also be trans ferred person-to-person through contact with blood, secretions or mucous of a patient with SFTS .\nIn this study, the Index patient had a history of exposure to ticks during farm work. When we examined the Index patient’s close contacts, 16.3% (8/49) were positive for virus-specific IgM, which is higher than those in other studies . Li et al. have reported the seroprevalence of SFTSV in healthy Chinese people varies from 0.23 to 9.17%, depending on the population, geography, as well as the test reagent and methods. Only a small proportion of exposed individuals develop clinical symptoms .\nIn this study, we also conducted screening on a healthy population in the village where the Index case occurred, the nucleic acid and antibody test results were negative for all the volunteers.\nStudies have reported that",
+              "list_items": [
+                "SFTSV can also be trans ferred person-to-person through contact with blood, secretions or mucous of a patient with SFTS .",
+                "When we examined the Index patient’s close contacts, 16.3% (8/49) were positive for virus-specific IgM, which is higher than those in other studies .",
+                "In this study, we also conducted screening on a healthy population in the village where the Index case occurred, the nucleic acid and antibody test results were negative for all the volunteers."
+              ]
+            },
+            {
+              "evidence_id": "10.3390_v17060854_chunk1_t3840-5438_t192-448",
+              "source": "10.3390_v17060854",
+              "span": " SFTSV variants obtained from ticks; scale bar indicates nucleotide substitutions per site.\n\nViruses 2025, 17, 854 10 of 13 Figure 6. Phylogenetic analysis of SFTSV variants from patients and ticks. Maximum likelihood trees were constructed based on full-length of S segment. Red circles indicate the sequences of SFTSV variants obtained from patients with SFTS; black triangles indicate the sequences of SFTSV variants obtained from ticks; black square indicate the sequences of SFTSV strains obtained from sheep in Hebei Province, China. Scale bar indicates nucleotide substitutions per site.\n4. Discussion Prior to 2022, Hebei Province had only reported imported cases of SFTS, but locally acquired cases were first identified in 2022, with an upward trend in incidence observed thereafter. To confirm the existence of an SFTS endemic focus in Hebei Province, we conducted a multidisciplinary investigation integrating epidemiological surveillance, molecular characterization of SFTSV and seroprevalence analysis. Our findings conclusively demonstrate that Hebei Province has evolved into a newly established endemic focus for SFTSV transmission.\nIn China, SFTS cases have been predominantly reported in",
+              "list_items": []
+            }
+          ]
+        },
+        "value_cleaning": {
+          "geographic_distribution": {
+            "cleaned_values": [
+              "Baoding",
+              "Tangshan",
+              "Hengshui",
+              "Langfang",
+              "longicornis",
+              "altitude had a greater effect",
+              "while the distribution of H.",
+              "which had a lower elevation",
+              "higher precipitation than the northwestern",
+              "southwestern China (Miao et al.",
+              "2020).",
+              "persulcatus",
+              "mixed broadleaf-conifer forest (Sun RX et al.",
+              "2017).",
+              "In agreement with previous studies",
+              "the Lesser Khingan Mountains",
+              "the Changbai",
+              "The cluster reported in this study occurred in Xinchang County",
+              "Shaoxing City",
+              "Zhe jiang Province",
+              "and involved household",
+              "nosocomial transmission",
+              "which is relatively uncommon.",
+              "South Korea",
+              "Japan",
+              "Vietnam",
+              "Pakistan in recent years (Yu et al",
+              "China was SFTSV of the genus Bandavirus",
+              "LCMV could be carried by 4 species of ticks",
+              "Shaanxi Provinces.",
+              "CCHFV was discovered early",
+              "classified into three genotypes: Asian",
+              "European",
+              "African (Serretiello et al.",
+              "associated with climatic factors",
+              "including light",
+              "humidity",
+              "and temperature (Pérez et al.",
+              "2024).",
+              "hystricis prefers warm",
+              "humid environments",
+              "while H.",
+              "longicornis exhibits stronger environmental adaptability",
+              "urban areas (Miao et al.",
+              "Changes in environmental factors",
+              "particularly climatic-ecological",
+              "geographical landscape factors",
+              "may provide suitable ecological conditions for natural tick population growth",
+              "contributing to the seasonal variation characteristics of SFTSV infections.",
+              "SFTS was first reported in central China between March",
+              "July 2009",
+              "and Japan",
+              "(A) Nairoviridae",
+              "(B) Phenuiviridae",
+              "(C) Flaviviridae",
+              "(D) Paramyxoviridae",
+              "Arenaviridae.",
+              "However",
+              "there was no information on the clinical symptoms",
+              "if any",
+              "in the dogs at this shelter around February 2022.",
+              "21 of the 34 provinces in China",
+              "as well as in other Asian countries such as Korea",
+              "and Pakistan",
+              "a total of 12 states in the Eastern",
+              "Central United States",
+              "and HRTV shares genetic similarities with SFTSV",
+              "many dogs in Thailand possessed anti-SFTSV antibodies",
+              "indicating that SFTSV has already spread in Thailand",
+              "similar to in other Asian countries [5–11].",
+              "Since currently",
+              "only RT-PCR approach was used for clinical diagnosis of SFTS",
+              "but it is not yet widely used in rural areas",
+              "especially with limited medical resources.",
+              "bei Province",
+              "we conducted a multidisciplinary investigation integrating epidemiological surveillance",
+              "molecular characterization of SFTSV",
+              "seroprevalence analysis.",
+              "In China",
+              "hilly rural regions of seven high-incidence provinces .",
+              "Cangzhou City is characterized by the absence of traditional topographic risk factors",
+              "has no mountains or hills in the city.",
+              "Yanshan",
+              "Haixing Counties",
+              "are geographically adjacent to Dezhou",
+              "Binzhou cities of Shandong Province.",
+              "with a high prevalence in Shandong",
+              "Liaoning Provinces",
+              "partially overlapping with SFTSV.",
+              "It was also found in forested",
+              "shrub-covered areas of Yunnan",
+              "Guizhou Provinces.",
+              "ihai Center for Disease Control",
+              "Prevention",
+              "Weihai",
+              "Shandong Province",
+              "P.R.",
+              "China 3Department of Infectious Disease Control",
+              "Wendeng Center for Disease Control",
+              "China 4Weihai Health Commission",
+              "SFTS virus (SFTSV) is transmitted by tick bites",
+              "contact with the blood or body fluids of SFTS patients.",
+              "Method  An epidemiological investigation",
+              "a genetic analysis of patients",
+              "animals",
+              "working environment were carried out.",
+              "Subgenotype B-1",
+              "which was predomi nant in Gyeonggi province",
+              "was detected in all cities or areas of interest.",
+              "Phenuiviridae",
+              "and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)",
+              "and was identified as the causative pathogen of the disease",
+              "was first isolated from the serum samples of a patient with SFTS in China in 2009 .",
+              "SFTSV was mainly prevalent in central",
+              "eastern China",
+              "Serological evidence also suggested SFTSV prevalence",
+              "occurrence of human exposure in Pakistan",
+              "ended at the end of the third quarter",
+              "August.",
+              "There has been a recent increase in the populations of feral cats",
+              "and they share habitats with wildlife",
+              "domestic animals",
+              "and humans.",
+              "When the city or area of presumed exposure was not known",
+              "the city or area where the patient resided was used in the analysis.",
+              "en mortality via elevated viral loads",
+              "early immunosuppression",
+              "organ damage.",
+              "stray",
+              "These cities were categorized into four geographical regions",
+              "namely the northern",
+              "central",
+              "southern",
+              "and eastern regions",
+              "alongside the inclusion of a fifth western island (Kinmen) (Figure 1).",
+              "The sample numbers",
+              "based on this regional classification",
+              "are illustrated in Table 3.",
+              "Names of area or cities are shown at the left",
+              "and the bars indicate the number of patients.",
+              "SFTSV can also be trans ferred person-to-person through contact with blood",
+              "secretions or mucous of a patient with SFTS .",
+              "When we examined the Index patient’s close contacts",
+              "16.3% (8/49) were positive for virus-specific IgM",
+              "which is higher than those in other studies .",
+              "In this study",
+              "the nucleic acid",
+              "antibody test results were negative for all the volunteers."
+            ],
+            "removed_values": [
+              "with lower altitude resulting in more SFTSV cases",
+              "This might be related to the fact that SFTSV cases were mainly in central China",
+              "the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain",
+              "which were densely distributed in the XUAR",
+              "widely distributed in rural landscapes",
+              "with subsequent cases reported across various provinces.",
+              "Most cases are concentrated in China",
+              "At least three human cases have already been reported in Thailand",
+              "more human cases will occur in the future",
+              "SFTS cases have been predominantly reported in mountainous",
+              "with the largest number of cases of Cangzhou city",
+              "DTV is now distributed in six provinces of China",
+              "where reported human cases confirmed with SFTSV infection .",
+              "indicating that the virus may be widely distributed in East Asia.",
+              "The peak of cases began at the beginning of the second quarter",
+              "with cases mainly concentrated between May",
+              "domesticated animals in each species (dog or cat) was carried out.",
+              "we also conducted screening on a healthy population in the village where the Index case occurred"
+            ],
+            "normalization_map": {
+              "The imported cases were distributed in Baoding, Tangshan, Hengshui and Langfang, with one case each.": "Baoding, Tangshan, Hengshui and Langfang,"
+            },
+            "split_map": {
+              "Baoding, Tangshan, Hengshui and Langfang,": [
+                "Baoding",
+                "Tangshan",
+                "Hengshui",
+                "Langfang"
+              ],
+              "longicornis and altitude had a greater effect, with lower altitude resulting in more SFTSV cases, while the distribution of H.": [
+                "longicornis",
+                "altitude had a greater effect",
+                "with lower altitude resulting in more SFTSV cases",
+                "while the distribution of H."
+              ],
+              "This might be related to the fact that SFTSV cases were mainly in central China, which had a lower elevation and higher precipitation than the northwestern and southwestern China (Miao et al., 2020).": [
+                "This might be related to the fact that SFTSV cases were mainly in central China",
+                "which had a lower elevation",
+                "higher precipitation than the northwestern",
+                "southwestern China (Miao et al.",
+                "2020)."
+              ],
+              "persulcatus and mixed broadleaf-conifer forest (Sun RX et al., 2017).": [
+                "persulcatus",
+                "mixed broadleaf-conifer forest (Sun RX et al.",
+                "2017)."
+              ],
+              "In agreement with previous studies, the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain, the Lesser Khingan Mountains, the Changbai": [
+                "In agreement with previous studies",
+                "the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain",
+                "the Lesser Khingan Mountains",
+                "the Changbai"
+              ],
+              "The cluster reported in this study occurred in Xinchang County, Shaoxing City, Zhe jiang Province, and involved household and nosocomial transmission, which is relatively uncommon.": [
+                "The cluster reported in this study occurred in Xinchang County",
+                "Shaoxing City",
+                "Zhe jiang Province",
+                "and involved household",
+                "nosocomial transmission",
+                "which is relatively uncommon."
+              ],
+              "LCMV could be carried by 4 species of ticks, which were densely distributed in the XUAR and Shaanxi Provinces.": [
+                "LCMV could be carried by 4 species of ticks",
+                "which were densely distributed in the XUAR",
+                "Shaanxi Provinces."
+              ],
+              "CCHFV was discovered early and classified into three genotypes: Asian, European and African (Serretiello et al., 2020).": [
+                "CCHFV was discovered early",
+                "classified into three genotypes: Asian",
+                "European",
+                "African (Serretiello et al.",
+                "2020)."
+              ],
+              "associated with climatic factors, including light, humidity, and temperature (Pérez et al., 2024).": [
+                "associated with climatic factors",
+                "including light",
+                "humidity",
+                "and temperature (Pérez et al.",
+                "2024)."
+              ],
+              "hystricis prefers warm and humid environments, while H.": [
+                "hystricis prefers warm",
+                "humid environments",
+                "while H."
+              ],
+              "longicornis exhibits stronger environmental adaptability, widely distributed in rural landscapes and urban areas (Miao et al., 2020).": [
+                "longicornis exhibits stronger environmental adaptability",
+                "widely distributed in rural landscapes",
+                "urban areas (Miao et al.",
+                "2020)."
+              ],
+              "Changes in environmental factors, particularly climatic-ecological and geographical landscape factors, may provide suitable ecological conditions for natural tick population growth, contributing to the seasonal variation characteristics of SFTSV infections.": [
+                "Changes in environmental factors",
+                "particularly climatic-ecological",
+                "geographical landscape factors",
+                "may provide suitable ecological conditions for natural tick population growth",
+                "contributing to the seasonal variation characteristics of SFTSV infections."
+              ],
+              "SFTS was first reported in central China between March and July 2009, with subsequent cases reported across various provinces.": [
+                "SFTS was first reported in central China between March",
+                "July 2009",
+                "with subsequent cases reported across various provinces."
+              ],
+              "Most cases are concentrated in China, South Korea, and Japan": [
+                "Most cases are concentrated in China",
+                "South Korea",
+                "and Japan"
+              ],
+              "(A) Nairoviridae, (B) Phenuiviridae, (C) Flaviviridae, (D) Paramyxoviridae and Arenaviridae.": [
+                "(A) Nairoviridae",
+                "(B) Phenuiviridae",
+                "(C) Flaviviridae",
+                "(D) Paramyxoviridae",
+                "Arenaviridae."
+              ],
+              "However, there was no information on the clinical symptoms, if any, in the dogs at this shelter around February 2022.": [
+                "However",
+                "there was no information on the clinical symptoms",
+                "if any",
+                "in the dogs at this shelter around February 2022."
+              ],
+              "At least three human cases have already been reported in Thailand and many dogs in Thailand possessed anti-SFTSV antibodies, indicating that SFTSV has already spread in Thailand and more human cases will occur in the future, similar to in other Asian countries [5–11].": [
+                "At least three human cases have already been reported in Thailand",
+                "many dogs in Thailand possessed anti-SFTSV antibodies",
+                "indicating that SFTSV has already spread in Thailand",
+                "more human cases will occur in the future",
+                "similar to in other Asian countries [5–11]."
+              ],
+              "Since currently, only RT-PCR approach was used for clinical diagnosis of SFTS, but it is not yet widely used in rural areas, especially with limited medical resources.": [
+                "Since currently",
+                "only RT-PCR approach was used for clinical diagnosis of SFTS",
+                "but it is not yet widely used in rural areas",
+                "especially with limited medical resources."
+              ],
+              "bei Province, we conducted a multidisciplinary investigation integrating epidemiological surveillance, molecular characterization of SFTSV and seroprevalence analysis.": [
+                "bei Province",
+                "we conducted a multidisciplinary investigation integrating epidemiological surveillance",
+                "molecular characterization of SFTSV",
+                "seroprevalence analysis."
+              ],
+              "In China, SFTS cases have been predominantly reported in mountainous and hilly rural regions of seven high-incidence provinces .": [
+                "In China",
+                "SFTS cases have been predominantly reported in mountainous",
+                "hilly rural regions of seven high-incidence provinces ."
+              ],
+              "Cangzhou City is characterized by the absence of traditional topographic risk factors and has no mountains or hills in the city.": [
+                "Cangzhou City is characterized by the absence of traditional topographic risk factors",
+                "has no mountains or hills in the city."
+              ],
+              "Yanshan and Haixing Counties, with the largest number of cases of Cangzhou city, are geographically adjacent to Dezhou and Binzhou cities of Shandong Province.": [
+                "Yanshan",
+                "Haixing Counties",
+                "with the largest number of cases of Cangzhou city",
+                "are geographically adjacent to Dezhou",
+                "Binzhou cities of Shandong Province."
+              ],
+              "DTV is now distributed in six provinces of China, with a high prevalence in Shandong and Liaoning Provinces, partially overlapping with SFTSV.": [
+                "DTV is now distributed in six provinces of China",
+                "with a high prevalence in Shandong",
+                "Liaoning Provinces",
+                "partially overlapping with SFTSV."
+              ],
+              "It was also found in forested and shrub-covered areas of Yunnan and Guizhou Provinces.": [
+                "It was also found in forested",
+                "shrub-covered areas of Yunnan",
+                "Guizhou Provinces."
+              ],
+              "ihai Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.": [
+                "ihai Center for Disease Control",
+                "Prevention",
+                "Weihai",
+                "Shandong Province",
+                "P.R."
+              ],
+              "China 3Department of Infectious Disease Control, Wendeng Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.": [
+                "China 3Department of Infectious Disease Control",
+                "Wendeng Center for Disease Control",
+                "Prevention",
+                "Weihai",
+                "Shandong Province",
+                "P.R."
+              ],
+              "China 4Weihai Health Commission, Weihai, Shandong Province, P.R.": [
+                "China 4Weihai Health Commission",
+                "Weihai",
+                "Shandong Province",
+                "P.R."
+              ],
+              "SFTS virus (SFTSV) is transmitted by tick bites and contact with the blood or body fluids of SFTS patients.": [
+                "SFTS virus (SFTSV) is transmitted by tick bites",
+                "contact with the blood or body fluids of SFTS patients."
+              ],
+              "Method  An epidemiological investigation and a genetic analysis of patients, animals and working environment were carried out.": [
+                "Method  An epidemiological investigation",
+                "a genetic analysis of patients",
+                "animals",
+                "working environment were carried out."
+              ],
+              "Subgenotype B-1, which was predomi nant in Gyeonggi province, was detected in all cities or areas of interest.": [
+                "Subgenotype B-1",
+                "which was predomi nant in Gyeonggi province",
+                "was detected in all cities or areas of interest."
+              ],
+              "Phenuiviridae, and genus Bandavirus (https://talk.ictvonline.org/taxonomy/), and was identified as the causative pathogen of the disease and was first isolated from the serum samples of a patient with SFTS in China in 2009 .": [
+                "Phenuiviridae",
+                "and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)",
+                "and was identified as the causative pathogen of the disease",
+                "was first isolated from the serum samples of a patient with SFTS in China in 2009 ."
+              ],
+              "SFTSV was mainly prevalent in central and eastern China, Japan and South Korea, where reported human cases confirmed with SFTSV infection .": [
+                "SFTSV was mainly prevalent in central",
+                "eastern China",
+                "Japan",
+                "South Korea",
+                "where reported human cases confirmed with SFTSV infection ."
+              ],
+              "Serological evidence also suggested SFTSV prevalence and occurrence of human exposure in Pakistan and Vietnam , indicating that the virus may be widely distributed in East Asia.": [
+                "Serological evidence also suggested SFTSV prevalence",
+                "occurrence of human exposure in Pakistan",
+                "Vietnam",
+                "indicating that the virus may be widely distributed in East Asia."
+              ],
+              "The peak of cases began at the beginning of the second quarter and ended at the end of the third quarter, with cases mainly concentrated between May and August.": [
+                "The peak of cases began at the beginning of the second quarter",
+                "ended at the end of the third quarter",
+                "with cases mainly concentrated between May",
+                "August."
+              ],
+              "There has been a recent increase in the populations of feral cats, and they share habitats with wildlife, domestic animals, and humans.": [
+                "There has been a recent increase in the populations of feral cats",
+                "and they share habitats with wildlife",
+                "domestic animals",
+                "and humans."
+              ],
+              "When the city or area of presumed exposure was not known, the city or area where the patient resided was used in the analysis.": [
+                "When the city or area of presumed exposure was not known",
+                "the city or area where the patient resided was used in the analysis."
+              ],
+              "en mortality via elevated viral loads, early immunosuppression and organ damage.": [
+                "en mortality via elevated viral loads",
+                "early immunosuppression",
+                "organ damage."
+              ],
+              "stray and domesticated animals in each species (dog or cat) was carried out.": [
+                "stray",
+                "domesticated animals in each species (dog or cat) was carried out."
+              ],
+              "These cities were categorized into four geographical regions, namely the northern, central, southern, and eastern regions, alongside the inclusion of a fifth western island (Kinmen) (Figure 1).": [
+                "These cities were categorized into four geographical regions",
+                "namely the northern",
+                "central",
+                "southern",
+                "and eastern regions",
+                "alongside the inclusion of a fifth western island (Kinmen) (Figure 1)."
+              ],
+              "The sample numbers, based on this regional classification, are illustrated in Table 3.": [
+                "The sample numbers",
+                "based on this regional classification",
+                "are illustrated in Table 3."
+              ],
+              "Names of area or cities are shown at the left, and the bars indicate the number of patients.": [
+                "Names of area or cities are shown at the left",
+                "and the bars indicate the number of patients."
+              ],
+              "SFTSV can also be trans ferred person-to-person through contact with blood, secretions or mucous of a patient with SFTS .": [
+                "SFTSV can also be trans ferred person-to-person through contact with blood",
+                "secretions or mucous of a patient with SFTS ."
+              ],
+              "When we examined the Index patient’s close contacts, 16.3% (8/49) were positive for virus-specific IgM, which is higher than those in other studies .": [
+                "When we examined the Index patient’s close contacts",
+                "16.3% (8/49) were positive for virus-specific IgM",
+                "which is higher than those in other studies ."
+              ],
+              "In this study, we also conducted screening on a healthy population in the village where the Index case occurred, the nucleic acid and antibody test results were negative for all the volunteers.": [
+                "In this study",
+                "we also conducted screening on a healthy population in the village where the Index case occurred",
+                "the nucleic acid",
+                "antibody test results were negative for all the volunteers."
+              ]
+            },
+            "debug": {
+              "semantic_type": "location",
+              "evidence_ids": [
+                "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+                "10.3390_v17060854_chunk0_t0-4096_t1536-1792",
+                "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+                "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+                "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+                "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+                "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+                "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+                "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+                "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+                "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+                "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+                "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+                "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+                "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+                "10.3390_v15122403_chunk0_t0-3872_t2688-2944",
+                "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+                "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+                "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+                "10.3390_v17060854_chunk0_t0-4096_t1344-1600",
+                "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+                "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+                "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+                "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+                "10.3390_microorganisms12040823_chunk0_t0-4096_t3648-3904",
+                "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+                "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+                "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+                "10.3390_v17060854_chunk1_t3840-5438_t192-448"
+              ]
+            }
+          }
+        },
+        "value_cleaning_by_block": {
+          "geographic_distribution": {
+            "10.3390_v17060854_chunk0_t0-4096_t1728-1984": {
+              "cleaned_values": [
+                "Baoding",
+                "Tangshan",
+                "Hengshui",
+                "Langfang"
+              ],
+              "removed_values": [],
+              "normalization_map": {
+                "The imported cases were distributed in Baoding, Tangshan, Hengshui and Langfang, with one case each.": "Baoding, Tangshan, Hengshui and Langfang,"
+              },
+              "split_map": {
+                "Baoding, Tangshan, Hengshui and Langfang,": [
+                  "Baoding",
+                  "Tangshan",
+                  "Hengshui",
+                  "Langfang"
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_v17060854_chunk0_t0-4096_t1728-1984"
+                ]
+              }
+            },
+            "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176": {
+              "cleaned_values": [
+                "longicornis",
+                "altitude had a greater effect",
+                "while the distribution of H.",
+                "which had a lower elevation",
+                "higher precipitation than the northwestern",
+                "southwestern China (Miao et al.",
+                "2020).",
+                "persulcatus",
+                "mixed broadleaf-conifer forest (Sun RX et al.",
+                "2017).",
+                "In agreement with previous studies",
+                "the Lesser Khingan Mountains",
+                "the Changbai"
+              ],
+              "removed_values": [
+                "with lower altitude resulting in more SFTSV cases",
+                "This might be related to the fact that SFTSV cases were mainly in central China",
+                "the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "longicornis and altitude had a greater effect, with lower altitude resulting in more SFTSV cases, while the distribution of H.": [
+                  "longicornis",
+                  "altitude had a greater effect",
+                  "with lower altitude resulting in more SFTSV cases",
+                  "while the distribution of H."
+                ],
+                "This might be related to the fact that SFTSV cases were mainly in central China, which had a lower elevation and higher precipitation than the northwestern and southwestern China (Miao et al., 2020).": [
+                  "This might be related to the fact that SFTSV cases were mainly in central China",
+                  "which had a lower elevation",
+                  "higher precipitation than the northwestern",
+                  "southwestern China (Miao et al.",
+                  "2020)."
+                ],
+                "persulcatus and mixed broadleaf-conifer forest (Sun RX et al., 2017).": [
+                  "persulcatus",
+                  "mixed broadleaf-conifer forest (Sun RX et al.",
+                  "2017)."
+                ],
+                "In agreement with previous studies, the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain, the Lesser Khingan Mountains, the Changbai": [
+                  "In agreement with previous studies",
+                  "the majority of TBEV in China was distributed in the forested areas of the Great Khingan Mountain",
+                  "the Lesser Khingan Mountains",
+                  "the Changbai"
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176"
+                ]
+              }
+            },
+            "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904": {
+              "cleaned_values": [
+                "The cluster reported in this study occurred in Xinchang County",
+                "Shaoxing City",
+                "Zhe jiang Province",
+                "and involved household",
+                "nosocomial transmission",
+                "which is relatively uncommon."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "The cluster reported in this study occurred in Xinchang County, Shaoxing City, Zhe jiang Province, and involved household and nosocomial transmission, which is relatively uncommon.": [
+                  "The cluster reported in this study occurred in Xinchang County",
+                  "Shaoxing City",
+                  "Zhe jiang Province",
+                  "and involved household",
+                  "nosocomial transmission",
+                  "which is relatively uncommon."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904"
+                ]
+              }
+            },
+            "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944": {
+              "cleaned_values": [
+                "South Korea",
+                "Japan",
+                "Vietnam",
+                "Pakistan in recent years (Yu et al",
+                "China was SFTSV of the genus Bandavirus"
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {},
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944"
+                ]
+              }
+            },
+            "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520": {
+              "cleaned_values": [
+                "LCMV could be carried by 4 species of ticks",
+                "Shaanxi Provinces.",
+                "CCHFV was discovered early",
+                "classified into three genotypes: Asian",
+                "European",
+                "African (Serretiello et al.",
+                "2020)."
+              ],
+              "removed_values": [
+                "which were densely distributed in the XUAR"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "LCMV could be carried by 4 species of ticks, which were densely distributed in the XUAR and Shaanxi Provinces.": [
+                  "LCMV could be carried by 4 species of ticks",
+                  "which were densely distributed in the XUAR",
+                  "Shaanxi Provinces."
+                ],
+                "CCHFV was discovered early and classified into three genotypes: Asian, European and African (Serretiello et al., 2020).": [
+                  "CCHFV was discovered early",
+                  "classified into three genotypes: Asian",
+                  "European",
+                  "African (Serretiello et al.",
+                  "2020)."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520"
+                ]
+              }
+            },
+            "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408": {
+              "cleaned_values": [
+                "associated with climatic factors",
+                "including light",
+                "humidity",
+                "and temperature (Pérez et al.",
+                "2024).",
+                "hystricis prefers warm",
+                "humid environments",
+                "while H.",
+                "longicornis exhibits stronger environmental adaptability",
+                "urban areas (Miao et al.",
+                "2020).",
+                "Changes in environmental factors",
+                "particularly climatic-ecological",
+                "geographical landscape factors",
+                "may provide suitable ecological conditions for natural tick population growth",
+                "contributing to the seasonal variation characteristics of SFTSV infections.",
+                "SFTS was first reported in central China between March",
+                "July 2009",
+                "South Korea",
+                "and Japan"
+              ],
+              "removed_values": [
+                "widely distributed in rural landscapes",
+                "with subsequent cases reported across various provinces.",
+                "Most cases are concentrated in China"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "associated with climatic factors, including light, humidity, and temperature (Pérez et al., 2024).": [
+                  "associated with climatic factors",
+                  "including light",
+                  "humidity",
+                  "and temperature (Pérez et al.",
+                  "2024)."
+                ],
+                "hystricis prefers warm and humid environments, while H.": [
+                  "hystricis prefers warm",
+                  "humid environments",
+                  "while H."
+                ],
+                "longicornis exhibits stronger environmental adaptability, widely distributed in rural landscapes and urban areas (Miao et al., 2020).": [
+                  "longicornis exhibits stronger environmental adaptability",
+                  "widely distributed in rural landscapes",
+                  "urban areas (Miao et al.",
+                  "2020)."
+                ],
+                "Changes in environmental factors, particularly climatic-ecological and geographical landscape factors, may provide suitable ecological conditions for natural tick population growth, contributing to the seasonal variation characteristics of SFTSV infections.": [
+                  "Changes in environmental factors",
+                  "particularly climatic-ecological",
+                  "geographical landscape factors",
+                  "may provide suitable ecological conditions for natural tick population growth",
+                  "contributing to the seasonal variation characteristics of SFTSV infections."
+                ],
+                "SFTS was first reported in central China between March and July 2009, with subsequent cases reported across various provinces.": [
+                  "SFTS was first reported in central China between March",
+                  "July 2009",
+                  "with subsequent cases reported across various provinces."
+                ],
+                "Most cases are concentrated in China, South Korea, and Japan": [
+                  "Most cases are concentrated in China",
+                  "South Korea",
+                  "and Japan"
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408"
+                ]
+              }
+            },
+            "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944": {
+              "cleaned_values": [
+                "(A) Nairoviridae",
+                "(B) Phenuiviridae",
+                "(C) Flaviviridae",
+                "(D) Paramyxoviridae",
+                "Arenaviridae."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "(A) Nairoviridae, (B) Phenuiviridae, (C) Flaviviridae, (D) Paramyxoviridae and Arenaviridae.": [
+                  "(A) Nairoviridae",
+                  "(B) Phenuiviridae",
+                  "(C) Flaviviridae",
+                  "(D) Paramyxoviridae",
+                  "Arenaviridae."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944"
+                ]
+              }
+            },
+            "10.3390_v15122403_chunk0_t0-3872_t2880-3136": {
+              "cleaned_values": [
+                "However",
+                "there was no information on the clinical symptoms",
+                "if any",
+                "in the dogs at this shelter around February 2022."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "However, there was no information on the clinical symptoms, if any, in the dogs at this shelter around February 2022.": [
+                  "However",
+                  "there was no information on the clinical symptoms",
+                  "if any",
+                  "in the dogs at this shelter around February 2022."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_v15122403_chunk0_t0-3872_t2880-3136"
+                ]
+              }
+            },
+            "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712": {
+              "cleaned_values": [
+                "21 of the 34 provinces in China",
+                "as well as in other Asian countries such as Korea",
+                "Japan",
+                "Vietnam",
+                "and Pakistan",
+                "a total of 12 states in the Eastern",
+                "Central United States",
+                "and HRTV shares genetic similarities with SFTSV"
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {},
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712"
+                ]
+              }
+            },
+            "10.3390_v15122403_chunk0_t0-3872_t3072-3328": {
+              "cleaned_values": [
+                "many dogs in Thailand possessed anti-SFTSV antibodies",
+                "indicating that SFTSV has already spread in Thailand",
+                "similar to in other Asian countries [5–11]."
+              ],
+              "removed_values": [
+                "At least three human cases have already been reported in Thailand",
+                "more human cases will occur in the future"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "At least three human cases have already been reported in Thailand and many dogs in Thailand possessed anti-SFTSV antibodies, indicating that SFTSV has already spread in Thailand and more human cases will occur in the future, similar to in other Asian countries [5–11].": [
+                  "At least three human cases have already been reported in Thailand",
+                  "many dogs in Thailand possessed anti-SFTSV antibodies",
+                  "indicating that SFTSV has already spread in Thailand",
+                  "more human cases will occur in the future",
+                  "similar to in other Asian countries [5–11]."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_v15122403_chunk0_t0-3872_t3072-3328"
+                ]
+              }
+            },
+            "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368": {
+              "cleaned_values": [
+                "Since currently",
+                "only RT-PCR approach was used for clinical diagnosis of SFTS",
+                "but it is not yet widely used in rural areas",
+                "especially with limited medical resources."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "Since currently, only RT-PCR approach was used for clinical diagnosis of SFTS, but it is not yet widely used in rural areas, especially with limited medical resources.": [
+                  "Since currently",
+                  "only RT-PCR approach was used for clinical diagnosis of SFTS",
+                  "but it is not yet widely used in rural areas",
+                  "especially with limited medical resources."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368"
+                ]
+              }
+            },
+            "10.3390_v17060854_chunk1_t3840-5438_t384-640": {
+              "cleaned_values": [
+                "bei Province",
+                "we conducted a multidisciplinary investigation integrating epidemiological surveillance",
+                "molecular characterization of SFTSV",
+                "seroprevalence analysis.",
+                "In China",
+                "hilly rural regions of seven high-incidence provinces .",
+                "Cangzhou City is characterized by the absence of traditional topographic risk factors",
+                "has no mountains or hills in the city.",
+                "Yanshan",
+                "Haixing Counties",
+                "are geographically adjacent to Dezhou",
+                "Binzhou cities of Shandong Province."
+              ],
+              "removed_values": [
+                "SFTS cases have been predominantly reported in mountainous",
+                "with the largest number of cases of Cangzhou city"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "bei Province, we conducted a multidisciplinary investigation integrating epidemiological surveillance, molecular characterization of SFTSV and seroprevalence analysis.": [
+                  "bei Province",
+                  "we conducted a multidisciplinary investigation integrating epidemiological surveillance",
+                  "molecular characterization of SFTSV",
+                  "seroprevalence analysis."
+                ],
+                "In China, SFTS cases have been predominantly reported in mountainous and hilly rural regions of seven high-incidence provinces .": [
+                  "In China",
+                  "SFTS cases have been predominantly reported in mountainous",
+                  "hilly rural regions of seven high-incidence provinces ."
+                ],
+                "Cangzhou City is characterized by the absence of traditional topographic risk factors and has no mountains or hills in the city.": [
+                  "Cangzhou City is characterized by the absence of traditional topographic risk factors",
+                  "has no mountains or hills in the city."
+                ],
+                "Yanshan and Haixing Counties, with the largest number of cases of Cangzhou city, are geographically adjacent to Dezhou and Binzhou cities of Shandong Province.": [
+                  "Yanshan",
+                  "Haixing Counties",
+                  "with the largest number of cases of Cangzhou city",
+                  "are geographically adjacent to Dezhou",
+                  "Binzhou cities of Shandong Province."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_v17060854_chunk1_t3840-5438_t384-640"
+                ]
+              }
+            },
+            "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752": {
+              "cleaned_values": [
+                "with a high prevalence in Shandong",
+                "Liaoning Provinces",
+                "partially overlapping with SFTSV.",
+                "It was also found in forested",
+                "shrub-covered areas of Yunnan",
+                "Guizhou Provinces."
+              ],
+              "removed_values": [
+                "DTV is now distributed in six provinces of China"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "DTV is now distributed in six provinces of China, with a high prevalence in Shandong and Liaoning Provinces, partially overlapping with SFTSV.": [
+                  "DTV is now distributed in six provinces of China",
+                  "with a high prevalence in Shandong",
+                  "Liaoning Provinces",
+                  "partially overlapping with SFTSV."
+                ],
+                "It was also found in forested and shrub-covered areas of Yunnan and Guizhou Provinces.": [
+                  "It was also found in forested",
+                  "shrub-covered areas of Yunnan",
+                  "Guizhou Provinces."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752"
+                ]
+              }
+            },
+            "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640": {
+              "cleaned_values": [
+                "ihai Center for Disease Control",
+                "Prevention",
+                "Weihai",
+                "Shandong Province",
+                "P.R.",
+                "China 3Department of Infectious Disease Control",
+                "Wendeng Center for Disease Control",
+                "China 4Weihai Health Commission",
+                "SFTS virus (SFTSV) is transmitted by tick bites",
+                "contact with the blood or body fluids of SFTS patients.",
+                "Method  An epidemiological investigation",
+                "a genetic analysis of patients",
+                "animals",
+                "working environment were carried out."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "ihai Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.": [
+                  "ihai Center for Disease Control",
+                  "Prevention",
+                  "Weihai",
+                  "Shandong Province",
+                  "P.R."
+                ],
+                "China 3Department of Infectious Disease Control, Wendeng Center for Disease Control and Prevention, Weihai, Shandong Province, P.R.": [
+                  "China 3Department of Infectious Disease Control",
+                  "Wendeng Center for Disease Control",
+                  "Prevention",
+                  "Weihai",
+                  "Shandong Province",
+                  "P.R."
+                ],
+                "China 4Weihai Health Commission, Weihai, Shandong Province, P.R.": [
+                  "China 4Weihai Health Commission",
+                  "Weihai",
+                  "Shandong Province",
+                  "P.R."
+                ],
+                "SFTS virus (SFTSV) is transmitted by tick bites and contact with the blood or body fluids of SFTS patients.": [
+                  "SFTS virus (SFTSV) is transmitted by tick bites",
+                  "contact with the blood or body fluids of SFTS patients."
+                ],
+                "Method  An epidemiological investigation and a genetic analysis of patients, animals and working environment were carried out.": [
+                  "Method  An epidemiological investigation",
+                  "a genetic analysis of patients",
+                  "animals",
+                  "working environment were carried out."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640"
+                ]
+              }
+            },
+            "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712": {
+              "cleaned_values": [
+                "Subgenotype B-1",
+                "which was predomi nant in Gyeonggi province",
+                "was detected in all cities or areas of interest."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "Subgenotype B-1, which was predomi nant in Gyeonggi province, was detected in all cities or areas of interest.": [
+                  "Subgenotype B-1",
+                  "which was predomi nant in Gyeonggi province",
+                  "was detected in all cities or areas of interest."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712"
+                ]
+              }
+            },
+            "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600": {
+              "cleaned_values": [
+                "Phenuiviridae",
+                "and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)",
+                "and was identified as the causative pathogen of the disease",
+                "was first isolated from the serum samples of a patient with SFTS in China in 2009 .",
+                "SFTSV was mainly prevalent in central",
+                "eastern China",
+                "Japan",
+                "South Korea",
+                "Serological evidence also suggested SFTSV prevalence",
+                "occurrence of human exposure in Pakistan",
+                "Vietnam"
+              ],
+              "removed_values": [
+                "where reported human cases confirmed with SFTSV infection .",
+                "indicating that the virus may be widely distributed in East Asia."
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "Phenuiviridae, and genus Bandavirus (https://talk.ictvonline.org/taxonomy/), and was identified as the causative pathogen of the disease and was first isolated from the serum samples of a patient with SFTS in China in 2009 .": [
+                  "Phenuiviridae",
+                  "and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)",
+                  "and was identified as the causative pathogen of the disease",
+                  "was first isolated from the serum samples of a patient with SFTS in China in 2009 ."
+                ],
+                "SFTSV was mainly prevalent in central and eastern China, Japan and South Korea, where reported human cases confirmed with SFTSV infection .": [
+                  "SFTSV was mainly prevalent in central",
+                  "eastern China",
+                  "Japan",
+                  "South Korea",
+                  "where reported human cases confirmed with SFTSV infection ."
+                ],
+                "Serological evidence also suggested SFTSV prevalence and occurrence of human exposure in Pakistan and Vietnam , indicating that the virus may be widely distributed in East Asia.": [
+                  "Serological evidence also suggested SFTSV prevalence",
+                  "occurrence of human exposure in Pakistan",
+                  "Vietnam",
+                  "indicating that the virus may be widely distributed in East Asia."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600"
+                ]
+              }
+            },
+            "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984": {
+              "cleaned_values": [
+                "ended at the end of the third quarter",
+                "August."
+              ],
+              "removed_values": [
+                "The peak of cases began at the beginning of the second quarter",
+                "with cases mainly concentrated between May"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "The peak of cases began at the beginning of the second quarter and ended at the end of the third quarter, with cases mainly concentrated between May and August.": [
+                  "The peak of cases began at the beginning of the second quarter",
+                  "ended at the end of the third quarter",
+                  "with cases mainly concentrated between May",
+                  "August."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984"
+                ]
+              }
+            },
+            "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944": {
+              "cleaned_values": [
+                "There has been a recent increase in the populations of feral cats",
+                "and they share habitats with wildlife",
+                "domestic animals",
+                "and humans."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "There has been a recent increase in the populations of feral cats, and they share habitats with wildlife, domestic animals, and humans.": [
+                  "There has been a recent increase in the populations of feral cats",
+                  "and they share habitats with wildlife",
+                  "domestic animals",
+                  "and humans."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944"
+                ]
+              }
+            },
+            "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024": {
+              "cleaned_values": [
+                "When the city or area of presumed exposure was not known",
+                "the city or area where the patient resided was used in the analysis."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "When the city or area of presumed exposure was not known, the city or area where the patient resided was used in the analysis.": [
+                  "When the city or area of presumed exposure was not known",
+                  "the city or area where the patient resided was used in the analysis."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024"
+                ]
+              }
+            },
+            "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328": {
+              "cleaned_values": [
+                "en mortality via elevated viral loads",
+                "early immunosuppression",
+                "organ damage."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "en mortality via elevated viral loads, early immunosuppression and organ damage.": [
+                  "en mortality via elevated viral loads",
+                  "early immunosuppression",
+                  "organ damage."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328"
+                ]
+              }
+            },
+            "10.3390_v15122338_chunk0_t0-4096_t3648-3904": {
+              "cleaned_values": [
+                "stray",
+                "These cities were categorized into four geographical regions",
+                "namely the northern",
+                "central",
+                "southern",
+                "and eastern regions",
+                "alongside the inclusion of a fifth western island (Kinmen) (Figure 1).",
+                "The sample numbers",
+                "based on this regional classification",
+                "are illustrated in Table 3."
+              ],
+              "removed_values": [
+                "domesticated animals in each species (dog or cat) was carried out."
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "stray and domesticated animals in each species (dog or cat) was carried out.": [
+                  "stray",
+                  "domesticated animals in each species (dog or cat) was carried out."
+                ],
+                "These cities were categorized into four geographical regions, namely the northern, central, southern, and eastern regions, alongside the inclusion of a fifth western island (Kinmen) (Figure 1).": [
+                  "These cities were categorized into four geographical regions",
+                  "namely the northern",
+                  "central",
+                  "southern",
+                  "and eastern regions",
+                  "alongside the inclusion of a fifth western island (Kinmen) (Figure 1)."
+                ],
+                "The sample numbers, based on this regional classification, are illustrated in Table 3.": [
+                  "The sample numbers",
+                  "based on this regional classification",
+                  "are illustrated in Table 3."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.3390_v15122338_chunk0_t0-4096_t3648-3904"
+                ]
+              }
+            },
+            "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560": {
+              "cleaned_values": [
+                "Names of area or cities are shown at the left",
+                "and the bars indicate the number of patients."
+              ],
+              "removed_values": [],
+              "normalization_map": {},
+              "split_map": {
+                "Names of area or cities are shown at the left, and the bars indicate the number of patients.": [
+                  "Names of area or cities are shown at the left",
+                  "and the bars indicate the number of patients."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560"
+                ]
+              }
+            },
+            "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640": {
+              "cleaned_values": [
+                "SFTSV can also be trans ferred person-to-person through contact with blood",
+                "secretions or mucous of a patient with SFTS .",
+                "When we examined the Index patient’s close contacts",
+                "16.3% (8/49) were positive for virus-specific IgM",
+                "which is higher than those in other studies .",
+                "In this study",
+                "the nucleic acid",
+                "antibody test results were negative for all the volunteers."
+              ],
+              "removed_values": [
+                "we also conducted screening on a healthy population in the village where the Index case occurred"
+              ],
+              "normalization_map": {},
+              "split_map": {
+                "SFTSV can also be trans ferred person-to-person through contact with blood, secretions or mucous of a patient with SFTS .": [
+                  "SFTSV can also be trans ferred person-to-person through contact with blood",
+                  "secretions or mucous of a patient with SFTS ."
+                ],
+                "When we examined the Index patient’s close contacts, 16.3% (8/49) were positive for virus-specific IgM, which is higher than those in other studies .": [
+                  "When we examined the Index patient’s close contacts",
+                  "16.3% (8/49) were positive for virus-specific IgM",
+                  "which is higher than those in other studies ."
+                ],
+                "In this study, we also conducted screening on a healthy population in the village where the Index case occurred, the nucleic acid and antibody test results were negative for all the volunteers.": [
+                  "In this study",
+                  "we also conducted screening on a healthy population in the village where the Index case occurred",
+                  "the nucleic acid",
+                  "antibody test results were negative for all the volunteers."
+                ]
+              },
+              "debug": {
+                "semantic_type": "location",
+                "evidence_ids": [
+                  "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640"
+                ]
+              }
+            }
+          }
+        },
+        "filtered_out_non_symptom_lists": []
+      }
+    ],
+    "slot_status_source": "semantic_instances",
+    "slot_status_snapshot": {
+      "geographic_distribution": "satisfied"
+    },
+    "list_items_extracted": [
+      "Baoding",
+      "Tangshan",
+      "Hengshui",
+      "Langfang",
+      "longicornis",
+      "altitude had a greater effect",
+      "while the distribution of H.",
+      "which had a lower elevation",
+      "The cluster reported in this study occurred in Xinchang County",
+      "Shaoxing City",
+      "Zhe jiang Province",
+      "and involved household",
+      "South Korea",
+      "Japan",
+      "Vietnam",
+      "Pakistan in recent years (Yu et al",
+      "LCMV could be carried by 4 species of ticks",
+      "Shaanxi Provinces.",
+      "CCHFV was discovered early",
+      "classified into three genotypes: Asian",
+      "associated with climatic factors",
+      "including light",
+      "humidity",
+      "and temperature (Pérez et al.",
+      "(A) Nairoviridae",
+      "(B) Phenuiviridae",
+      "(C) Flaviviridae",
+      "(D) Paramyxoviridae",
+      "However",
+      "there was no information on the clinical symptoms",
+      "if any",
+      "in the dogs at this shelter around February 2022.",
+      "21 of the 34 provinces in China",
+      "as well as in other Asian countries such as Korea",
+      "and Pakistan",
+      "a total of 12 states in the Eastern",
+      "many dogs in Thailand possessed anti-SFTSV antibodies",
+      "indicating that SFTSV has already spread in Thailand",
+      "similar to in other Asian countries [5–11].",
+      "Since currently",
+      "only RT-PCR approach was used for clinical diagnosis of SFTS",
+      "but it is not yet widely used in rural areas",
+      "especially with limited medical resources.",
+      "bei Province",
+      "we conducted a multidisciplinary investigation integrating epidemiological surveillance",
+      "molecular characterization of SFTSV",
+      "seroprevalence analysis.",
+      "with a high prevalence in Shandong",
+      "Liaoning Provinces",
+      "partially overlapping with SFTSV.",
+      "It was also found in forested",
+      "ihai Center for Disease Control",
+      "Prevention",
+      "Weihai",
+      "Shandong Province",
+      "Subgenotype B-1",
+      "which was predomi nant in Gyeonggi province",
+      "was detected in all cities or areas of interest.",
+      "Phenuiviridae",
+      "and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)",
+      "and was identified as the causative pathogen of the disease",
+      "was first isolated from the serum samples of a patient with SFTS in China in 2009 .",
+      "ended at the end of the third quarter",
+      "August.",
+      "There has been a recent increase in the populations of feral cats",
+      "and they share habitats with wildlife",
+      "domestic animals",
+      "and humans.",
+      "When the city or area of presumed exposure was not known",
+      "the city or area where the patient resided was used in the analysis.",
+      "en mortality via elevated viral loads",
+      "early immunosuppression",
+      "organ damage.",
+      "stray",
+      "These cities were categorized into four geographical regions",
+      "namely the northern",
+      "central",
+      "Names of area or cities are shown at the left",
+      "and the bars indicate the number of patients.",
+      "SFTSV can also be trans ferred person-to-person through contact with blood",
+      "secretions or mucous of a patient with SFTS .",
+      "When we examined the Index patient’s close contacts",
+      "16.3% (8/49) were positive for virus-specific IgM"
+    ],
+    "list_items_source_block_ids": [
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+      "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+      "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+      "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+      "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+      "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+      "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+      "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+      "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+      "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+      "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640"
+    ],
+    "list_only_audit": {
+      "retrieval_rank": [
+        "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "10.3390_v17060854_chunk0_t0-4096_t1536-1792",
+        "10.3390_v17060854_chunk0_t0-4096_t1920-2176",
+        "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t384-640",
+        "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+        "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+        "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+        "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+        "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+        "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+        "10.3390_v15122403_chunk0_t0-3872_t2688-2944",
+        "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+        "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "10.3390_v17060854_chunk0_t0-4096_t1344-1600",
+        "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+        "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+        "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+        "10.3390_microorganisms12040823_chunk0_t0-4096_t3648-3904",
+        "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+        "10.3390_v17060854_chunk1_t3840-5438_t192-448",
+        "10.3389_fvets.2023.1268440_chunk2_t7680-11776_t0-256",
+        "10.3389_fvets.2023.1268440_chunk1_t3840-7936_t3840-4096",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2112-2368",
+        "10.3390_v17060854_chunk0_t0-4096_t2112-2368"
+      ],
+      "output_order": [
+        "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "10.3390_v17060854_chunk0_t0-4096_t1728-1984",
+        "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "10.3389_fmicb.2024.1309698_chunk3_t11520-14828_t1920-2176",
+        "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "10.1186_s12889-025-24608-w_chunk0_t0-4096_t3648-3904",
+        "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk0_t0-4096_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t3264-3520",
+        "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+        "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+        "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+        "10.3389_fmicb.2025.1622394_chunk0_t0-4096_t1152-1408",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2688-2944",
+        "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+        "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+        "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+        "10.3390_v15122403_chunk0_t0-3872_t2880-3136",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+        "10.3390_microorganisms12040823_chunk1_t3840-7936_t3456-3712",
+        "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+        "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+        "10.3390_v15122403_chunk0_t0-3872_t3072-3328",
+        "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+        "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+        "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+        "10.1128_spectrum.02144-23_chunk1_t3840-6922_t2112-2368",
+        "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+        "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+        "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+        "10.3390_v17060854_chunk1_t3840-5438_t384-640",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+        "10.3389_fmicb.2024.1309698_chunk2_t7680-11776_t2496-2752",
+        "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+        "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+        "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+        "10.1186_s12985-024-02387-x_chunk0_t0-4096_t384-640",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t3456-3712",
+        "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "10.1371_journal.pntd.0012216_chunk0_t0-4096_t1344-1600",
+        "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+        "10.1016_j.idm.2024.01.003_chunk0_t0-4096_t1728-1984",
+        "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+        "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+        "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+        "10.1371_journal.pntd.0012306_chunk2_t7680-11565_t2688-2944",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t768-1024",
+        "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+        "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+        "10.3892_ijmm.2025.5610_chunk0_t0-4096_t3072-3328",
+        "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+        "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+        "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+        "10.3390_v15122338_chunk0_t0-4096_t3648-3904",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+        "10.1007_s00705-025-06411-5_chunk0_t0-3744_t2304-2560",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640",
+        "10.1186_s12985-023-02155-3_chunk0_t0-1538_t384-640"
+      ],
+      "one_to_one_mapping": false,
+      "per_block_cap": 4,
+      "total_cap": 136,
+      "dropped_blocks_no_items": 11,
+      "dropped_duplicates": 2,
+      "reason": "ok"
+    }
+  },
+  "final_answer": "- Baoding\n- Tangshan\n- Hengshui\n- Langfang\n- longicornis\n- altitude had a greater effect\n- while the distribution of H.\n- which had a lower elevation\n- The cluster reported in this study occurred in Xinchang County\n- Shaoxing City\n- Zhe jiang Province\n- and involved household\n- South Korea\n- Japan\n- Vietnam\n- Pakistan in recent years (Yu et al\n- LCMV could be carried by 4 species of ticks\n- Shaanxi Provinces.\n- CCHFV was discovered early\n- classified into three genotypes: Asian\n- associated with climatic factors\n- including light\n- humidity\n- and temperature (Pérez et al.\n- (A) Nairoviridae\n- (B) Phenuiviridae\n- (C) Flaviviridae\n- (D) Paramyxoviridae\n- However\n- there was no information on the clinical symptoms\n- if any\n- in the dogs at this shelter around February 2022.\n- 21 of the 34 provinces in China\n- as well as in other Asian countries such as Korea\n- and Pakistan\n- a total of 12 states in the Eastern\n- many dogs in Thailand possessed anti-SFTSV antibodies\n- indicating that SFTSV has already spread in Thailand\n- similar to in other Asian countries [5–11].\n- Since currently\n- only RT-PCR approach was used for clinical diagnosis of SFTS\n- but it is not yet widely used in rural areas\n- especially with limited medical resources.\n- bei Province\n- we conducted a multidisciplinary investigation integrating epidemiological surveillance\n- molecular characterization of SFTSV\n- seroprevalence analysis.\n- with a high prevalence in Shandong\n- Liaoning Provinces\n- partially overlapping with SFTSV.\n- It was also found in forested\n- ihai Center for Disease Control\n- Prevention\n- Weihai\n- Shandong Province\n- Subgenotype B-1\n- which was predomi nant in Gyeonggi province\n- was detected in all cities or areas of interest.\n- Phenuiviridae\n- and genus Bandavirus (https://talk.ictvonline.org/taxonomy/)\n- and was identified as the causative pathogen of the disease\n- was first isolated from the serum samples of a patient with SFTS in China in 2009 .\n- ended at the end of the third quarter\n- August.\n- There has been a recent increase in the populations of feral cats\n- and they share habitats with wildlife\n- domestic animals\n- and humans.\n- When the city or area of presumed exposure was not known\n- the city or area where the patient resided was used in the analysis.\n- en mortality via elevated viral loads\n- early immunosuppression\n- organ damage.\n- stray\n- These cities were categorized into four geographical regions\n- namely the northern\n- central\n- Names of area or cities are shown at the left\n- and the bars indicate the number of patients.\n- SFTSV can also be trans ferred person-to-person through contact with blood\n- secretions or mucous of a patient with SFTS .\n- When we examined the Index patient’s close contacts\n- 16.3% (8/49) were positive for virus-specific IgM"
+}
