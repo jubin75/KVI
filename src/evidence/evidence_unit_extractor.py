@@ -13,7 +13,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 _SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\。\！\？])\s+|\n+")
-_ENUM_SIGNAL_RE = re.compile(r"(,|;|\band\b|\bor\b)", flags=re.IGNORECASE)
+_ENUM_SIGNAL_RE = re.compile(
+    # Enumeration signals (EN + ZH): commas/semicolons/conjunctions.
+    r"(,|;|，|；|、|\band\b|\bor\b|和|或|以及|及)",
+    flags=re.IGNORECASE,
+)
 _DISCOURSE_LIST_RE = re.compile(r"\b(in addition|furthermore|see also)\b", flags=re.IGNORECASE)
 _BLOCKING_META_RE = re.compile(
     r"\b(statistical analysis|methods|materials and methods|copyright|license|p value|confidence interval)\b",
@@ -186,13 +190,23 @@ class EvidenceUnitExtractor:
         Returns (items, cross_semantic_mixed).
         """
         s = str(sentence)
-        # normalize conjunctions
+        # normalize conjunctions (EN + ZH) into commas for a unified split.
         s2 = re.sub(r"\b(and|or)\b", ",", s, flags=re.IGNORECASE)
-        # split on commas/semicolons
-        raw = [p.strip() for p in re.split(r"[;,]", s2) if p and p.strip()]
-        # drop leading clause like "Patients present with"
+        # Chinese conjunctions (keep it conservative; no heavy NLP)
+        s2 = re.sub(r"(以及|及|和|或)", "，", s2)
+        # split on commas/semicolons (EN + ZH) and Chinese list delimiter
+        raw = [p.strip() for p in re.split(r"[,;，；、]", s2) if p and p.strip()]
+        # drop leading clause like "Patients present with" / "包括/表现为"
         if raw:
-            raw[0] = re.sub(r"^.*?\b(with|including|include|present with|characterized by)\b", "", raw[0], flags=re.IGNORECASE).strip()
+            raw0 = raw[0]
+            raw0 = re.sub(
+                r"^.*?\b(with|including|include|present with|characterized by)\b",
+                "",
+                raw0,
+                flags=re.IGNORECASE,
+            ).strip()
+            raw0 = re.sub(r"^.*?(包括|主要包括|表现为|表现出|常见表现包括|临床表现包括|临床表现为)[:：]?", "", raw0).strip()
+            raw[0] = raw0
         items = [r for r in raw if 2 <= len(r) <= 60]
         # cross semantic mixed heuristic: presence of many digits/units mixed with words
         digitish = sum(1 for it in items if re.search(r"\d", it))
