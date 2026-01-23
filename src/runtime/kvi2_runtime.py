@@ -58,6 +58,7 @@ class KVI2Config:
     # How to render LIST_ONLY answers:
     # - "list_only": deterministic bullet list projection (default, safest)
     # - "narrative": run a constrained second-pass LLM summary using extracted items as the only facts
+    # - "llm": disable LIST_ONLY projection and force KV-injected generative answering
     answer_mode: str = "list_only"
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
@@ -532,49 +533,54 @@ class KVI2Runtime:
 
         # LIST_ONLY: deterministic projection of retrieval results.
         if str(guard_style or "").upper() == "LIST_ONLY":
-            items, mapping, audit = _project_list_only(
-                semantic_instances=semantic_instances,
-                retrieval_rank=final_rank,
-            )
-            out["retrieval"]["list_items_extracted"] = items
-            out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
-            out["retrieval"]["list_only_audit"] = audit
-            if not items:
-                out["rim_answer"] = "No list-like evidence found in retrieved sources."
+            # If user explicitly requests LLM narrative answering, bypass LIST_ONLY entirely.
+            # This keeps injection behavior intact but trades determinism for fluency.
+            if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "llm":
+                guard_style = ""
+            else:
+                items, mapping, audit = _project_list_only(
+                    semantic_instances=semantic_instances,
+                    retrieval_rank=final_rank,
+                )
+                out["retrieval"]["list_items_extracted"] = items
+                out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
+                out["retrieval"]["list_only_audit"] = audit
+                if not items:
+                    out["rim_answer"] = "No list-like evidence found in retrieved sources."
+                    out["gate"] = dict(chosen_gate_after_validation or {})
+                    return out
+                # Optional: narrative rendering (still grounded; items are the only allowed facts).
+                if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "narrative":
+                    narrative_prompt = _build_list_only_narrative_prompt(
+                        user_prompt=user_prompt,
+                        items=[m["item_text"] for m in mapping],
+                        max_items=16,
+                    )
+                    # Chat-tuned models need chat template even for this constrained narrative prompt.
+                    narrative_prompt = self._format_prompt(
+                        tokenizer, narrative_prompt, use_chat_template=bool(use_chat_template)
+                    )
+                    rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompt=narrative_prompt,
+                        device=device,
+                        past_key_values=chosen_pkv,
+                        max_new_tokens=min(256, int(self.cfg.max_new_tokens_rim)),
+                        no_repeat_ngram_size=12,
+                        repetition_penalty=1.08,
+                    )
+                    # Always include the item list at the end for traceability.
+                    summary = str(rim_answer or "").strip()
+                    if not summary:
+                        # Fail-closed: if model returns empty, fall back to deterministic list.
+                        out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
+                    else:
+                        out["rim_answer"] = (summary + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
+                else:
+                    out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
                 out["gate"] = dict(chosen_gate_after_validation or {})
                 return out
-            # Optional: narrative rendering (still grounded; items are the only allowed facts).
-            if str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower() == "narrative":
-                narrative_prompt = _build_list_only_narrative_prompt(
-                    user_prompt=user_prompt,
-                    items=[m["item_text"] for m in mapping],
-                    max_items=16,
-                )
-                # Chat-tuned models need chat template even for this constrained narrative prompt.
-                narrative_prompt = self._format_prompt(
-                    tokenizer, narrative_prompt, use_chat_template=bool(use_chat_template)
-                )
-                rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
-                    model=model,
-                    tokenizer=tokenizer,
-                    prompt=narrative_prompt,
-                    device=device,
-                    past_key_values=chosen_pkv,
-                    max_new_tokens=min(256, int(self.cfg.max_new_tokens_rim)),
-                    no_repeat_ngram_size=12,
-                    repetition_penalty=1.08,
-                )
-                # Always include the item list at the end for traceability.
-                summary = str(rim_answer or "").strip()
-                if not summary:
-                    # Fail-closed: if model returns empty, fall back to deterministic list.
-                    out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
-                else:
-                    out["rim_answer"] = (summary + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
-            else:
-                out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
-            out["gate"] = dict(chosen_gate_after_validation or {})
-            return out
         guarded_prompt = _apply_answer_style_guard(formatted_prompt, guard_style)
         rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
