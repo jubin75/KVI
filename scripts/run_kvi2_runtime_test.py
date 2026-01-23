@@ -206,8 +206,25 @@ def _infer_target_semantic_type_for_query(
         or ("distribution" in ql)
         or ("reported in" in ql)
     )
-    if sum([int(symptom), int(drug), int(location)]) != 1:
-        # Preserve contract debug context if present, but mark heuristic ambiguity.
+    intents = {
+        "symptom": bool(symptom),
+        "drug": bool(drug),
+        "location": bool(location),
+    }
+    active = [k for k, v in intents.items() if v]
+    if len(active) != 1:
+        # Multi-intent is common in Chinese: "哪些地区？主要症状有哪些？"
+        # In simple pipeline, we prefer a safe UNION filter (deletion-only) instead of fail-closed to empty.
+        if active:
+            if dbg.get("method") == "contracts+scoring":
+                dbg["method"] = "contracts+scoring+heuristic"
+                dbg["semantic_type"] = "multi"
+                dbg["semantic_types"] = active
+                dbg["rationale"] = list(dbg.get("rationale") or []) + ["heuristic:multi_intent"]
+                return "multi", dbg
+            dbg.update({"method": "heuristic", "semantic_type": "multi", "semantic_types": active, "rationale": ["heuristic:multi_intent"]})
+            return "multi", dbg
+        # No intent cues
         if dbg.get("method") == "contracts+scoring":
             dbg["method"] = "contracts+scoring+heuristic"
             dbg["rationale"] = list(dbg.get("rationale") or []) + ["heuristic:ambiguous_or_no_intent"]
@@ -238,6 +255,14 @@ def _infer_target_semantic_type_for_query(
         return "location", dbg
     dbg.update({"method": "heuristic", "semantic_type": "location", "rationale": ["cue:location"]})
     return "location", dbg
+
+
+def _unit_relevant_to_any_semantic_type(*, unit_text: str, semantic_types: List[str], query: str) -> bool:
+    sts = [str(s or "").strip().lower() for s in (semantic_types or [])]
+    sts = [s for s in sts if s and s not in {"unknown", "generic", "other"}]
+    if not sts:
+        return False
+    return any(_unit_relevant_to_semantic_type(unit_text=unit_text, semantic_type=st, query=query) for st in sts)
 
 
 def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query: str) -> bool:
@@ -405,7 +430,11 @@ def main() -> None:
                     metadata=meta,
                 )
                 # Scheme #1: semantic_type-aware relevance filter (deletion-only; fail-closed to empty if unknown)
-                if target_semantic_type != "unknown":
+                if target_semantic_type == "multi":
+                    sts = router_dbg.get("semantic_types") if isinstance(router_dbg, dict) else None
+                    sts = list(sts) if isinstance(sts, list) else []
+                    units = [u for u in units if _unit_relevant_to_any_semantic_type(unit_text=u, semantic_types=sts, query=user_prompt)]
+                elif target_semantic_type != "unknown":
                     units = [
                         u
                         for u in units
