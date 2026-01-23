@@ -231,6 +231,111 @@ python -u scripts/build_kvbank_from_blocks_jsonl.py \
   --shard_size 1024
 ```
 
+#### 1.2.2.1.a（调试必备）mini evidence.txt 一键建库：evidence.txt → blocks → pattern sidecar → pattern_contract → kvbank_blocks
+
+> 用途：你只有几行 `evidence.txt`，想先跑通“检索→Evidence Units→注入→回答”的最小闭环（用于架构调试/补漏洞），不依赖 PDF。
+>
+> 约定目录（可替换成任意 topic）：  
+> - `TOPIC_DIR=/home/jb/KVI/config/topics/SFTSV`  
+> - 输入：`$TOPIC_DIR/evidence.txt`  
+> - 产物：`$TOPIC_DIR/blocks.jsonl`、`$TOPIC_DIR/blocks.enriched.jsonl`、`$TOPIC_DIR/pattern_contract.json`、`$TOPIC_DIR/kvbank_blocks/`
+
+```bash
+cd /home/jb/KVI
+
+export TOPIC_DIR="/home/jb/KVI/config/topics/SFTSV"
+export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
+export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
+
+# 1) evidence.txt -> blocks.jsonl
+python scripts/build_blocks_from_raw_text.py \
+  --raw_text "$TOPIC_DIR/evidence.txt" \
+  --out "$TOPIC_DIR/blocks.jsonl" \
+  --tokenizer "$BASE_LLM" \
+  --chunk_tokens 4096 --chunk_overlap 256 \
+  --block_tokens 256 \
+  --keep_last_incomplete_block
+
+# 2) blocks.jsonl -> blocks.enriched.jsonl + pattern sidecar（pattern_out_dir 放在 topic_dir 里即可）
+python scripts/build_pattern_index_from_blocks_v2.py \
+  --blocks_jsonl_in "$TOPIC_DIR/blocks.jsonl" \
+  --blocks_jsonl_out "$TOPIC_DIR/blocks.enriched.jsonl" \
+  --pattern_out_dir "$TOPIC_DIR"
+
+# 3) blocks.enriched.jsonl -> pattern_contract.json（供 PatternContractLoader + matcher/scoring 使用）
+python scripts/pattern_contract_autogen.py \
+  --blocks_jsonl_in "$TOPIC_DIR/blocks.enriched.jsonl" \
+  --out "$TOPIC_DIR/pattern_contract.json" \
+  --topic SFTSV \
+  --min_abbr_count 1 \
+  --min_slot_count 1 \
+  --max_abbr 50 \
+  --max_slots 50
+
+# 4) blocks.enriched.jsonl -> kvbank_blocks（mini KVBank）
+python scripts/build_kvbank_from_blocks_jsonl.py \
+  --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
+  --out_dir "$TOPIC_DIR/kvbank_blocks" \
+  --base_llm "$BASE_LLM" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --layers 0,1,2,3 \
+  --block_tokens 256 \
+  --shard_size 1024 \
+  --device cuda \
+  --dtype bfloat16
+```
+
+##### 1.2.2.1.a.1 验证（simple pipeline）：routing + Evidence Units + injected output
+
+> 目标：验证“检索命中 + Evidence Units 数量 + 注入输出”都正常（输出 JSON 里会包含 step_debug）。
+> 注意：simple pipeline 是架构调试模式，核心链路是：prompt → similarity retrieval（kvbank_blocks）→ Evidence Units（sentence-level）→ 多步注入 → 文本回答。
+
+```bash
+cd /home/jb/KVI
+
+export TOPIC_DIR="/home/jb/KVI/config/topics/SFTSV"
+export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
+export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
+
+# A) 症状（应出现 selected_unit_counts>0 且 evidence_units_shown 有症状枚举句）
+python scripts/run_kvi2_runtime_test.py \
+  --pipeline simple \
+  --model "$BASE_LLM" \
+  --prompt "SFTSV的主要临床症状有哪些？" \
+  --kv_dir "$TOPIC_DIR/kvbank_blocks" \
+  --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
+  --pattern_index_dir "$TOPIC_DIR" \
+  --sidecar_dir "$TOPIC_DIR" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --use_chat_template \
+  --top_k 8 \
+  --simple_use_evidence_units \
+  --simple_require_units \
+  --simple_max_steps 1 \
+  --simple_max_blocks_per_step 4 \
+  --simple_max_unit_sentences 4 \
+  --show_baseline
+
+# B) 地区 + 症状（multi-intent，evidence_units_shown 应同时包含地区与症状句）
+python scripts/run_kvi2_runtime_test.py \
+  --pipeline simple \
+  --model "$BASE_LLM" \
+  --prompt "2009-2014年SFTSV在我国的主要发病地区有哪些？主要临床症状有哪些？" \
+  --kv_dir "$TOPIC_DIR/kvbank_blocks" \
+  --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
+  --pattern_index_dir "$TOPIC_DIR" \
+  --sidecar_dir "$TOPIC_DIR" \
+  --domain_encoder_model "$DOMAIN_ENCODER" \
+  --use_chat_template \
+  --top_k 8 \
+  --simple_use_evidence_units \
+  --simple_require_units \
+  --simple_max_steps 1 \
+  --simple_max_blocks_per_step 4 \
+  --simple_max_unit_sentences 6 \
+  --show_baseline
+```
+
 #### 1.2.2.2（新增，推荐）Schema 版本：blocks.schema + kvbank_schema（slot-aware 注入）
 
 为了解决"重复注入同一语义维度导致答案坍缩"的问题，我们在 evidence 之上引入 **schema-first + slot-aware 策略**：
