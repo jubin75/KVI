@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, List, Sequence
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -34,6 +34,11 @@ def _load_block_text_lookup(path: str) -> Dict[str, str]:
     return out
 
 
+def _kv_id(it: Any) -> str:
+    meta = getattr(it, "meta", None) or {}
+    return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     repo_root_str = str(repo_root)
@@ -47,6 +52,12 @@ def main() -> None:
     p.add_argument("--pattern_index_dir", required=True, help="pattern sidecar directory")
     p.add_argument("--sidecar_dir", required=True, help="sidecar directory")
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
+    p.add_argument(
+        "--pipeline",
+        choices=["kvi2", "simple"],
+        default="kvi2",
+        help="kvi2: Pattern+Gate+RIM pipeline; simple: prompt->similarity retrieval (KVBank)->multi-step KV injection->text answer (also prints base LLM).",
+    )
     p.add_argument("--top_k", type=int, default=8)
     p.add_argument("--kv_refresh_rounds", type=int, default=2)
     p.add_argument("--kv_irrelevant_logit_delta_threshold", type=float, default=0.05)
@@ -58,6 +69,10 @@ def main() -> None:
         default="llm_prose",
         help="Answer rendering: list_only / narrative / llm (bypass LIST_ONLY) / llm_prose (bypass LIST_ONLY + force prose, no bullets).",
     )
+    # Simple pipeline knobs (architecture debugging)
+    p.add_argument("--simple_max_steps", type=int, default=3)
+    p.add_argument("--simple_step_new_tokens", type=int, default=96)
+    p.add_argument("--simple_max_blocks_per_step", type=int, default=8)
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
     p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")
     p.add_argument("--final_only", action="store_true", help="Print only final_answer (rim_answer) and exit")
@@ -65,8 +80,21 @@ def main() -> None:
 
     try:
         from external_kv_injection.src.runtime.kvi2_runtime import KVI2Runtime, KVI2Config  # type: ignore
+        from external_kv_injection.src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
+        from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+        from external_kv_injection.src.retriever import Retriever  # type: ignore
+        from external_kv_injection.src.runtime.hf_cache_prefix_injection import (  # type: ignore
+            build_past_key_values_prefix,
+            stack_ext_kv_items_by_layer,
+        )
+        from external_kv_injection.src.runtime.multistep_injector import MultiStepInjector  # type: ignore
     except ModuleNotFoundError:
         from src.runtime.kvi2_runtime import KVI2Runtime, KVI2Config  # type: ignore
+        from src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
+        from src.kv_bank import FaissKVBank  # type: ignore
+        from src.retriever import Retriever  # type: ignore
+        from src.runtime.hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer  # type: ignore
+        from src.runtime.multistep_injector import MultiStepInjector  # type: ignore
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
@@ -76,6 +104,122 @@ def main() -> None:
 
     block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
 
+    # ----------------------------------------
+    # SIMPLE PIPELINE (architecture debugging)
+    # ----------------------------------------
+    if str(args.pipeline) == "simple":
+        user_prompt = str(args.prompt)
+        base_prompt = KVI2Runtime._format_prompt(tok, user_prompt, use_chat_template=bool(args.use_chat_template))
+        base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+            model=model,
+            tokenizer=tok,
+            prompt=base_prompt,
+            device=device,
+            past_key_values=None,
+            max_new_tokens=192,
+            no_repeat_ngram_size=12,
+            repetition_penalty=1.08,
+        ).strip()
+
+        bank = FaissKVBank.load(Path(str(args.kv_dir)))
+        retriever = Retriever(bank)
+        enc = DomainEncoder(
+            DomainEncoderConfig(
+                model_name_or_path=str(args.domain_encoder_model),
+                max_length=256,
+                normalize=True,
+                device=str(device),
+            )
+        )
+
+        # We want a prose answer (no bullets) in this debug mode.
+        prose_guard = "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
+
+        max_steps = int(args.simple_max_steps)
+        step_new_tokens = int(args.simple_step_new_tokens)
+        max_blocks = int(args.simple_max_blocks_per_step)
+        top_k = int(args.top_k)
+        used: set[str] = set()
+        generated = ""
+        step_debug: List[Dict[str, Any]] = []
+
+        for step in range(max_steps):
+            qtxt = user_prompt + ("\n" + generated if generated.strip() else "")
+            qv = enc.encode(qtxt)[0]
+            rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
+            cand_ids = [_kv_id(it) for it in (rr.items or [])]
+            cand_ids = [x for x in cand_ids if x]
+            selected: List[Any] = []
+            selected_ids: List[str] = []
+            for it in rr.items or []:
+                bid = _kv_id(it)
+                if not bid or bid in used:
+                    continue
+                selected.append(it)
+                selected_ids.append(bid)
+                used.add(bid)
+                if len(selected) >= max_blocks:
+                    break
+            # Build injected prefix from selected blocks (layers 0..3).
+            dtype2 = next(model.parameters()).dtype
+            ext_by_layer: Dict[int, Any] = {}
+            for li in (0, 1, 2, 3):
+                try:
+                    ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
+                        items=selected,
+                        layer_id=int(li),
+                        batch_size=1,
+                        device=device,
+                        dtype=dtype2,
+                    )
+                except Exception:
+                    continue
+            pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
+
+            step_prompt = (user_prompt + prose_guard + ("\n\n" + generated if generated.strip() else "")).strip()
+            step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
+            chunk = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=step_prompt,
+                device=device,
+                past_key_values=pkv,
+                max_new_tokens=int(step_new_tokens),
+                no_repeat_ngram_size=12,
+                repetition_penalty=1.08,
+            )
+            chunk = str(chunk or "").strip()
+            generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
+            step_debug.append(
+                {
+                    "step": int(step),
+                    "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
+                    "selected_ids": selected_ids,
+                }
+            )
+            if not chunk:
+                break
+
+        out_simple = {
+            "pipeline": "simple",
+            "prompt": user_prompt,
+            "base_answer": base_answer,
+            "injected_answer": generated.strip(),
+            "steps": step_debug,
+        }
+        if bool(args.final_only):
+            # Per your requirement: include base LLM output as well.
+            print("=== Base LLM (no injection) ===\n")
+            print(base_answer)
+            print("\n\n=== Injected (multi-step) ===\n")
+            print(out_simple["injected_answer"])
+            return
+        print(json.dumps(out_simple, ensure_ascii=False, indent=2))
+        return
+
+    # ----------------------------------------
+    # KVI2 PIPELINE (default)
+    # ----------------------------------------
     cfg = KVI2Config(
         top_k=int(args.top_k),
         kv_refresh_rounds=int(args.kv_refresh_rounds),
