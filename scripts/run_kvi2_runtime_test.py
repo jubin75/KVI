@@ -265,6 +265,82 @@ def _unit_relevant_to_any_semantic_type(*, unit_text: str, semantic_types: List[
     return any(_unit_relevant_to_semantic_type(unit_text=unit_text, semantic_type=st, query=query) for st in sts)
 
 
+def _format_evidence_units_with_ids(evidence_units: List[str]) -> Tuple[str, List[Tuple[str, str]]]:
+    """
+    Returns (formatted_text, pairs) where pairs = [(E1, text), ...]
+    """
+    pairs: List[Tuple[str, str]] = []
+    for i, s in enumerate(evidence_units or [], start=1):
+        t = str(s or "").strip()
+        if not t:
+            continue
+        pairs.append((f"E{i}", t))
+    formatted = "\n".join([f"[{eid}] {txt}" for eid, txt in pairs])
+    return formatted, pairs
+
+
+_SIMPLE_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\。\！\？])\s*|\n+")
+_SIMPLE_CITE_RE = re.compile(r"\[E\d+\]")
+
+
+def _postprocess_answer_citation_guardrails(
+    *,
+    answer: str,
+    evidence_pairs: List[Tuple[str, str]],
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Deletion-only guardrails (simple pipeline):
+    - If a sentence looks like it asserts concrete facts but has no [E#] citation, drop it.
+    - If it contains an SFTSV parenthetical expansion not present verbatim in evidence, drop the whole sentence.
+    """
+    a = str(answer or "").strip()
+    evidence_blob = "\n".join([t for _eid, t in (evidence_pairs or [])])
+    dropped: List[Dict[str, Any]] = []
+
+    def _looks_like_fact(s: str) -> bool:
+        sl = s.lower()
+        # "Facty" cues: lists, numbers, places, symptoms, explicit definition/alias, institutions.
+        if re.search(r"\d", s):
+            return True
+        if any(k in s for k in ["河南", "湖北", "安徽", "山东", "浙江", "江苏", "辽宁", "吉林", "省", "市", "地区", "分布", "交界处"]):
+            return True
+        if any(k in s for k in ["临床表现", "症状", "包括", "表现为", "常见", "发热", "血小板", "白细胞", "胃肠道", "神经系统", "出血"]):
+            return True
+        if any(k in s for k in ["SFTSV（", "SFTSV(", "简称", "全称", "也称", "又称"]):
+            return True
+        if any(k in sl for k in ["cdc", "fda", "who"]) or any(k in s for k in ["疾控", "疾病预防控制中心"]):
+            return True
+        return False
+
+    def _has_cite(s: str) -> bool:
+        return bool(_SIMPLE_CITE_RE.search(s))
+
+    def _has_unsupported_sftsv_expansion(s: str) -> bool:
+        # If model expands SFTSV in parentheses, require verbatim presence in evidence units.
+        m = re.search(r"SFTSV[（(]([^）)]+)[）)]", s)
+        if not m:
+            return False
+        expanded = str(m.group(0) or "").strip()
+        if not expanded:
+            return False
+        return expanded not in evidence_blob
+
+    # Split and filter sentence-by-sentence.
+    parts = [p.strip() for p in _SIMPLE_SENT_SPLIT_RE.split(a) if p and p.strip()]
+    kept: List[str] = []
+    for s in parts:
+        if _has_unsupported_sftsv_expansion(s):
+            dropped.append({"sentence": s, "reason": "unsupported_sftsv_parenthetical"})
+            continue
+        if _looks_like_fact(s) and not _has_cite(s):
+            dropped.append({"sentence": s, "reason": "fact_without_citation"})
+            continue
+        kept.append(s)
+    out = "\n".join(kept).strip()
+    dbg = {"dropped_count": len(dropped), "dropped_examples": dropped[:3]}
+    return out, dbg
+
+
 def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query: str) -> bool:
     """
     Minimal relevance filter (deletion-only) to avoid cross-intent contamination.
@@ -445,7 +521,16 @@ def main() -> None:
                 unit_lookup[str(bid)] = units
 
         # We want a prose answer (no bullets) in this debug mode.
-        prose_guard = "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。回答必须与证据一致，不要编造。"
+        # Citation rule: only cite when you use Evidence Units; but any concrete factual claim must be supported
+        # by at least one Evidence Unit and MUST include the citation marker [E#] in that sentence.
+        prose_guard = (
+            "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
+            "回答必须严格与证据一致，不要编造。\n"
+            "【引用规则】当你使用 Evidence Units 的信息时，请在对应句子末尾添加引用标记，如 [E1]。[E#] 只在使用证据处出现。\n"
+            "【强约束】任何具体事实句（含地点/省份/数字/症状清单/机构来源/缩写解释等）必须带至少一个 [E#]；"
+            "没有引用的句子只能是非常泛化的过渡句，且不得引入新实体名。\n"
+            "【缩写规则】除非 Evidence Units 中原文出现该括号形式，否则禁止输出类似 “SFTSV（……）” 的括号扩展。"
+        )
 
         max_steps = int(args.simple_max_steps)
         step_new_tokens = int(args.simple_step_new_tokens)
@@ -508,8 +593,10 @@ def main() -> None:
                         break
             evidence_sents = evidence_sents[: max(0, max_unit_sents)]
             evidence_appendix = ""
+            evidence_pairs: List[Tuple[str, str]] = []
             if evidence_sents:
-                evidence_appendix = "\n\n[Evidence Units]\n" + "\n".join([s for s in evidence_sents]) + "\n"
+                formatted, evidence_pairs = _format_evidence_units_with_ids(evidence_sents)
+                evidence_appendix = "\n\n[Evidence Units]\n" + formatted + "\n"
             # Build injected prefix from selected blocks (layers 0..3).
             dtype2 = next(model.parameters()).dtype
             ext_by_layer: Dict[int, Any] = {}
@@ -540,6 +627,9 @@ def main() -> None:
             )
             chunk = str(chunk or "").strip()
             generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
+            post_dbg: Dict[str, Any] = {}
+            if evidence_pairs:
+                generated, post_dbg = _postprocess_answer_citation_guardrails(answer=generated, evidence_pairs=evidence_pairs)
             step_debug.append(
                 {
                     "step": int(step),
@@ -547,6 +637,7 @@ def main() -> None:
                     "selected_ids": selected_ids,
                     "selected_unit_counts": {bid: int(len(unit_lookup.get(bid) or [])) for bid in selected_ids} if unit_lookup else {},
                     "evidence_units_shown": evidence_sents[: min(3, len(evidence_sents))],
+                    "answer_postprocess": post_dbg,
                 }
             )
             if not chunk:
