@@ -550,6 +550,10 @@ class KVI2Runtime:
                     items=[m["item_text"] for m in mapping],
                     max_items=16,
                 )
+                # Chat-tuned models need chat template even for this constrained narrative prompt.
+                narrative_prompt = self._format_prompt(
+                    tokenizer, narrative_prompt, use_chat_template=bool(use_chat_template)
+                )
                 rim_answer = MultiStepInjector._greedy_generate_with_past_prefix(
                     model=model,
                     tokenizer=tokenizer,
@@ -561,7 +565,12 @@ class KVI2Runtime:
                     repetition_penalty=1.08,
                 )
                 # Always include the item list at the end for traceability.
-                out["rim_answer"] = (rim_answer.strip() + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
+                summary = str(rim_answer or "").strip()
+                if not summary:
+                    # Fail-closed: if model returns empty, fall back to deterministic list.
+                    out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
+                else:
+                    out["rim_answer"] = (summary + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
             else:
                 out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
             out["gate"] = dict(chosen_gate_after_validation or {})
@@ -651,12 +660,10 @@ def _build_list_only_narrative_prompt(*, user_prompt: str, items: Sequence[str],
         + "\n\n[INJECTED_LIST_ITEMS]\n"
         + bullet
         + "\n\n[STYLE_GUARD]\n"
-        + "Write a concise clinical summary in Chinese using ONLY the items above as factual content. "
+        + "Write ONLY 1–3 Chinese sentences as a concise summary using ONLY the items above as factual content. "
         + "Do NOT add any new symptoms, mechanisms, locations, drugs, numbers, or approvals not present in the list. "
+        + "Do NOT output any bullet list (the system will attach the list separately). "
         + "If the list is empty, output only: '现有证据不足以回答该问题。'\n"
-        + "Output format:\n"
-        + "1) 1–3 sentences summary.\n"
-        + "2) A bullet list repeating the same items (verbatim).\n"
     )
 
 
