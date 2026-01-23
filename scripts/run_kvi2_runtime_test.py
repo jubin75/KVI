@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -38,6 +38,72 @@ def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
 
+
+def _load_block_metadata_lookup(path: str) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    p = Path(path)
+    with p.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                rec = json.loads(s)
+            except Exception:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            bid = rec.get("block_id") or (rec.get("metadata") or {}).get("block_id")
+            if not bid:
+                continue
+            meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+            out[str(bid)] = meta
+    return out
+
+
+def _extract_sentence_units_only(
+    *, extractor: Any, block_id: str, text: str, metadata: Dict[str, Any]
+) -> List[str]:
+    """
+    Evidence Unit Pipeline (sentence-level only; no list-item fallback).
+    Keep only injectable sentence_enumerative units.
+    """
+    bid = str(block_id or "").strip()
+    t = str(text or "")
+    meta = metadata if isinstance(metadata, dict) else {}
+    try:
+        section_type = extractor.infer_section_type(text=t, metadata=meta)
+        sentences = extractor.split_sentences(block_id=bid, text=t)
+        units = extractor.extract_units(
+            block_id=bid,
+            text=t,
+            section_type=section_type,
+            sentences=sentences,
+            list_features={},  # do NOT enable list-item fallback in simple mode
+        )
+    except Exception:
+        return []
+    out: List[str] = []
+    for u in units or []:
+        if not isinstance(u, dict):
+            continue
+        if str(u.get("unit_type") or "") != "sentence_enumerative":
+            continue
+        inj = u.get("injectability") if isinstance(u.get("injectability"), dict) else {}
+        if not bool(inj.get("allowed")):
+            continue
+        s = str(u.get("text") or "").strip()
+        if s:
+            out.append(s)
+    # dedupe keep order
+    seen: set[str] = set()
+    dedup: List[str] = []
+    for s in out:
+        if s in seen:
+            continue
+        seen.add(s)
+        dedup.append(s)
+    return dedup
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -73,6 +139,10 @@ def main() -> None:
     p.add_argument("--simple_max_steps", type=int, default=3)
     p.add_argument("--simple_step_new_tokens", type=int, default=96)
     p.add_argument("--simple_max_blocks_per_step", type=int, default=8)
+    # Evidence Unit Pipeline knobs (sentence-level only; no LIST_ONLY)
+    p.add_argument("--simple_use_evidence_units", action="store_true", help="Use sentence-level evidence units to select/ground injected blocks")
+    p.add_argument("--simple_max_unit_sentences", type=int, default=6)
+    p.add_argument("--simple_require_units", action="store_true", help="If set, only inject blocks that have injectable sentence-level units (fallback to ANN if none)")
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
     p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")
     p.add_argument("--final_only", action="store_true", help="Print only final_answer (rim_answer) and exit")
@@ -132,12 +202,31 @@ def main() -> None:
             )
         )
 
+        # Evidence Unit Pipeline (sentence-level only; no list-item / no LIST_ONLY)
+        unit_lookup: Dict[str, List[str]] = {}
+        if bool(args.simple_use_evidence_units):
+            try:
+                from external_kv_injection.src.evidence.evidence_unit_extractor import EvidenceUnitExtractor  # type: ignore
+            except ModuleNotFoundError:
+                from src.evidence.evidence_unit_extractor import EvidenceUnitExtractor  # type: ignore
+            eu = EvidenceUnitExtractor()
+            meta_lookup = _load_block_metadata_lookup(str(args.blocks_jsonl))
+            for bid, txt in (block_text_lookup or {}).items():
+                meta = meta_lookup.get(str(bid), {})
+                unit_lookup[str(bid)] = _extract_sentence_units_only(
+                    extractor=eu,
+                    block_id=str(bid),
+                    text=str(txt or ""),
+                    metadata=meta,
+                )
+
         # We want a prose answer (no bullets) in this debug mode.
-        prose_guard = "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
+        prose_guard = "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。回答必须与证据一致，不要编造。"
 
         max_steps = int(args.simple_max_steps)
         step_new_tokens = int(args.simple_step_new_tokens)
         max_blocks = int(args.simple_max_blocks_per_step)
+        max_unit_sents = int(args.simple_max_unit_sentences)
         top_k = int(args.top_k)
         used: set[str] = set()
         generated = ""
@@ -147,19 +236,56 @@ def main() -> None:
             qtxt = user_prompt + ("\n" + generated if generated.strip() else "")
             qv = enc.encode(qtxt)[0]
             rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
-            cand_ids = [_kv_id(it) for it in (rr.items or [])]
-            cand_ids = [x for x in cand_ids if x]
+            # Rank candidates by evidence-unit richness first (if enabled), then ANN score.
+            candidates: List[Tuple[int, float, Any, str]] = []
+            cand_ids: List[str] = []
+            for it in (rr.items or []):
+                bid = _kv_id(it)
+                if not bid:
+                    continue
+                cand_ids.append(bid)
+                unit_cnt = len(unit_lookup.get(bid) or []) if unit_lookup else 0
+                score = float(getattr(it, "score", 0.0) or 0.0)
+                candidates.append((int(unit_cnt), float(score), it, bid))
+            candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
             selected: List[Any] = []
             selected_ids: List[str] = []
-            for it in rr.items or []:
-                bid = _kv_id(it)
-                if not bid or bid in used:
-                    continue
-                selected.append(it)
-                selected_ids.append(bid)
-                used.add(bid)
-                if len(selected) >= max_blocks:
-                    break
+            require_units = bool(args.simple_require_units) and bool(unit_lookup)
+            # First pass: pick blocks with sentence-level injectable units.
+            if unit_lookup:
+                for unit_cnt, _score, it, bid in candidates:
+                    if bid in used:
+                        continue
+                    if require_units and int(unit_cnt) <= 0:
+                        continue
+                    if int(unit_cnt) <= 0:
+                        continue
+                    selected.append(it)
+                    selected_ids.append(bid)
+                    used.add(bid)
+                    if len(selected) >= max_blocks:
+                        break
+            # Fallback: pick top ANN hits if no unit-rich blocks found.
+            if not selected:
+                for _unit_cnt, _score, it, bid in candidates:
+                    if bid in used:
+                        continue
+                    selected.append(it)
+                    selected_ids.append(bid)
+                    used.add(bid)
+                    if len(selected) >= max_blocks:
+                        break
+
+            evidence_sents: List[str] = []
+            if unit_lookup:
+                for bid in selected_ids:
+                    evidence_sents.extend(unit_lookup.get(bid) or [])
+                    if len(evidence_sents) >= max_unit_sents:
+                        break
+            evidence_sents = evidence_sents[: max(0, max_unit_sents)]
+            evidence_appendix = ""
+            if evidence_sents:
+                evidence_appendix = "\n\n[Evidence Units]\n" + "\n".join([s for s in evidence_sents]) + "\n"
             # Build injected prefix from selected blocks (layers 0..3).
             dtype2 = next(model.parameters()).dtype
             ext_by_layer: Dict[int, Any] = {}
@@ -176,7 +302,7 @@ def main() -> None:
                     continue
             pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
 
-            step_prompt = (user_prompt + prose_guard + ("\n\n" + generated if generated.strip() else "")).strip()
+            step_prompt = (user_prompt + prose_guard + evidence_appendix + ("\n\n" + generated if generated.strip() else "")).strip()
             step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
             chunk = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
@@ -195,6 +321,8 @@ def main() -> None:
                     "step": int(step),
                     "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
                     "selected_ids": selected_ids,
+                    "selected_unit_counts": {bid: int(len(unit_lookup.get(bid) or [])) for bid in selected_ids} if unit_lookup else {},
+                    "evidence_units_shown": evidence_sents[: min(3, len(evidence_sents))],
                 }
             )
             if not chunk:
