@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 
-_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\。\！\？])\s+|\n+")
+# Sentence boundary splitter.
+# Important: Chinese text often has no whitespace after "。/！/？", so we must allow \s*.
+_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\。\！\？])\s*|\n+")
 _ENUM_SIGNAL_RE = re.compile(
     # Enumeration signals (EN + ZH): commas/semicolons/conjunctions.
     r"(,|;|，|；|、|\band\b|\bor\b|和|或|以及|及)",
@@ -190,6 +192,8 @@ class EvidenceUnitExtractor:
         Returns (items, cross_semantic_mixed).
         """
         s = str(sentence)
+        # strip common Chinese discourse lead-ins that are not part of list content
+        s = re.sub(r"^(此外|另外|同时|同时也|此外也|其中|并且|而且)[，,]\s*", "", s)
         # normalize conjunctions (EN + ZH) into commas for a unified split.
         s2 = re.sub(r"\b(and|or)\b", ",", s, flags=re.IGNORECASE)
         # Chinese conjunctions (keep it conservative; no heavy NLP)
