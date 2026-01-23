@@ -297,6 +297,7 @@ def _postprocess_answer_citation_guardrails(
     a = str(answer or "").strip()
     evidence_blob = "\n".join([t for _eid, t in (evidence_pairs or [])])
     dropped: List[Dict[str, Any]] = []
+    auto_cited: List[Dict[str, Any]] = []
 
     def _looks_like_fact(s: str) -> bool:
         sl = s.lower()
@@ -316,6 +317,45 @@ def _postprocess_answer_citation_guardrails(
     def _has_cite(s: str) -> bool:
         return bool(_SIMPLE_CITE_RE.search(s))
 
+    def _strip_cites(s: str) -> str:
+        return _SIMPLE_CITE_RE.sub("", s).strip()
+
+    def _tokenize_shingles(s: str) -> List[str]:
+        """
+        Very lightweight tokenization for overlap scoring:
+        - English words / numbers as tokens
+        - Chinese text as 2-char shingles (to avoid single-char noise)
+        """
+        t = str(s or "")
+        # keep alnum tokens
+        en = re.findall(r"[A-Za-z0-9]+", t)
+        # Chinese characters only
+        zh = "".join(re.findall(r"[\u4e00-\u9fff]+", t))
+        z2 = [zh[i : i + 2] for i in range(0, max(0, len(zh) - 1))]
+        out = [x.lower() for x in en] + z2
+        # drop very short shingles
+        return [x for x in out if len(x) >= 2]
+
+    def _best_evidence_cites_for_sentence(s: str) -> List[str]:
+        """
+        Return a small list like ["[E2]", "[E3]"] if the sentence matches evidence well.
+        """
+        stoks = set(_tokenize_shingles(_strip_cites(s)))
+        if not stoks:
+            return []
+        scored: List[Tuple[float, str]] = []
+        for eid, etxt in (evidence_pairs or []):
+            etoks = set(_tokenize_shingles(etxt))
+            if not etoks:
+                continue
+            inter = len(stoks & etoks)
+            # fraction of sentence tokens covered by evidence tokens
+            frac = float(inter) / float(max(1, len(stoks)))
+            if inter >= 3 and frac >= 0.22:
+                scored.append((frac, f"[{eid}]"))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _f, c in scored[:2]]
+
     def _has_unsupported_sftsv_expansion(s: str) -> bool:
         # If model expands SFTSV in parentheses, require verbatim presence in evidence units.
         m = re.search(r"SFTSV[（(]([^）)]+)[）)]", s)
@@ -330,15 +370,30 @@ def _postprocess_answer_citation_guardrails(
     parts = [p.strip() for p in _SIMPLE_SENT_SPLIT_RE.split(a) if p and p.strip()]
     kept: List[str] = []
     for s in parts:
+        # Drop citation-only fragments
+        if not _strip_cites(s):
+            dropped.append({"sentence": s, "reason": "citation_only_fragment"})
+            continue
         if _has_unsupported_sftsv_expansion(s):
             dropped.append({"sentence": s, "reason": "unsupported_sftsv_parenthetical"})
             continue
         if _looks_like_fact(s) and not _has_cite(s):
+            cites = _best_evidence_cites_for_sentence(s)
+            if cites:
+                s2 = (s.rstrip() + " " + "".join(cites)).strip()
+                auto_cited.append({"before": s, "after": s2, "cites": cites})
+                kept.append(s2)
+                continue
             dropped.append({"sentence": s, "reason": "fact_without_citation"})
             continue
         kept.append(s)
     out = "\n".join(kept).strip()
-    dbg = {"dropped_count": len(dropped), "dropped_examples": dropped[:3]}
+    dbg = {
+        "dropped_count": len(dropped),
+        "dropped_examples": dropped[:3],
+        "auto_cited_count": len(auto_cited),
+        "auto_cited_examples": auto_cited[:3],
+    }
     return out, dbg
 
 
