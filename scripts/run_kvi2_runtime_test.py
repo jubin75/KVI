@@ -173,6 +173,10 @@ def _infer_target_semantic_type_for_query(
                         }
                     )
                     return st, dbg
+                # IMPORTANT: do NOT fail-closed here. Topic-level contracts can be incomplete
+                # (e.g., mini evidence topics), or schema slots may remain "generic".
+                # Fall back to the conservative heuristic router below so Evidence Units can
+                # still be filtered by a stable semantic_type without using base LLM.
                 dbg.update(
                     {
                         "method": "contracts+scoring",
@@ -181,7 +185,6 @@ def _infer_target_semantic_type_for_query(
                         "rationale": ["ambiguous_semantic_type"],
                     }
                 )
-                return "unknown", dbg
     except Exception:
         pass
 
@@ -204,14 +207,35 @@ def _infer_target_semantic_type_for_query(
         or ("reported in" in ql)
     )
     if sum([int(symptom), int(drug), int(location)]) != 1:
+        # Preserve contract debug context if present, but mark heuristic ambiguity.
+        if dbg.get("method") == "contracts+scoring":
+            dbg["method"] = "contracts+scoring+heuristic"
+            dbg["rationale"] = list(dbg.get("rationale") or []) + ["heuristic:ambiguous_or_no_intent"]
+            dbg["semantic_type"] = "unknown"
+            return "unknown", dbg
         dbg.update({"method": "heuristic", "semantic_type": "unknown", "rationale": ["ambiguous_or_no_intent"]})
         return "unknown", dbg
     if symptom:
+        if dbg.get("method") == "contracts+scoring":
+            dbg["method"] = "contracts+scoring+heuristic"
+            dbg["semantic_type"] = "symptom"
+            dbg["rationale"] = list(dbg.get("rationale") or []) + ["cue:symptom"]
+            return "symptom", dbg
         dbg.update({"method": "heuristic", "semantic_type": "symptom", "rationale": ["cue:symptom"]})
         return "symptom", dbg
     if drug:
+        if dbg.get("method") == "contracts+scoring":
+            dbg["method"] = "contracts+scoring+heuristic"
+            dbg["semantic_type"] = "drug"
+            dbg["rationale"] = list(dbg.get("rationale") or []) + ["cue:drug"]
+            return "drug", dbg
         dbg.update({"method": "heuristic", "semantic_type": "drug", "rationale": ["cue:drug"]})
         return "drug", dbg
+    if dbg.get("method") == "contracts+scoring":
+        dbg["method"] = "contracts+scoring+heuristic"
+        dbg["semantic_type"] = "location"
+        dbg["rationale"] = list(dbg.get("rationale") or []) + ["cue:location"]
+        return "location", dbg
     dbg.update({"method": "heuristic", "semantic_type": "location", "rationale": ["cue:location"]})
     return "location", dbg
 
