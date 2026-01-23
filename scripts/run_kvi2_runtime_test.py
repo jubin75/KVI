@@ -55,7 +55,7 @@ def main() -> None:
     p.add_argument(
         "--answer_mode",
         choices=["list_only", "narrative", "llm", "llm_prose"],
-        default="list_only",
+        default="llm_prose",
         help="Answer rendering: list_only / narrative / llm (bypass LIST_ONLY) / llm_prose (bypass LIST_ONLY + force prose, no bullets).",
     )
     # Output controls: baseline is frequently hallucinated; keep it opt-in.

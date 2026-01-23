@@ -56,11 +56,13 @@ class KVI2Config:
     structured_template_text: str = ""
     debug_retrieved_ids: bool = False
     # How to render LIST_ONLY answers:
-    # - "list_only": deterministic bullet list projection (default, safest)
-    # - "narrative": run a constrained second-pass LLM summary using extracted items as the only facts
-    # - "llm": disable LIST_ONLY projection and force KV-injected generative answering
-    # - "llm_prose": like llm, but forces a prose paragraph (no bullet list) via a style guard
-    answer_mode: str = "list_only"
+    # - "list_only": deterministic bullet list projection (safest)
+    # - "narrative": constrained LLM summary (grounded) + bullets
+    # - "llm": bypass LIST_ONLY projection and force KV-injected generative answering
+    # - "llm_prose": like llm, but also forces prose (no bullets) via a style guard
+    #
+    # TEMP (per product iteration): default to llm_prose so intent routing bypasses LIST_ONLY projection.
+    answer_mode: str = "llm_prose"
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
     pattern_soft: Sequence[str] = ()
@@ -536,9 +538,18 @@ class KVI2Runtime:
         if str(guard_style or "").upper() == "LIST_ONLY":
             # If user explicitly requests LLM narrative answering, bypass LIST_ONLY entirely.
             # This keeps injection behavior intact but trades determinism for fluency.
-            am = str(getattr(self.cfg, "answer_mode", "list_only") or "").strip().lower()
+            am = str(getattr(self.cfg, "answer_mode", "llm_prose") or "").strip().lower()
             if am in {"llm", "llm_prose"}:
-                guard_style = ""
+                # Still compute list items for debug/traceability, but do not use projection as final answer.
+                items, mapping, audit = _project_list_only(
+                    semantic_instances=semantic_instances,
+                    retrieval_rank=final_rank,
+                )
+                out["retrieval"]["list_items_extracted"] = items
+                out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
+                out["retrieval"]["list_only_audit"] = audit
+                # Force prose generation downstream.
+                guard_style = "PROSE" if am == "llm_prose" else ""
             else:
                 items, mapping, audit = _project_list_only(
                     semantic_instances=semantic_instances,
@@ -558,7 +569,6 @@ class KVI2Runtime:
                         items=[m["item_text"] for m in mapping],
                         max_items=16,
                     )
-                    # Chat-tuned models need chat template even for this constrained narrative prompt.
                     narrative_prompt = self._format_prompt(
                         tokenizer, narrative_prompt, use_chat_template=bool(use_chat_template)
                     )
@@ -572,10 +582,8 @@ class KVI2Runtime:
                         no_repeat_ngram_size=12,
                         repetition_penalty=1.08,
                     )
-                    # Always include the item list at the end for traceability.
                     summary = str(rim_answer or "").strip()
                     if not summary:
-                        # Fail-closed: if model returns empty, fall back to deterministic list.
                         out["rim_answer"] = "\n".join([f"- {m['item_text']}" for m in mapping])
                     else:
                         out["rim_answer"] = (summary + "\n\n" + "\n".join([f"- {m['item_text']}" for m in mapping])).strip()
@@ -597,7 +605,14 @@ class KVI2Runtime:
             no_repeat_ngram_size=12,
             repetition_penalty=1.08,
         )
-        out["rim_answer"] = rim_answer.strip()
+        ans = str(rim_answer or "").strip()
+        # If model still outputs bullets in llm_prose mode, rewrite into deterministic prose using extracted items.
+        if str(getattr(self.cfg, "answer_mode", "") or "").strip().lower() == "llm_prose":
+            extracted = out.get("retrieval", {}).get("list_items_extracted") if isinstance(out.get("retrieval"), dict) else None
+            extracted_items = [str(x).strip() for x in (extracted or []) if str(x).strip()] if isinstance(extracted, list) else []
+            if _looks_like_bullet_list(ans) and extracted_items:
+                ans = _rewrite_items_to_prose(user_prompt=user_prompt, items=extracted_items)
+        out["rim_answer"] = ans
         return out
 
     @staticmethod
@@ -665,6 +680,36 @@ def _apply_answer_style_guard(prompt: str, final_style: str) -> str:
         )
         return str(prompt) + guard
     return str(prompt)
+
+
+def _looks_like_bullet_list(text: str) -> bool:
+    t = str(text or "").strip()
+    if not t:
+        return False
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    bullet = 0
+    for ln in lines:
+        if ln.startswith(("-", "•", "*")):
+            bullet += 1
+            continue
+        if len(ln) >= 3 and ln[0].isdigit() and ln[1:2] in {".", ")"}:
+            bullet += 1
+            continue
+    return bullet >= max(2, int(len(lines) * 0.5))
+
+
+def _rewrite_items_to_prose(*, user_prompt: str, items: Sequence[str], max_items: int = 12) -> str:
+    it = [str(x).strip() for x in (items or []) if str(x).strip()]
+    it = it[: max(1, int(max_items))]
+    joined = "、".join(it)
+    q = str(user_prompt or "").strip()
+    if not joined:
+        return "现有证据不足以回答该问题。"
+    if ("临床" in q) or ("表现" in q) or ("症状" in q):
+        return f"根据检索到的证据，SFTSV/SFTS 的临床表现主要包括：{joined}。"
+    return f"根据检索到的证据，主要包括：{joined}。"
 
 
 def _build_list_only_narrative_prompt(*, user_prompt: str, items: Sequence[str], max_items: int = 16) -> str:
