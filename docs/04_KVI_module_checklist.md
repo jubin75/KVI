@@ -69,6 +69,38 @@
   - 输入：pattern_id / slot_status / contract missing / （可选）kv relevance delta 等
   - 输出：是否 retrieve_more / 是否 REFUSE / 选择 answer_style（如 LIST_ONLY）
 
+#### 2.3.1（已知缺陷/风险记录）Gate 的 Q1/Q2/Q3 在设计上的不稳定性
+
+> 目的：把“我们已经讨论过的问题”写进 checklist，后续再修代码时作为明确的改造目标与验收点。
+
+**现状（代码事实）**：
+- `retrieve_more` 的核心信号来自 `RIM.introspection_gate(...)`（Q1/Q2/Q3）：`src/rim.py`
+  - **Q1 semantic-shift**：比较 `q0` 与 `q'` 的 cosine distance（`tau_cos_dist`）
+  - **Q2 low-impact**：注入后 `logit_delta_vs_zero_prefix < kv_irrelevant_logit_delta_threshold`
+  - **Q3 pattern-mismatch**：`missing_hard`（hard contract violations）触发 refresh
+- 在 `KVI2Runtime.run_ab` 中第一次 gate（semantic-second 之前）使用：
+  - `q0 = enc(prompt)`
+  - `q' = enc(prompt + baseline)`（baseline 是 base LLM 的生成文本）
+
+**我们认为的潜在问题（讨论结论）**：
+- **Q1（semantic-shift）在第一次 gate 尤其不稳**：
+  - `q'` 由 `prompt + baseline` 组成，baseline 是 LLM 生成文本，包含风格/幻觉/模板噪声；
+  - DomainEncoder 对“生成风格噪声”敏感，cos_dist 可能反映的是表达变化而非语义漂移；
+  - 这会导致“在没有任何外部证据之前，就用不稳定信号决定要不要检索”，属于高风险决策点。
+- **Q2（low-impact）不等价于“证据不相关”**：
+  - 注入影响小可能是“模型本来就会/答案短/层选择不敏感”，并不代表证据无价值（尤其对审计与引用仍有价值）；
+  - 阈值强依赖模型、注入层、注入 token 数、prompt 长度，跨任务泛化差；
+  - 更适合作为“注入管线健康度/强度监控”，而不是相关性判定。
+- **Q3（pattern-mismatch = missing_hard）可能把“契约/抽取问题”误当成“证据问题”**：
+  - hard missing 可能来自 contract 设计过硬、metadata 抽取不足、cleaner 过严等；
+  - 若直接驱动 refresh，可能产生“无效换 KV 循环”，而不是引导补信息/降级/转人工。
+
+**建议的未来修复方向（先记录，不改代码）**：
+- **第一次 gate 降级为“弱门禁”**：默认进入 semantic-second（至少进行一小步检索），第一次 gate 只决定检索预算而不是做强拒绝/强刷新决策。
+- **把是否需要更多证据改为“契约缺口/slot 缺口驱动”**：对 evidence-expected intents（诊断/治疗/风险/预后等）默认检索；对纯解释性问题降低强制检索。
+- **把 Q2 从相关性判定降级为健康监控**：用于识别注入无效/注入过强/需要降噪，而不是直接判“证据不相关”。
+- **Q3 优先导向“缺口解释/追问/转人工”**：missing_hard 更像“缺变量/缺证据/指南不覆盖”的提示，应优先 fail-closed 并给出缺口清单，而非盲目 refresh。
+
 ### 2.4 Semantic-second 检索 + 契约过滤（Detox）
 
 - **检索**：`Retriever.search(...)` → `KVBank.search(...)`
