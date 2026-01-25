@@ -903,6 +903,9 @@ def _build_slot_evidence(
             span = str(block_text_lookup.get(bid) or "")
         elif isinstance(getattr(it, "text", None), str):
             span = str(getattr(it, "text") or "")
+        elif isinstance(meta.get("semantic_text"), str):
+            # Authoring evidence KVBank (EvidenceUnit-first): keep text in meta for grounding.
+            span = str(meta.get("semantic_text") or "")
         meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
         pat = meta_payload.get("pattern") if isinstance(meta_payload.get("pattern"), dict) else {}
         evmeta = meta_payload.get("evidence") if isinstance(meta_payload.get("evidence"), dict) else {}
@@ -910,6 +913,41 @@ def _build_slot_evidence(
         # Slot filling ONLY from Evidence Units (docs/078_Evidence_extract.md).
         # For schema slots, use injectability.allowed == true units as list_items.
         list_items: List[str] = []
+        # New path (docs/11 & docs/012): Authoring EvidenceUnit provides slot_projection directly.
+        # Prefer it over any runtime/heuristic evidence_units extraction.
+        if str(spec.inference_level).lower() == "schema" and isinstance(meta.get("slot_projection"), dict):
+            # Contract checks: schema_id & semantic_type must match (hard reject).
+            schema_id = str(meta.get("schema_id") or "").strip()
+            if pattern_id and schema_id and schema_id != str(pattern_id):
+                if filtered_out is not None:
+                    filtered_out.append(
+                        {
+                            "evidence_id": bid,
+                            "reason": "SCHEMA_MISMATCH",
+                            "expected": str(pattern_id),
+                            "actual": str(schema_id),
+                        }
+                    )
+                continue
+            ev_sem = str(meta.get("semantic_type") or "").strip().lower()
+            slot_sem = str(spec.semantic_type or "").strip().lower()
+            if slot_sem and ev_sem and ev_sem != slot_sem:
+                if filtered_out is not None:
+                    filtered_out.append(
+                        {
+                            "evidence_id": bid,
+                            "reason": "SEMANTIC_TYPE_MISMATCH",
+                            "expected": str(slot_sem),
+                            "actual": str(ev_sem),
+                        }
+                    )
+                continue
+            proj = meta.get("slot_projection") if isinstance(meta.get("slot_projection"), dict) else {}
+            raw_vals = proj.get(spec.name)
+            if isinstance(raw_vals, list):
+                list_items = [str(x) for x in raw_vals if str(x).strip()]
+            else:
+                list_items = []
         if str(spec.inference_level).lower() == "schema" and isinstance(evmeta.get("evidence_units"), list):
             for u in evmeta.get("evidence_units") or []:
                 if not isinstance(u, dict):

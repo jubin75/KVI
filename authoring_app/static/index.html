@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Knowledge Authoring (EvidenceUnit)</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="panel">
+      <div class="title">
+        <h1>Evidence 列表</h1>
+        <div class="hint" id="count">0 items</div>
+      </div>
+
+      <div id="filters">
+        <div class="field">
+          <label>搜索（evidence_id / claim / schema_id / semantic_type）</label>
+          <input id="filter_q" placeholder="关键词..." />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Status</label>
+            <select id="filter_status">
+              <option value="">(all)</option>
+              <option value="draft">draft</option>
+              <option value="reviewed">reviewed</option>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>semantic_type</label>
+            <select id="filter_semantic_type">
+              <option value="">(all)</option>
+              <option value="drug">drug</option>
+              <option value="symptom">symptom</option>
+              <option value="location">location</option>
+              <option value="procedure">procedure</option>
+              <option value="laboratory">laboratory</option>
+              <option value="population">population</option>
+              <option value="outcome">outcome</option>
+              <option value="generic">generic</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>schema_id</label>
+          <input id="filter_schema" placeholder="schema:..." />
+        </div>
+        <div class="btns">
+          <button id="btn_refresh">Refresh</button>
+          <button class="primary" id="btn_new">New Draft</button>
+        </div>
+      </div>
+
+      <div class="notice">
+        <div><b>原则（冻结）</b></div>
+        <div>Evidence 是“语义条目”，不是问题答案；不包含 intent/topic 路由信息。</div>
+        <div><b>重要</b>：Rejected evidence will never be injected into answers. This does not mean the evidence is wrong — only that it is not suitable for the current knowledge slot.</div>
+      </div>
+
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="title">
+        <h1 id="editor_title">Evidence Editor</h1>
+        <div class="hint">MVP · Authoring + Review</div>
+      </div>
+
+      <div id="err" class="rejection" style="display:none"></div>
+
+      <div class="row">
+        <div class="field">
+          <label>evidence_id（新建留空自动生成）</label>
+          <input id="evidence_id" placeholder="EVIDENCE_..." />
+        </div>
+        <div class="field">
+          <label>status</label>
+          <select id="status">
+            <option value="draft">draft</option>
+            <option value="reviewed">reviewed</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>semantic_type</label>
+          <select id="semantic_type">
+            <option value="drug">drug</option>
+            <option value="symptom">symptom</option>
+            <option value="location">location</option>
+            <option value="procedure">procedure</option>
+            <option value="laboratory">laboratory</option>
+            <option value="population">population</option>
+            <option value="outcome">outcome</option>
+            <option value="generic">generic</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>polarity</label>
+          <select id="polarity">
+            <option value="neutral">neutral</option>
+            <option value="positive">positive</option>
+            <option value="negative">negative</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>schema_id</label>
+        <input id="schema_id" placeholder="schema:infectious_disease" />
+      </div>
+
+      <div class="field">
+        <label>claim（原始文本不可隐藏）</label>
+        <textarea id="claim" placeholder="Textual statement of a single evidence unit."></textarea>
+      </div>
+
+      <div class="field">
+        <label>slot_projection（JSON）</label>
+        <textarea id="slot_projection" placeholder='{"slot_name":["value1","value2"]}'></textarea>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>provenance（JSON）</label>
+          <textarea id="provenance"></textarea>
+        </div>
+        <div class="field">
+          <label>external_refs（JSON）</label>
+          <textarea id="external_refs"></textarea>
+        </div>
+      </div>
+
+      <div id="rej_block" class="rejection" style="display:none">
+        <div><b>拒绝原因（后端 → 前端结构冻结）</b></div>
+        <div class="row">
+          <div class="field">
+            <label>rejection.code（有限集）</label>
+            <select id="rej_code"></select>
+          </div>
+          <div class="field">
+            <label>confidence</label>
+            <input id="rej_confidence" placeholder="0.93" />
+          </div>
+        </div>
+        <div class="field">
+          <label>message</label>
+          <input id="rej_message" placeholder="Evidence semantic_type does not match target slot." />
+        </div>
+        <div class="field">
+          <label>details（JSON）</label>
+          <textarea id="rej_details" placeholder='{"expected":"drug","actual":"location"}'></textarea>
+        </div>
+        <div class="notice">
+          <b>What you can do:</b>
+          <div>• Change semantic type</div>
+          <div>• Move to a different schema</div>
+          <div>• Edit the evidence text</div>
+          <div>• Leave it rejected</div>
+        </div>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="btn_save">Save</button>
+        <button class="ok" id="btn_approve">Approve</button>
+        <button class="bad" id="btn_reject">Reject</button>
+      </div>
+
+      <div class="footer">
+        说明：本 UI 只做“编辑/审核/解释为什么不能注入”，不提供“加规则/自动修补”。
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

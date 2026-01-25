@@ -1,0 +1,241 @@
+async function apiGet(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`GET ${path} ${res.status}`);
+  return await res.json();
+}
+
+async function apiSend(path, method, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : "{}",
+  });
+  const txt = await res.text();
+  let obj = null;
+  try { obj = JSON.parse(txt); } catch { obj = { raw: txt }; }
+  if (!res.ok) throw new Error(`${method} ${path} ${res.status}: ${obj?.message || obj?.error || txt}`);
+  return obj;
+}
+
+function $(id) { return document.getElementById(id); }
+
+function badgeClass(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "approved") return "badge approved";
+  if (s === "rejected") return "badge rejected";
+  if (s === "reviewed") return "badge reviewed";
+  return "badge draft";
+}
+
+function truncate(s, n) {
+  s = (s || "").trim();
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + "…";
+}
+
+function safeJsonParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+function prettyJson(obj) {
+  try { return JSON.stringify(obj, null, 2); } catch { return ""; }
+}
+
+let current = null;
+let rejectionCodes = [];
+
+async function refreshList() {
+  const qs = new URLSearchParams();
+  const status = $("filter_status").value;
+  const schema = $("filter_schema").value.trim();
+  const sem = $("filter_semantic_type").value;
+  const q = $("filter_q").value.trim();
+  if (status) qs.set("status", status);
+  if (schema) qs.set("schema_id", schema);
+  if (sem) qs.set("semantic_type", sem);
+  if (q) qs.set("q", q);
+  const data = await apiGet(`/api/evidence?${qs.toString()}`);
+  $("count").textContent = `${data.count} items`;
+  const el = $("list");
+  el.innerHTML = "";
+  for (const it of data.items || []) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.onclick = () => loadEvidence(it.evidence_id);
+    const top = document.createElement("div");
+    top.className = "top";
+
+    const left = document.createElement("div");
+    left.className = "id";
+    left.textContent = it.evidence_id;
+
+    const badge = document.createElement("div");
+    badge.className = badgeClass(it.status);
+    badge.textContent = (it.status || "draft").toUpperCase();
+
+    top.appendChild(left);
+    top.appendChild(badge);
+
+    const claim = document.createElement("div");
+    claim.className = "claim";
+    claim.textContent = truncate(it.claim || "", 220) || "(empty claim)";
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `semantic_type=${it.semantic_type || ""}  schema_id=${it.schema_id || ""}  polarity=${it.polarity || ""}`;
+
+    card.appendChild(top);
+    card.appendChild(claim);
+    card.appendChild(meta);
+
+    if ((it.status || "").toLowerCase() === "rejected" && it.rejection) {
+      const rej = document.createElement("div");
+      rej.className = "rejection";
+      rej.innerHTML = `<div class="code">${it.rejection.code || "REJECTED"}</div><div class="msg">${it.rejection.message || ""}</div>`;
+      card.appendChild(rej);
+    }
+
+    el.appendChild(card);
+  }
+}
+
+function fillForm(u) {
+  current = u;
+  $("evidence_id").value = u.evidence_id || "";
+  $("status").value = u.status || "draft";
+  $("semantic_type").value = u.semantic_type || "generic";
+  $("schema_id").value = u.schema_id || "";
+  $("polarity").value = u.polarity || "neutral";
+  $("claim").value = u.claim || "";
+  $("slot_projection").value = prettyJson(u.slot_projection || {});
+  $("provenance").value = prettyJson(u.provenance || {});
+  $("external_refs").value = prettyJson(u.external_refs || {});
+
+  const rej = u.rejection || null;
+  $("rej_block").style.display = rej ? "block" : "none";
+  $("rej_code").value = rej?.code || (rejectionCodes[0] || "");
+  $("rej_message").value = rej?.message || "";
+  $("rej_details").value = prettyJson(rej?.details || {});
+  $("rej_confidence").value = (rej?.confidence != null ? String(rej.confidence) : "0.9");
+}
+
+async function loadEvidence(evidenceId) {
+  const u = await apiGet(`/api/evidence/${encodeURIComponent(evidenceId)}`);
+  fillForm(u);
+  $("editor_title").textContent = `Evidence ${u.evidence_id}`;
+}
+
+function buildPayloadFromForm() {
+  const slotProj = safeJsonParse($("slot_projection").value) || {};
+  const prov = safeJsonParse($("provenance").value) || {};
+  const exr = safeJsonParse($("external_refs").value) || {};
+  return {
+    evidence_id: $("evidence_id").value.trim(),
+    status: $("status").value,
+    semantic_type: $("semantic_type").value,
+    schema_id: $("schema_id").value.trim(),
+    polarity: $("polarity").value,
+    claim: $("claim").value,
+    slot_projection: slotProj,
+    provenance: prov,
+    external_refs: exr,
+    rejection: current?.rejection || null,
+  };
+}
+
+async function createNew() {
+  const u = {
+    evidence_id: "",
+    status: "draft",
+    semantic_type: "generic",
+    schema_id: "",
+    polarity: "neutral",
+    claim: "",
+    slot_projection: {},
+    provenance: { source_type: "guideline", organization: null, document_title: "", publication_year: null, page_range: null },
+    external_refs: { document_id: null, pmid: null, orcid: null, title: null, abstract: null, authors: [], published_at: null },
+    rejection: null,
+  };
+  fillForm(u);
+  $("editor_title").textContent = "New Evidence (draft)";
+}
+
+async function saveDraft() {
+  const payload = buildPayloadFromForm();
+  if (!payload.evidence_id) {
+    // create
+    const saved = await apiSend("/api/evidence", "POST", payload);
+    fillForm(saved);
+  } else {
+    const saved = await apiSend(`/api/evidence/${encodeURIComponent(payload.evidence_id)}`, "PUT", payload);
+    fillForm(saved);
+  }
+  await refreshList();
+}
+
+async function approve() {
+  const id = $("evidence_id").value.trim();
+  if (!id) throw new Error("Save before approve (needs evidence_id).");
+  const saved = await apiSend(`/api/evidence/${encodeURIComponent(id)}/approve`, "POST", {});
+  fillForm(saved);
+  await refreshList();
+}
+
+async function reject() {
+  const id = $("evidence_id").value.trim();
+  if (!id) throw new Error("Save before reject (needs evidence_id).");
+  const details = safeJsonParse($("rej_details").value) || {};
+  const conf = Number($("rej_confidence").value || "0.9");
+  const payload = {
+    rejection: {
+      code: $("rej_code").value,
+      message: $("rej_message").value.trim(),
+      details,
+      confidence: Number.isFinite(conf) ? conf : 0.9,
+    },
+  };
+  const saved = await apiSend(`/api/evidence/${encodeURIComponent(id)}/reject`, "POST", payload);
+  fillForm(saved);
+  await refreshList();
+}
+
+async function init() {
+  const codes = await apiGet("/api/rejection_codes");
+  rejectionCodes = codes.codes || [];
+  const sel = $("rej_code");
+  sel.innerHTML = "";
+  for (const c of rejectionCodes) {
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  }
+
+  $("btn_refresh").onclick = () => refreshList().catch(showErr);
+  $("btn_new").onclick = () => createNew().catch(showErr);
+  $("btn_save").onclick = () => saveDraft().catch(showErr);
+  $("btn_approve").onclick = () => approve().catch(showErr);
+  $("btn_reject").onclick = () => reject().catch(showErr);
+  $("filters").oninput = debounce(() => refreshList().catch(showErr), 300);
+
+  await refreshList();
+  await createNew();
+}
+
+function showErr(e) {
+  const msg = (e && e.message) ? e.message : String(e);
+  $("err").textContent = msg;
+  $("err").style.display = "block";
+  setTimeout(() => { $("err").style.display = "none"; }, 6000);
+}
+
+function debounce(fn, ms) {
+  let t = null;
+  return () => {
+    if (t) clearTimeout(t);
+    t = setTimeout(fn, ms);
+  };
+}
+
+window.addEventListener("DOMContentLoaded", () => init().catch(showErr));
+
