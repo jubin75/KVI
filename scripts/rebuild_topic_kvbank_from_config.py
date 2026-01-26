@@ -394,11 +394,19 @@ def main() -> None:
     )
     print(f"[rebuild_topic] wrote_blocks={n_blocks} path={blocks}", flush=True)
 
-    # 2.5) Optional: build extractive evidence blocks and an evidence KVBank.
+    # 2.5) Optional: build extractive evidence blocks (DeepSeek) as *authoring suggestions*.
+    #
+    # IMPORTANT boundary (docs/11 + docs/012):
+    # - DeepSeek output MUST NOT become runtime knowledge directly.
+    # - It may be imported into Authoring DB as "draft" EvidenceUnits for human review.
+    # - runtime evidence KVBank MUST be built from Authoring-approved EvidenceUnits only.
     evidence_cfg = build_cfg.get("evidence_build") if isinstance(build_cfg.get("evidence_build"), dict) else {}
     if not isinstance(evidence_cfg, dict):
         evidence_cfg = {}
     enable_evidence = bool(evidence_cfg.get("enabled", True))
+    legacy_build_evidence_kvbank = bool(evidence_cfg.get("legacy_build_kvbank", False))
+    authoring_db_jsonl = str(evidence_cfg.get("authoring_db_jsonl") or "").strip()
+    authoring_schema_id = str(evidence_cfg.get("authoring_schema_id") or evidence_cfg.get("schema_id") or "").strip()
     # preferred: raw_chunks -> paragraphs -> evidence sentences
     source_level = str(evidence_cfg.get("source_level", "raw_chunks")).strip().lower()
     max_sentences_per_paragraph = int(evidence_cfg.get("max_sentences_per_paragraph", evidence_cfg.get("max_sentences_per_block", 3)))
@@ -436,6 +444,26 @@ def main() -> None:
                 max_blocks=max_blocks_evidence,
             )
         print(f"[rebuild_topic] wrote_evidence_blocks stats={ev_stats}", flush=True)
+        if authoring_db_jsonl and authoring_schema_id and blocks_evidence.exists():
+            try:
+                from external_kv_injection.src.authoring.importers import (  # type: ignore
+                    import_deepseek_blocks_evidence_jsonl_to_authoring_db,
+                )
+            except ModuleNotFoundError:
+                from src.authoring.importers import import_deepseek_blocks_evidence_jsonl_to_authoring_db  # type: ignore
+            imp_stats = import_deepseek_blocks_evidence_jsonl_to_authoring_db(
+                blocks_evidence_jsonl=blocks_evidence,
+                authoring_db_jsonl=Path(authoring_db_jsonl),
+                schema_id=str(authoring_schema_id),
+                default_semantic_type=str(evidence_cfg.get("default_semantic_type") or "generic"),
+                evidence_type=str(evidence_cfg.get("evidence_type") or "extractive_suggestion"),
+            )
+            print(f"[rebuild_topic] imported_deepseek_suggestions_to_authoring stats={imp_stats}", flush=True)
+        elif authoring_db_jsonl or authoring_schema_id:
+            print(
+                "[rebuild_topic] authoring import skipped: set BOTH evidence_build.authoring_db_jsonl and evidence_build.authoring_schema_id",
+                flush=True,
+            )
 
     # 2.6) Build schema blocks (from evidence blocks) and a schema KVBank.
     schema_cfg = build_cfg.get("schema_build") if isinstance(build_cfg.get("schema_build"), dict) else {}
@@ -475,7 +503,12 @@ def main() -> None:
     if bool(split_tables):
         print(f"[rebuild_topic] kv_dir_tables={kv_dir_tables}", flush=True)
 
-    if enable_evidence and blocks_evidence.exists():
+    if enable_evidence and blocks_evidence.exists() and legacy_build_evidence_kvbank:
+        print(
+            "[warn] legacy_build_kvbank=true: building kvbank_evidence directly from DeepSeek blocks.evidence.jsonl. "
+            "This violates the Authoring-only rule; use ONLY for debugging.",
+            flush=True,
+        )
         ev_kv_stats = build_kvbank_from_blocks_jsonl(
             blocks_jsonl=blocks_evidence,
             out_dir=kv_dir_evidence,
@@ -489,6 +522,13 @@ def main() -> None:
         )
         print(f"[rebuild_topic] kvbank_evidence_done stats={ev_kv_stats}", flush=True)
         print(f"[rebuild_topic] kv_dir_evidence={kv_dir_evidence}", flush=True)
+    elif enable_evidence:
+        print(
+            "[rebuild_topic] evidence KVBank build skipped (default). "
+            "Build runtime evidence KVBank from Authoring-approved EvidenceUnits using scripts/export_authoring_evidence_runtime_jsonl.py "
+            "and scripts/build_kvbank_from_authoring_evidence_jsonl.py",
+            flush=True,
+        )
 
     if enable_schema and blocks_schema.exists():
         sc_kv_stats = build_kvbank_from_blocks_jsonl(

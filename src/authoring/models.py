@@ -79,6 +79,9 @@ class ExternalRefs:
     abstract: Optional[str] = None
     authors: List[str] = field(default_factory=list)
     published_at: Optional[str] = None
+    # Optional provenance pointers (useful for authoring imports).
+    source_uri: Optional[str] = None
+    url: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -89,6 +92,8 @@ class ExternalRefs:
             "abstract": self.abstract,
             "authors": list(self.authors or []),
             "published_at": self.published_at,
+            "source_uri": self.source_uri,
+            "url": self.url,
         }
 
 
@@ -184,6 +189,8 @@ class EvidenceUnit:
                 abstract=exr.get("abstract", None),
                 authors=[str(a) for a in (exr.get("authors") or []) if str(a).strip()] if isinstance(exr.get("authors"), list) else [],
                 published_at=exr.get("published_at", None),
+                source_uri=exr.get("source_uri", None),
+                url=exr.get("url", None),
             ),
             evidence_type=str(obj.get("evidence_type") or obj.get("type") or "clinical_guideline"),
             review_feedback=obj.get("review_feedback") if isinstance(obj.get("review_feedback"), dict) else None,
