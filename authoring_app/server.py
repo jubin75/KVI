@@ -33,6 +33,44 @@ except ModuleNotFoundError:
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+_INDEX_FALLBACK_HTML = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Authoring UI (static missing)</title>
+  <style>
+    body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }}
+    code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }}
+    .box {{ border: 1px solid #ddd; border-radius: 12px; padding: 14px; max-width: 980px; }}
+    .muted {{ color: #555; }}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Authoring UI static files not found</h2>
+    <p class="muted">
+      The HTTP server is running, but <code>authoring_app/static/index.html</code> was not found on disk.
+    </p>
+    <p>
+      Expected directory: <code>{STATIC_DIR.as_posix()}</code>
+    </p>
+    <p>
+      Quick checks (run on server):
+      <ul>
+        <li><code>ls -la {STATIC_DIR.as_posix()}</code></li>
+        <li><code>ls -la { (STATIC_DIR / "index.html").as_posix() }</code></li>
+        <li><code>curl -v http://127.0.0.1:8765/api/health</code></li>
+      </ul>
+    </p>
+    <p>
+      API is reachable: <a href="/api/health">/api/health</a> · <a href="/api/evidence">/api/evidence</a>
+    </p>
+  </div>
+</body>
+</html>
+"""
+
 
 def _safe_json_loads(s: str) -> Optional[Any]:
     try:
@@ -177,10 +215,16 @@ class AuthoringHandler(BaseHTTPRequestHandler):
         path = parsed.path or "/"
         qs = parse_qs(parsed.query or "")
 
+        # Browsers often request favicon.ico; avoid confusing 404s.
+        if path == "/favicon.ico":
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
+
         if path == "/" or path == "/index.html":
             p = STATIC_DIR / "index.html"
             if not p.exists():
-                _text_response(self, HTTPStatus.NOT_FOUND, "missing index.html", content_type="text/plain; charset=utf-8")
+                _text_response(self, HTTPStatus.OK, _INDEX_FALLBACK_HTML, content_type="text/html; charset=utf-8")
                 return
             _text_response(self, HTTPStatus.OK, p.read_text(encoding="utf-8"), content_type="text/html; charset=utf-8")
             return
@@ -254,6 +298,76 @@ class AuthoringHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path or "/"
+
+        if path == "/api/import/blocks":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            blocks_jsonl = str(obj.get("blocks_jsonl") or "").strip()
+            schema_id = str(obj.get("schema_id") or "").strip()
+            default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
+            evidence_type = str(obj.get("evidence_type") or "pdf_block").strip()
+            max_blocks = int(obj.get("max_blocks") or 0)
+            if not blocks_jsonl or not schema_id:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "blocks_jsonl and schema_id required"})
+                return
+            try:
+                try:
+                    from external_kv_injection.src.authoring.importers import (  # type: ignore
+                        import_blocks_jsonl_to_authoring_db,
+                    )
+                except ModuleNotFoundError:
+                    from src.authoring.importers import import_blocks_jsonl_to_authoring_db  # type: ignore
+                stats = import_blocks_jsonl_to_authoring_db(
+                    blocks_jsonl=Path(blocks_jsonl),
+                    authoring_db_jsonl=self.store.path,
+                    schema_id=schema_id,
+                    default_semantic_type=default_semantic_type,
+                    evidence_type=evidence_type,
+                    max_blocks=max_blocks,
+                )
+                _json_response(self, HTTPStatus.OK, {"ok": True, "stats": stats.__dict__})
+                return
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
+
+        if path == "/api/import/blocks.evidence":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            blocks_evidence_jsonl = str(obj.get("blocks_evidence_jsonl") or obj.get("blocks_jsonl") or "").strip()
+            schema_id = str(obj.get("schema_id") or "").strip()
+            default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
+            evidence_type = str(obj.get("evidence_type") or "extractive_suggestion").strip()
+            if not blocks_evidence_jsonl or not schema_id:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "bad_request", "message": "blocks_evidence_jsonl (or blocks_jsonl) and schema_id required"},
+                )
+                return
+            try:
+                try:
+                    from external_kv_injection.src.authoring.importers import (  # type: ignore
+                        import_deepseek_blocks_evidence_jsonl_to_authoring_db,
+                    )
+                except ModuleNotFoundError:
+                    from src.authoring.importers import import_deepseek_blocks_evidence_jsonl_to_authoring_db  # type: ignore
+                stats = import_deepseek_blocks_evidence_jsonl_to_authoring_db(
+                    blocks_evidence_jsonl=Path(blocks_evidence_jsonl),
+                    authoring_db_jsonl=self.store.path,
+                    schema_id=schema_id,
+                    default_semantic_type=default_semantic_type,
+                    evidence_type=evidence_type,
+                )
+                _json_response(self, HTTPStatus.OK, {"ok": True, "stats": stats.__dict__})
+                return
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
 
         if path == "/api/evidence":
             obj, err = _read_body_json(self)

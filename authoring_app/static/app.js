@@ -211,6 +211,9 @@ async function init() {
     sel.appendChild(opt);
   }
 
+  $("btn_import_blocks").onclick = () => importBlocksJsonl().catch(showErr);
+  $("btn_import_evidence_blocks").onclick = () => importEvidenceBlocksJsonl().catch(showErr);
+
   $("btn_refresh").onclick = () => refreshList().catch(showErr);
   $("btn_new").onclick = () => createNew().catch(showErr);
   $("btn_save").onclick = () => saveDraft().catch(showErr);
@@ -220,6 +223,42 @@ async function init() {
 
   await refreshList();
   await createNew();
+}
+
+async function importBlocksJsonl() {
+  const schemaId = $("import_schema_id").value.trim();
+  const sem = $("import_semantic_type").value;
+  const pth = $("import_blocks_path").value.trim();
+  const maxBlocks = Number(($("import_max_blocks").value || "0").trim());
+  if (!schemaId) throw new Error("Import requires schema_id.");
+  if (!pth) throw new Error("Import requires blocks.jsonl path.");
+  $("import_result").value = "Importing blocks.jsonl ...";
+  const out = await apiSend("/api/import/blocks", "POST", {
+    blocks_jsonl: pth,
+    schema_id: schemaId,
+    default_semantic_type: sem,
+    max_blocks: Number.isFinite(maxBlocks) ? maxBlocks : 0,
+    evidence_type: "pdf_block",
+  });
+  $("import_result").value = prettyJson(out);
+  await refreshList();
+}
+
+async function importEvidenceBlocksJsonl() {
+  const schemaId = $("import_schema_id").value.trim();
+  const sem = $("import_semantic_type").value;
+  const pth = $("import_evidence_blocks_path").value.trim();
+  if (!schemaId) throw new Error("Import requires schema_id.");
+  if (!pth) throw new Error("Import requires blocks.evidence.jsonl path.");
+  $("import_result").value = "Importing blocks.evidence.jsonl ...";
+  const out = await apiSend("/api/import/blocks.evidence", "POST", {
+    blocks_evidence_jsonl: pth,
+    schema_id: schemaId,
+    default_semantic_type: sem,
+    evidence_type: "extractive_suggestion",
+  });
+  $("import_result").value = prettyJson(out);
+  await refreshList();
 }
 
 function showErr(e) {

@@ -56,6 +56,51 @@
       </div>
 
       <div class="notice">
+        <div><b>Import（从 PDF 原始 blocks 导入草稿）</b></div>
+        <div class="field">
+          <label>schema_id（导入后写到每条 EvidenceUnit）</label>
+          <input id="import_schema_id" placeholder="schema:infectious_disease" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>default semantic_type（导入时默认，后续你在编辑器里改）</label>
+            <select id="import_semantic_type">
+              <option value="generic">generic</option>
+              <option value="drug">drug</option>
+              <option value="symptom">symptom</option>
+              <option value="location">location</option>
+              <option value="procedure">procedure</option>
+              <option value="laboratory">laboratory</option>
+              <option value="population">population</option>
+              <option value="outcome">outcome</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>max_blocks（0=全部）</label>
+            <input id="import_max_blocks" placeholder="0" />
+          </div>
+        </div>
+        <div class="field">
+          <label>blocks.jsonl 路径（服务器路径，例如 /home/jb/topics/SFTSV/work/blocks.jsonl）</label>
+          <input id="import_blocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.jsonl" />
+        </div>
+        <div class="btns">
+          <button id="btn_import_blocks">Import blocks.jsonl → draft EvidenceUnits</button>
+        </div>
+        <div class="field">
+          <label>blocks.evidence.jsonl 路径（可选：DS 抽取 evidence blocks，导入为 draft 供审核）</label>
+          <input id="import_evidence_blocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.evidence.jsonl" />
+        </div>
+        <div class="btns">
+          <button id="btn_import_evidence_blocks">Import blocks.evidence.jsonl → draft EvidenceUnits</button>
+        </div>
+        <div class="field">
+          <label>Import result</label>
+          <textarea id="import_result" placeholder="导入结果会显示在这里" style="min-height:90px"></textarea>
+        </div>
+      </div>
+
+      <div class="notice">
         <div><b>原则（冻结）</b></div>
         <div>Evidence 是“语义条目”，不是问题答案；不包含 intent/topic 路由信息。</div>
         <div><b>重要</b>：Rejected evidence will never be injected into answers. This does not mean the evidence is wrong — only that it is not suitable for the current knowledge slot.</div>

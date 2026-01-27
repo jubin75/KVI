@@ -42,6 +42,15 @@ class ImportDeepSeekBlocksStats:
     out_db: str
 
 
+@dataclass(frozen=True)
+class ImportBlocksStats:
+    read_blocks: int
+    created: int
+    dedup_skipped: int
+    errors: int
+    out_db: str
+
+
 def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
     *,
     blocks_evidence_jsonl: Path,
@@ -147,6 +156,123 @@ def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
                 continue
 
     return ImportDeepSeekBlocksStats(
+        read_blocks=int(read_blocks),
+        created=int(created),
+        dedup_skipped=int(dedup_skipped),
+        errors=int(errors),
+        out_db=str(authoring_db_jsonl),
+    )
+
+
+def _stable_block_evidence_id(*, doc_id: str, source_uri: str, block_id: str, text: str) -> str:
+    key = f"{doc_id}|{source_uri}|{block_id}|{text}".encode("utf-8", errors="ignore")
+    digest = hashlib.sha1(key).hexdigest()[:12]
+    return f"EVIDENCE_BLK_{digest}"
+
+
+def import_blocks_jsonl_to_authoring_db(
+    *,
+    blocks_jsonl: Path,
+    authoring_db_jsonl: Path,
+    schema_id: str,
+    default_semantic_type: str = "generic",
+    evidence_type: str = "pdf_block",
+    max_blocks: int = 0,
+) -> ImportBlocksStats:
+    """
+    Import raw PDF-derived blocks.jsonl as Authoring EvidenceUnit drafts.
+
+    This is intentionally "dumb": it does NOT infer semantic_type or slot_projection.
+    It only provides human-editable drafts with provenance pointers.
+    """
+    authoring_db_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    if not authoring_db_jsonl.exists():
+        authoring_db_jsonl.write_text("", encoding="utf-8")
+
+    existing_ids: set[str] = set()
+    try:
+        for rec in _read_jsonl(authoring_db_jsonl):
+            eid = str(rec.get("evidence_id") or rec.get("id") or "").strip()
+            if eid:
+                existing_ids.add(eid)
+    except Exception:
+        existing_ids = set()
+
+    schema_id = str(schema_id or "").strip()
+    if not schema_id:
+        raise ValueError("schema_id is required for importing blocks.jsonl")
+
+    default_semantic_type = str(default_semantic_type or "generic").strip().lower()
+
+    read_blocks = 0
+    created = 0
+    dedup_skipped = 0
+    errors = 0
+
+    with authoring_db_jsonl.open("a", encoding="utf-8") as out:
+        for b in _read_jsonl(blocks_jsonl):
+            read_blocks += 1
+            if int(max_blocks) > 0 and read_blocks > int(max_blocks):
+                break
+            try:
+                text = str(b.get("text") or "").strip()
+                if not text:
+                    continue
+                doc_id = str(b.get("doc_id") or "").strip()
+                source_uri = str(b.get("source_uri") or "").strip()
+                block_id = str(b.get("block_id") or b.get("id") or b.get("chunk_id") or "").strip()
+                eid = _stable_block_evidence_id(doc_id=doc_id, source_uri=source_uri, block_id=block_id, text=text)
+                if eid in existing_ids:
+                    dedup_skipped += 1
+                    continue
+                existing_ids.add(eid)
+
+                meta = b.get("metadata") if isinstance(b.get("metadata"), dict) else {}
+                review_feedback = {
+                    "state": "draft",
+                    "reasons": ["pdf_block_import"],
+                    "comment": "Imported from blocks.jsonl (PDF-derived raw block). Requires human editing and review.",
+                    "block": {
+                        "block_id": block_id or None,
+                        "parent_chunk_id": b.get("parent_chunk_id"),
+                        "source_id": b.get("source_id"),
+                        "lang": b.get("lang"),
+                        "token_count": b.get("token_count"),
+                        "metadata": meta,
+                    },
+                }
+
+                eu = EvidenceUnit(
+                    evidence_id=eid,
+                    semantic_type=default_semantic_type,  # type: ignore[arg-type]
+                    schema_id=schema_id,
+                    claim=text,
+                    polarity="neutral",  # type: ignore[arg-type]
+                    slot_projection={},
+                    status="draft",  # type: ignore[arg-type]
+                    provenance=Provenance(
+                        source_type="review",
+                        organization=None,
+                        document_title=str(doc_id or ""),
+                        publication_year=None,
+                        page_range=None,
+                    ),
+                    external_refs=ExternalRefs(
+                        document_id=(doc_id or None),
+                        title=(doc_id or None),
+                        source_uri=(source_uri or None),
+                        url=(source_uri or None),
+                    ),
+                    evidence_type=str(evidence_type or "pdf_block"),
+                    review_feedback=review_feedback,
+                )
+                out.write(json.dumps(eu.to_dict(), ensure_ascii=False) + "\n")
+                created += 1
+            except Exception:
+                errors += 1
+                continue
+
+    return ImportBlocksStats(
         read_blocks=int(read_blocks),
         created=int(created),
         dedup_skipped=int(dedup_skipped),
