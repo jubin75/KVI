@@ -42,6 +42,14 @@ except ModuleNotFoundError:
     from src.llm_filter.extractive_evidence import DeepSeekExtractiveEvidence, ExtractiveEvidenceConfig  # type: ignore
     from scripts.build_schema_blocks_from_evidence_jsonl import build_schema_blocks_from_evidence_jsonl  # type: ignore
 
+try:
+    from external_kv_injection.src.llm_filter.doc_meta_extractor import (  # type: ignore
+        DeepSeekDocMetaExtractor,
+        DocMetaExtractorConfig,
+    )
+except ModuleNotFoundError:
+    from src.llm_filter.doc_meta_extractor import DeepSeekDocMetaExtractor, DocMetaExtractorConfig  # type: ignore
+
 
 def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
     try:
@@ -69,6 +77,8 @@ def build_evidence_blocks_from_blocks_jsonl(
     *,
     blocks_jsonl: Path,
     out_jsonl: Path,
+    out_docs_meta_jsonl: Optional[Path] = None,
+    kb_id: str = "",
     topic_goal: str,
     deepseek_base_url: str,
     deepseek_model: str,
@@ -88,10 +98,20 @@ def build_evidence_blocks_from_blocks_jsonl(
             max_sentences=int(max_sentences_per_block),
         )
     )
+    meta_extractor = DeepSeekDocMetaExtractor(
+        DocMetaExtractorConfig(
+            deepseek_base_url=deepseek_base_url,
+            deepseek_model=deepseek_model,
+            api_key_env=deepseek_api_key_env,
+            max_chars=9000,
+        )
+    )
 
     total_in = 0
     total_keep = 0
     total_out = 0
+    seen_docs: set[str] = set()
+    docs_meta_f = out_docs_meta_jsonl.open("w", encoding="utf-8") if out_docs_meta_jsonl else None
     with blocks_jsonl.open("r", encoding="utf-8") as fin, out_jsonl.open("w", encoding="utf-8") as fout:
         for line in fin:
             line = line.strip()
@@ -112,6 +132,21 @@ def build_evidence_blocks_from_blocks_jsonl(
             source_uri = rec.get("source_uri", None)
             lang = rec.get("lang", None)
 
+            if docs_meta_f is not None and doc_id and doc_id not in seen_docs:
+                seen_docs.add(doc_id)
+                snippet = str(rec.get("text") or "")[:9000]
+                try:
+                    doc_meta = meta_extractor.extract(doc_id=doc_id, source_uri=str(source_uri or ""), pdf_snippet=snippet)
+                except Exception:
+                    doc_meta = {"title": doc_id, "journal": None, "doi": None, "publication_year": None, "published_at": None, "authors": []}
+                docs_meta_f.write(
+                    json.dumps(
+                        {"doc_id": doc_id, "kb_id": (kb_id or None), "source_uri": source_uri, "meta": doc_meta},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
             res = extractor.extract(topic_goal=str(topic_goal), raw_block_text=raw_text)
             sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
             if sents:
@@ -125,8 +160,10 @@ def build_evidence_blocks_from_blocks_jsonl(
                 out_rec = {
                     "block_id": ev_block_id,
                     "doc_id": doc_id,
+                    "kb_id": (kb_id or None),
                     "source_uri": source_uri,
                     "lang": lang,
+                    "block_type": "paragraph_summary",
                     "text": quote,
                     "token_count": int(_approx_token_count(quote)),
                     "metadata": {
@@ -139,13 +176,24 @@ def build_evidence_blocks_from_blocks_jsonl(
                 fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
                 total_out += 1
 
-    return {"in_blocks": total_in, "kept_blocks": total_keep, "out_evidence_blocks": total_out, "out_jsonl": str(out_jsonl)}
+    if docs_meta_f is not None:
+        docs_meta_f.close()
+    return {
+        "in_blocks": total_in,
+        "kept_blocks": total_keep,
+        "out_evidence_blocks": total_out,
+        "out_jsonl": str(out_jsonl),
+        "out_docs_meta_jsonl": str(out_docs_meta_jsonl) if out_docs_meta_jsonl else None,
+        "docs": int(len(seen_docs)),
+    }
 
 
 def build_evidence_blocks_from_raw_chunks_jsonl(
     *,
     raw_chunks_jsonl: Path,
     out_jsonl: Path,
+    out_docs_meta_jsonl: Optional[Path] = None,
+    kb_id: str = "",
     topic_goal: str,
     deepseek_base_url: str,
     deepseek_model: str,
@@ -171,6 +219,18 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
             max_sentences=int(max_sentences_per_paragraph),
         )
     )
+    meta_extractor = DeepSeekDocMetaExtractor(
+        DocMetaExtractorConfig(
+            deepseek_base_url=deepseek_base_url,
+            deepseek_model=deepseek_model,
+            api_key_env=deepseek_api_key_env,
+            max_chars=9000,
+        )
+    )
+
+    seen_docs: set[str] = set()
+    docs_meta_f = out_docs_meta_jsonl.open("w", encoding="utf-8") if out_docs_meta_jsonl else None
+    _FIG_CAP_RE = re.compile(r"^(Figure|Fig\.)\s*\d+[\s:：\-]", flags=re.IGNORECASE)
 
     chunks = 0
     paras = 0
@@ -191,11 +251,44 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
             source_uri = rec.get("source_uri", None)
             lang = rec.get("lang", None)
             meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+            para_type = str(meta.get("paragraph_type") or "").strip().lower()
             txt = str(rec.get("text") or "")
+
+            if docs_meta_f is not None and doc_id and doc_id not in seen_docs:
+                seen_docs.add(doc_id)
+                snippet = txt[:9000]
+                try:
+                    doc_meta = meta_extractor.extract(doc_id=doc_id, source_uri=str(source_uri or ""), pdf_snippet=snippet)
+                except Exception:
+                    doc_meta = {"title": doc_id, "journal": None, "doi": None, "publication_year": None, "published_at": None, "authors": []}
+                docs_meta_f.write(
+                    json.dumps(
+                        {"doc_id": doc_id, "kb_id": (kb_id or None), "source_uri": source_uri, "meta": doc_meta},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
             for p_idx, para in enumerate(_split_paragraphs(txt)):
                 paras += 1
                 if int(max_paragraphs) > 0 and paras > int(max_paragraphs):
                     break
+                if _FIG_CAP_RE.match(para.strip()):
+                    ev_block_id = f"{chunk_id}_p{p_idx}::cap"
+                    out_rec = {
+                        "block_id": ev_block_id,
+                        "doc_id": doc_id,
+                        "kb_id": (kb_id or None),
+                        "source_uri": source_uri,
+                        "lang": lang,
+                        "block_type": "figure_caption",
+                        "text": para.strip(),
+                        "token_count": int(_approx_token_count(para.strip())),
+                        "metadata": {"from_raw_chunk_id": chunk_id, "paragraph_index": int(p_idx), "raw_chunk_metadata": meta},
+                    }
+                    fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+                    out_blocks += 1
+                    kept_paras += 1
+                    continue
                 res = extractor.extract(topic_goal=str(topic_goal), raw_block_text=para)
                 sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
                 if not sents:
@@ -207,11 +300,16 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
                         continue
                     span = it.get("span") if isinstance(it.get("span"), dict) else {}
                     ev_block_id = f"{chunk_id}_p{p_idx}::ev{s_idx}"
+                    block_type = "paragraph_summary"
+                    if para_type == "abstract":
+                        block_type = "abstract"
                     out_rec = {
                         "block_id": ev_block_id,
                         "doc_id": doc_id,
+                        "kb_id": (kb_id or None),
                         "source_uri": source_uri,
                         "lang": lang,
+                        "block_type": block_type,
                         "text": quote,
                         "token_count": int(_approx_token_count(quote)),
                         "metadata": {
@@ -228,12 +326,16 @@ def build_evidence_blocks_from_raw_chunks_jsonl(
             if int(max_paragraphs) > 0 and paras >= int(max_paragraphs):
                 break
 
+    if docs_meta_f is not None:
+        docs_meta_f.close()
     return {
         "in_chunks": chunks,
         "in_paragraphs": paras,
         "kept_paragraphs": kept_paras,
         "out_evidence_blocks": out_blocks,
         "out_jsonl": str(out_jsonl),
+        "out_docs_meta_jsonl": str(out_docs_meta_jsonl) if out_docs_meta_jsonl else None,
+        "docs": int(len(seen_docs)),
     }
 
 
@@ -354,6 +456,7 @@ def main() -> None:
     raw_chunks = work_dir / "raw_chunks.jsonl"
     blocks = work_dir / "blocks.jsonl"
     blocks_evidence = work_dir / "blocks.evidence.jsonl"
+    docs_meta = work_dir / "docs.meta.jsonl"
     blocks_schema = work_dir / "blocks.schema.jsonl"
     kv_dir = work_dir / "kvbank_blocks"
     kv_dir_tables = work_dir / "kvbank_tables"
@@ -406,7 +509,10 @@ def main() -> None:
     enable_evidence = bool(evidence_cfg.get("enabled", True))
     legacy_build_evidence_kvbank = bool(evidence_cfg.get("legacy_build_kvbank", False))
     authoring_db_jsonl = str(evidence_cfg.get("authoring_db_jsonl") or "").strip()
-    authoring_schema_id = str(evidence_cfg.get("authoring_schema_id") or evidence_cfg.get("schema_id") or "").strip()
+    # kb_id is the UI-friendly name; stored as schema_id in EvidenceUnit for runtime compat.
+    authoring_kb_id = str(
+        evidence_cfg.get("authoring_kb_id") or evidence_cfg.get("kb_id") or evidence_cfg.get("authoring_schema_id") or evidence_cfg.get("schema_id") or ""
+    ).strip()
     # preferred: raw_chunks -> paragraphs -> evidence sentences
     source_level = str(evidence_cfg.get("source_level", "raw_chunks")).strip().lower()
     max_sentences_per_paragraph = int(evidence_cfg.get("max_sentences_per_paragraph", evidence_cfg.get("max_sentences_per_block", 3)))
@@ -425,6 +531,8 @@ def main() -> None:
             ev_stats = build_evidence_blocks_from_raw_chunks_jsonl(
                 raw_chunks_jsonl=raw_chunks,
                 out_jsonl=blocks_evidence,
+                out_docs_meta_jsonl=docs_meta,
+                kb_id=authoring_kb_id,
                 topic_goal=goal,
                 deepseek_base_url=deepseek_base_url,
                 deepseek_model=deepseek_model,
@@ -436,6 +544,8 @@ def main() -> None:
             ev_stats = build_evidence_blocks_from_blocks_jsonl(
                 blocks_jsonl=blocks,
                 out_jsonl=blocks_evidence,
+                out_docs_meta_jsonl=docs_meta,
+                kb_id=authoring_kb_id,
                 topic_goal=goal,
                 deepseek_base_url=deepseek_base_url,
                 deepseek_model=deepseek_model,
@@ -444,7 +554,7 @@ def main() -> None:
                 max_blocks=max_blocks_evidence,
             )
         print(f"[rebuild_topic] wrote_evidence_blocks stats={ev_stats}", flush=True)
-        if authoring_db_jsonl and authoring_schema_id and blocks_evidence.exists():
+        if authoring_db_jsonl and authoring_kb_id and blocks_evidence.exists():
             try:
                 from external_kv_injection.src.authoring.importers import (  # type: ignore
                     import_deepseek_blocks_evidence_jsonl_to_authoring_db,
@@ -454,14 +564,14 @@ def main() -> None:
             imp_stats = import_deepseek_blocks_evidence_jsonl_to_authoring_db(
                 blocks_evidence_jsonl=blocks_evidence,
                 authoring_db_jsonl=Path(authoring_db_jsonl),
-                schema_id=str(authoring_schema_id),
+                schema_id=str(authoring_kb_id),
                 default_semantic_type=str(evidence_cfg.get("default_semantic_type") or "generic"),
                 evidence_type=str(evidence_cfg.get("evidence_type") or "extractive_suggestion"),
             )
             print(f"[rebuild_topic] imported_deepseek_suggestions_to_authoring stats={imp_stats}", flush=True)
-        elif authoring_db_jsonl or authoring_schema_id:
+        elif authoring_db_jsonl or authoring_kb_id:
             print(
-                "[rebuild_topic] authoring import skipped: set BOTH evidence_build.authoring_db_jsonl and evidence_build.authoring_schema_id",
+                "[rebuild_topic] authoring import skipped: set BOTH evidence_build.authoring_db_jsonl and evidence_build.authoring_kb_id",
                 flush=True,
             )
 

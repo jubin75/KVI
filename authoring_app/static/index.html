@@ -16,7 +16,7 @@
 
       <div id="filters">
         <div class="field">
-          <label>搜索（evidence_id / claim / schema_id / semantic_type）</label>
+          <label>搜索（evidence_id / claim / kb_id / semantic_type）</label>
           <input id="filter_q" placeholder="关键词..." />
         </div>
         <div class="row">
@@ -46,8 +46,8 @@
           </div>
         </div>
         <div class="field">
-          <label>schema_id</label>
-          <input id="filter_schema" placeholder="schema:..." />
+          <label>kb_id（知识库/专题 ID）</label>
+          <input id="filter_kb" placeholder="kb:SFTSV" />
         </div>
         <div class="btns">
           <button id="btn_search">Search</button>
@@ -59,8 +59,8 @@
       <div class="notice">
         <div><b>Import（从 PDF 原始 blocks 导入草稿）</b></div>
         <div class="field">
-          <label>schema_id（可选；不填则使用 server 启动参数 --default_schema_id）</label>
-          <input id="import_schema_id" placeholder="schema:infectious_disease" />
+          <label>kb_id（可选；不填则使用 server 启动参数 --default_kb_id）</label>
+          <input id="import_kb_id" placeholder="SFTSV" />
         </div>
         <div class="row">
           <div class="field">
@@ -91,6 +91,10 @@
         <div class="field">
           <label>blocks.evidence.jsonl 路径（可选：DS 抽取 evidence blocks，导入为 draft 供审核）</label>
           <input id="import_evidence_blocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.evidence.jsonl" />
+        </div>
+        <div class="field">
+          <label>docs.meta.jsonl 路径（可选：doc-level 元信息，增强 provenance/refs）</label>
+          <input id="import_docs_meta_path" placeholder="/home/jb/topics/SFTSV/work/docs.meta.jsonl" />
         </div>
         <div class="btns">
           <button id="btn_import_evidence_blocks">Import blocks.evidence.jsonl → draft EvidenceUnits</button>
@@ -159,8 +163,8 @@
       </div>
 
       <div class="field">
-        <label>schema_id *</label>
-        <input id="schema_id" placeholder="schema:infectious_disease" />
+        <label>kb_id *（知识库/专题 ID）</label>
+        <input id="kb_id" placeholder="SFTSV" />
       </div>
 
       <div class="field">

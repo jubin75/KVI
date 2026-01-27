@@ -86,7 +86,24 @@
     "keep_last_incomplete_block": true,
 
     "knowledge_filter": true,
-    "shard_size": 1024
+    "shard_size": 1024,
+
+    "evidence_build": {
+      "enabled": true,
+      "source_level": "raw_chunks",
+
+      "kb_id": "SFTSV",
+      "authoring_kb_id": "SFTSV",
+      "authoring_db_jsonl": "/home/jb/topics/SFTSV/work/evidence_units.jsonl",
+
+      "default_semantic_type": "generic",
+      "evidence_type": "extractive_suggestion",
+
+      "max_sentences_per_paragraph": 3,
+      "max_paragraphs": 0,
+
+      "legacy_build_kvbank": false
+    }
   }
 }
 

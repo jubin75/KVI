@@ -44,16 +44,16 @@ function prettyJson(obj) {
 let current = null;
 let rejectionCodes = [];
 let paging = { offset: 0, limit: 200, total: 0, lastQs: "" };
-let serverDefaultSchemaId = "";
+let serverDefaultKbId = "";
 
 async function refreshList() {
   const qs = new URLSearchParams();
   const status = $("filter_status").value;
-  const schema = $("filter_schema").value.trim();
+  const kb = $("filter_kb").value.trim();
   const sem = $("filter_semantic_type").value;
   const q = $("filter_q").value.trim();
   if (status) qs.set("status", status);
-  if (schema) qs.set("schema_id", schema);
+  if (kb) qs.set("kb_id", kb);
   if (sem) qs.set("semantic_type", sem);
   if (q) qs.set("q", q);
   qs.set("offset", String(paging.offset || 0));
@@ -87,8 +87,8 @@ async function refreshList() {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    const sid = it.schema_id || it.effective_schema_id || "";
-    meta.textContent = `semantic_type=${it.semantic_type || ""}  schema_id=${sid}  polarity=${it.polarity || ""}`;
+    const kid = it.kb_id || it.effective_kb_id || "";
+    meta.textContent = `semantic_type=${it.semantic_type || ""}  kb_id=${kid}  polarity=${it.polarity || ""}`;
 
     card.appendChild(top);
     card.appendChild(claim);
@@ -110,7 +110,7 @@ function fillForm(u) {
   $("evidence_id").value = u.evidence_id || "";
   $("status").value = u.status || "draft";
   $("semantic_type").value = u.semantic_type || "generic";
-  $("schema_id").value = u.schema_id || serverDefaultSchemaId || "";
+  $("kb_id").value = u.kb_id || u.schema_id || serverDefaultKbId || "";
   $("polarity").value = u.polarity || "neutral";
   $("claim").value = u.claim || "";
   $("slot_projection").value = prettyJson(u.slot_projection || {});
@@ -139,7 +139,9 @@ function buildPayloadFromForm() {
     evidence_id: $("evidence_id").value.trim(),
     status: $("status").value,
     semantic_type: $("semantic_type").value,
-    schema_id: $("schema_id").value.trim(),
+    // Backing field is still `schema_id` in JSON for runtime compat, but UI calls it kb_id.
+    schema_id: $("kb_id").value.trim(),
+    kb_id: $("kb_id").value.trim(),
     polarity: $("polarity").value,
     claim: $("claim").value,
     slot_projection: slotProj,
@@ -154,7 +156,8 @@ async function createNew() {
     evidence_id: "",
     status: "draft",
     semantic_type: "generic",
-    schema_id: "",
+    schema_id: serverDefaultKbId || "",
+    kb_id: serverDefaultKbId || "",
     polarity: "neutral",
     claim: "",
     slot_projection: {},
@@ -171,12 +174,12 @@ async function saveDraft() {
   // Required fields (product-facing):
   // - claim: required
   // - semantic_type: required (fixed set)
-  // - schema_id: required (auto-filled from server default when available)
+  // - kb_id: required (auto-filled from server default when available)
   if (!String(payload.claim || "").trim()) throw new Error("claim * is required.");
   if (!String(payload.semantic_type || "").trim()) throw new Error("semantic_type * is required.");
-  if (!String(payload.schema_id || "").trim() && serverDefaultSchemaId) payload.schema_id = serverDefaultSchemaId;
+  if (!String(payload.schema_id || "").trim() && serverDefaultKbId) payload.schema_id = serverDefaultKbId;
   if (!String(payload.schema_id || "").trim()) {
-    throw new Error("schema_id * is required (or start server with --default_schema_id).");
+    throw new Error("kb_id * is required (or start server with --default_kb_id).");
   }
   if (!payload.evidence_id) {
     // create
@@ -216,13 +219,13 @@ async function reject() {
 }
 
 async function init() {
-  // Load server defaults (schema_id etc.)
+  // Load server defaults (kb_id etc.)
   try {
     const cfg = await apiGet("/api/config");
-    if (cfg && cfg.default_schema_id) {
-      serverDefaultSchemaId = cfg.default_schema_id;
-      $("import_schema_id").value = cfg.default_schema_id;
-      $("schema_id").value = cfg.default_schema_id;
+    if (cfg && cfg.default_kb_id) {
+      serverDefaultKbId = cfg.default_kb_id;
+      $("import_kb_id").value = cfg.default_kb_id;
+      $("kb_id").value = cfg.default_kb_id;
     }
   } catch {}
 
@@ -256,7 +259,7 @@ async function init() {
 }
 
 async function importBlocksJsonl() {
-  const schemaId = $("import_schema_id").value.trim();
+  const kbId = $("import_kb_id").value.trim();
   const sem = $("import_semantic_type").value;
   const pth = $("import_blocks_path").value.trim();
   const maxBlocks = Number(($("import_max_blocks").value || "0").trim());
@@ -264,7 +267,7 @@ async function importBlocksJsonl() {
   $("import_result").value = "Importing blocks.jsonl ...";
   const out = await apiSend("/api/import/blocks", "POST", {
     blocks_jsonl: pth,
-    schema_id: schemaId || null,
+    kb_id: kbId || null,
     default_semantic_type: sem,
     max_blocks: Number.isFinite(maxBlocks) ? maxBlocks : 0,
     evidence_type: "pdf_block",
@@ -275,14 +278,16 @@ async function importBlocksJsonl() {
 }
 
 async function importEvidenceBlocksJsonl() {
-  const schemaId = $("import_schema_id").value.trim();
+  const kbId = $("import_kb_id").value.trim();
   const sem = $("import_semantic_type").value;
   const pth = $("import_evidence_blocks_path").value.trim();
+  const metaPath = $("import_docs_meta_path").value.trim();
   if (!pth) throw new Error("Import requires blocks.evidence.jsonl path.");
   $("import_result").value = "Importing blocks.evidence.jsonl ...";
   const out = await apiSend("/api/import/blocks.evidence", "POST", {
     blocks_evidence_jsonl: pth,
-    schema_id: schemaId || null,
+    docs_meta_jsonl: metaPath || null,
+    kb_id: kbId || null,
     default_semantic_type: sem,
     evidence_type: "extractive_suggestion",
   });

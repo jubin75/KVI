@@ -175,7 +175,11 @@ def _read_body_json(handler: BaseHTTPRequestHandler) -> Tuple[Optional[Any], Opt
 
 def _filter_units(units: List[EvidenceUnit], *, qs: Dict[str, List[str]]) -> List[EvidenceUnit]:
     status = (qs.get("status", [""])[0] or "").strip().lower()
+    # UI uses kb_id; keep schema_id as a backward-compatible alias.
+    kb_id = (qs.get("kb_id", [""])[0] or "").strip()
     schema_id = (qs.get("schema_id", [""])[0] or "").strip()
+    if (not kb_id) and schema_id:
+        kb_id = schema_id
     semantic_type = (qs.get("semantic_type", [""])[0] or "").strip().lower()
     q = (qs.get("q", [""])[0] or "").strip().lower()
 
@@ -183,7 +187,7 @@ def _filter_units(units: List[EvidenceUnit], *, qs: Dict[str, List[str]]) -> Lis
     for u in units:
         if status and str(u.status).lower() != status:
             continue
-        if schema_id and str(u.schema_id) != schema_id:
+        if kb_id and str(u.schema_id) != kb_id:
             continue
         if semantic_type and str(u.semantic_type).lower() != semantic_type:
             continue
@@ -204,7 +208,7 @@ def _filter_units(units: List[EvidenceUnit], *, qs: Dict[str, List[str]]) -> Lis
 
 class AuthoringHandler(BaseHTTPRequestHandler):
     store: JsonlEvidenceStore
-    default_schema_id: str = ""
+    default_kb_id: str = ""
 
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003 (shadow builtin)
         # Keep console output minimal for MVP
@@ -323,7 +327,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "db_path": str(getattr(self.store, "path", "")),
-                    "default_schema_id": str(getattr(self, "default_schema_id", "") or ""),
+                    "default_kb_id": str(getattr(self, "default_kb_id", "") or ""),
                 },
             )
             return
@@ -384,8 +388,10 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 {
                     "evidence_id": u.evidence_id,
                     "semantic_type": u.semantic_type,
+                    # Backing field in DB is `schema_id`, but UI speaks kb_id.
+                    "kb_id": u.schema_id,
                     "schema_id": u.schema_id,
-                    "effective_schema_id": (u.schema_id or str(getattr(self, "default_schema_id", "") or "")),
+                    "effective_kb_id": (u.schema_id or str(getattr(self, "default_kb_id", "") or "")),
                     "status": u.status,
                     "polarity": u.polarity,
                     "claim": u.claim,
@@ -423,15 +429,15 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
                 return
             blocks_jsonl = str(obj.get("blocks_jsonl") or "").strip()
-            schema_id = str(obj.get("schema_id") or "").strip() or str(getattr(self, "default_schema_id", "") or "").strip()
+            kb_id = str(obj.get("kb_id") or obj.get("schema_id") or "").strip() or str(getattr(self, "default_kb_id", "") or "").strip()
             default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
             evidence_type = str(obj.get("evidence_type") or "pdf_block").strip()
             max_blocks = int(obj.get("max_blocks") or 0)
-            if not blocks_jsonl or not schema_id:
+            if not blocks_jsonl or not kb_id:
                 _json_response(
                     self,
                     HTTPStatus.BAD_REQUEST,
-                    {"error": "bad_request", "message": "blocks_jsonl required; schema_id is optional if server has --default_schema_id"},
+                    {"error": "bad_request", "message": "blocks_jsonl required; kb_id is optional if server has --default_kb_id"},
                 )
                 return
             try:
@@ -444,7 +450,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 stats = import_blocks_jsonl_to_authoring_db(
                     blocks_jsonl=Path(blocks_jsonl),
                     authoring_db_jsonl=self.store.path,
-                    schema_id=schema_id,
+                    schema_id=kb_id,
                     default_semantic_type=default_semantic_type,
                     evidence_type=evidence_type,
                     max_blocks=max_blocks,
@@ -461,14 +467,15 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
                 return
             blocks_evidence_jsonl = str(obj.get("blocks_evidence_jsonl") or obj.get("blocks_jsonl") or "").strip()
-            schema_id = str(obj.get("schema_id") or "").strip() or str(getattr(self, "default_schema_id", "") or "").strip()
+            docs_meta_jsonl = str(obj.get("docs_meta_jsonl") or "").strip()
+            kb_id = str(obj.get("kb_id") or obj.get("schema_id") or "").strip() or str(getattr(self, "default_kb_id", "") or "").strip()
             default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
             evidence_type = str(obj.get("evidence_type") or "extractive_suggestion").strip()
-            if not blocks_evidence_jsonl or not schema_id:
+            if not blocks_evidence_jsonl or not kb_id:
                 _json_response(
                     self,
                     HTTPStatus.BAD_REQUEST,
-                    {"error": "bad_request", "message": "blocks_evidence_jsonl required; schema_id is optional if server has --default_schema_id"},
+                    {"error": "bad_request", "message": "blocks_evidence_jsonl required; kb_id is optional if server has --default_kb_id"},
                 )
                 return
             try:
@@ -480,8 +487,9 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     from src.authoring.importers import import_deepseek_blocks_evidence_jsonl_to_authoring_db  # type: ignore
                 stats = import_deepseek_blocks_evidence_jsonl_to_authoring_db(
                     blocks_evidence_jsonl=Path(blocks_evidence_jsonl),
+                    docs_meta_jsonl=(Path(docs_meta_jsonl) if docs_meta_jsonl else None),
                     authoring_db_jsonl=self.store.path,
-                    schema_id=schema_id,
+                    schema_id=kb_id,
                     default_semantic_type=default_semantic_type,
                     evidence_type=evidence_type,
                 )
@@ -506,8 +514,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 eu.evidence_id = new_evidence_id()
             if not str(eu.status or "").strip():
                 eu.status = "draft"
-            if not str(eu.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
-                eu.schema_id = str(getattr(self, "default_schema_id", "") or "")
+            if not str(eu.schema_id or "").strip() and str(getattr(self, "default_kb_id", "") or "").strip():
+                eu.schema_id = str(getattr(self, "default_kb_id", "") or "")
             saved = self.store.upsert(eu)
             _json_response(self, HTTPStatus.OK, saved.to_dict())
             return
@@ -521,8 +529,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 return
             u.status = "approved"
             u.rejection = None
-            if not str(u.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
-                u.schema_id = str(getattr(self, "default_schema_id", "") or "")
+            if not str(u.schema_id or "").strip() and str(getattr(self, "default_kb_id", "") or "").strip():
+                u.schema_id = str(getattr(self, "default_kb_id", "") or "")
             self.store.upsert(u)
             _json_response(self, HTTPStatus.OK, u.to_dict())
             return
@@ -564,8 +572,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 conf = 0.9
             u.status = "rejected"
             u.rejection = {"code": code, "message": message, "details": details, "confidence": conf}
-            if not str(u.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
-                u.schema_id = str(getattr(self, "default_schema_id", "") or "")
+            if not str(u.schema_id or "").strip() and str(getattr(self, "default_kb_id", "") or "").strip():
+                u.schema_id = str(getattr(self, "default_kb_id", "") or "")
             self.store.upsert(u)
             _json_response(self, HTTPStatus.OK, u.to_dict())
             return
@@ -590,8 +598,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
             return
         eu.evidence_id = eid  # path is source of truth
-        if not str(eu.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
-            eu.schema_id = str(getattr(self, "default_schema_id", "") or "")
+        if not str(eu.schema_id or "").strip() and str(getattr(self, "default_kb_id", "") or "").strip():
+            eu.schema_id = str(getattr(self, "default_kb_id", "") or "")
         saved = self.store.upsert(eu)
         _json_response(self, HTTPStatus.OK, saved.to_dict())
 
@@ -601,12 +609,20 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--db", required=True, help="Path to authoring evidence_units.jsonl")
-    ap.add_argument("--default_schema_id", default="", help="Default schema_id used for imports/new drafts (optional).")
+    ap.add_argument("--default_kb_id", default="", help="Default kb_id used for imports/new drafts (optional).")
+    ap.add_argument(
+        "--default_schema_id",
+        default="",
+        help="Deprecated alias of --default_kb_id (kept for back-compat).",
+    )
     args = ap.parse_args()
 
     store = JsonlEvidenceStore(Path(str(args.db)))
     AuthoringHandler.store = store  # type: ignore[assignment]
-    AuthoringHandler.default_schema_id = str(args.default_schema_id or "")
+    dk = str(args.default_kb_id or "").strip()
+    if not dk:
+        dk = str(args.default_schema_id or "").strip()
+    AuthoringHandler.default_kb_id = dk
 
     server = ThreadingHTTPServer((str(args.host), int(args.port)), AuthoringHandler)
     print(f"[authoring_app] Serving on http://{args.host}:{int(args.port)}  db={args.db}", flush=True)

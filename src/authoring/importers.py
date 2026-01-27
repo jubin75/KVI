@@ -54,6 +54,7 @@ class ImportBlocksStats:
 def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
     *,
     blocks_evidence_jsonl: Path,
+    docs_meta_jsonl: Optional[Path] = None,
     authoring_db_jsonl: Path,
     schema_id: str,
     default_semantic_type: str = "generic",
@@ -92,6 +93,17 @@ def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
 
     default_semantic_type = str(default_semantic_type or "generic").strip().lower()
 
+    doc_meta_by_id: Dict[str, Dict[str, Any]] = {}
+    if docs_meta_jsonl is not None and docs_meta_jsonl.exists():
+        try:
+            for rec in _read_jsonl(docs_meta_jsonl):
+                did = str(rec.get("doc_id") or "").strip()
+                meta = rec.get("meta") if isinstance(rec.get("meta"), dict) else {}
+                if did and isinstance(meta, dict):
+                    doc_meta_by_id[did] = meta
+        except Exception:
+            doc_meta_by_id = {}
+
     with authoring_db_jsonl.open("a", encoding="utf-8") as out:
         for b in _read_jsonl(blocks_evidence_jsonl):
             read_blocks += 1
@@ -124,6 +136,21 @@ def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
                     },
                 }
 
+                dm = doc_meta_by_id.get(doc_id) if doc_id else None
+                doc_title = None
+                pub_year = None
+                doi = None
+                journal = None
+                published_at = None
+                authors = []
+                if isinstance(dm, dict):
+                    doc_title = dm.get("title")
+                    pub_year = dm.get("publication_year")
+                    doi = dm.get("doi")
+                    journal = dm.get("journal")
+                    published_at = dm.get("published_at")
+                    authors = dm.get("authors") if isinstance(dm.get("authors"), list) else []
+
                 eu = EvidenceUnit(
                     evidence_id=eid,
                     semantic_type=default_semantic_type,  # type: ignore[arg-type]
@@ -135,19 +162,27 @@ def import_deepseek_blocks_evidence_jsonl_to_authoring_db(
                     provenance=Provenance(
                         source_type="review",
                         organization=None,
-                        document_title=str(doc_id or ""),
-                        publication_year=None,
+                        document_title=str(doc_title or doc_id or ""),
+                        publication_year=(int(pub_year) if isinstance(pub_year, int) else None),
                         page_range=None,
                     ),
                     external_refs=ExternalRefs(
                         document_id=(doc_id or None),
-                        title=(doc_id or None),
+                        title=(str(doc_title) if doc_title else (doc_id or None)),
                         source_uri=(source_uri or None),
                         url=(source_uri or None),
+                        abstract=None,
+                        authors=[str(a) for a in (authors or []) if str(a).strip()],
+                        published_at=(str(published_at) if published_at else None),
                     ),
                     evidence_type=str(evidence_type or "extractive_suggestion"),
                     review_feedback=review_feedback,
                 )
+                # Store extra bib fields inside review_feedback for now (non-runtime).
+                if doi or journal:
+                    eu.review_feedback = eu.review_feedback or {}
+                    eu.review_feedback.setdefault("doc_meta", {})
+                    eu.review_feedback["doc_meta"].update({"doi": doi, "journal": journal})
 
                 out.write(json.dumps(eu.to_dict(), ensure_ascii=False) + "\n")
                 created += 1

@@ -112,15 +112,15 @@ def clean_noise(text: str) -> str:
         parts.append(_repair_wrapped_lines(tail))
     text = "\n".join(parts)
 
-    # strip figure captions (keep table content elsewhere)
+    # strip table captions (keep figure captions for evidence/citation)
     lines = []
     for ln in text.split("\n"):
         s = ln.strip()
         if not s:
             lines.append("")
             continue
-        if re.match(r"^(Figure|Fig\.|Table)\s*\d+", s, flags=re.IGNORECASE):
-            # drop captions lines; real tables are extracted separately
+        if re.match(r"^(Table)\s*\d+", s, flags=re.IGNORECASE):
+            # drop table captions lines; real tables are extracted separately
             continue
         lines.append(s)
     text = "\n".join(lines)
