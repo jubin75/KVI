@@ -210,6 +210,73 @@ class AuthoringHandler(BaseHTTPRequestHandler):
         # Keep console output minimal for MVP
         return
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        """
+        Support HEAD requests (curl -I, some proxies/browsers).
+        Mirrors GET routing but returns headers only.
+        """
+        parsed = urlparse(self.path)
+        path = parsed.path or "/"
+
+        if path == "/favicon.ico":
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
+
+        if path == "/" or path == "/index.html":
+            p = STATIC_DIR / "index.html"
+            body = p.read_text(encoding="utf-8") if p.exists() else _INDEX_FALLBACK_HTML
+            data = body.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return
+
+        if path.startswith("/static/"):
+            rel = path[len("/static/") :]
+            fp = (STATIC_DIR / rel).resolve()
+            if not str(fp).startswith(str(STATIC_DIR.resolve())) or (not fp.exists()) or fp.is_dir():
+                self.send_response(HTTPStatus.NOT_FOUND)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            ctype = "text/plain; charset=utf-8"
+            if fp.suffix == ".js":
+                ctype = "application/javascript; charset=utf-8"
+            elif fp.suffix == ".css":
+                ctype = "text/css; charset=utf-8"
+            elif fp.suffix == ".svg":
+                ctype = "image/svg+xml"
+            data = fp.read_text(encoding="utf-8").encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return
+
+        if path == "/api/health":
+            # json body would be {"ok": true}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if path in {"/api/rejection_codes", "/api/evidence"} or path.startswith("/api/evidence/"):
+            # For HEAD we only confirm reachability.
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        self.send_response(HTTPStatus.NOT_FOUND)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path or "/"
