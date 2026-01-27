@@ -7,7 +7,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 def _ensure_repo_root_on_syspath() -> None:
@@ -345,6 +345,28 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/export/evidence.txt":
+            # Legacy/simple pipeline export.
+            # Query params:
+            #   status=approved|all (default approved)
+            status = (qs.get("status", ["approved"])[0] or "approved").strip().lower()
+            units = self.store.list()
+            lines: List[str] = []
+            for u in units:
+                if status != "all" and str(u.status).lower() != "approved":
+                    continue
+                txt = str(u.claim or "").strip()
+                if not txt:
+                    continue
+                lines.append(f"{u.evidence_id}\t{txt}")
+            body = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if path == "/api/evidence":
             units_all = _filter_units(self.store.list(), qs=qs)
             try:
@@ -363,6 +385,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     "evidence_id": u.evidence_id,
                     "semantic_type": u.semantic_type,
                     "schema_id": u.schema_id,
+                    "effective_schema_id": (u.schema_id or str(getattr(self, "default_schema_id", "") or "")),
                     "status": u.status,
                     "polarity": u.polarity,
                     "claim": u.claim,
@@ -379,7 +402,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/evidence/"):
-            eid = path[len("/api/evidence/") :].strip()
+            eid_raw = path[len("/api/evidence/") :].strip()
+            eid = unquote(eid_raw)
             u = self.store.get(eid)
             if u is None:
                 _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found", "evidence_id": eid})
@@ -482,24 +506,30 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 eu.evidence_id = new_evidence_id()
             if not str(eu.status or "").strip():
                 eu.status = "draft"
+            if not str(eu.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
+                eu.schema_id = str(getattr(self, "default_schema_id", "") or "")
             saved = self.store.upsert(eu)
             _json_response(self, HTTPStatus.OK, saved.to_dict())
             return
 
         if path.startswith("/api/evidence/") and path.endswith("/approve"):
-            eid = path[len("/api/evidence/") : -len("/approve")].strip().rstrip("/")
+            eid_raw = path[len("/api/evidence/") : -len("/approve")].strip().rstrip("/")
+            eid = unquote(eid_raw)
             u = self.store.get(eid)
             if u is None:
                 _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
                 return
             u.status = "approved"
             u.rejection = None
+            if not str(u.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
+                u.schema_id = str(getattr(self, "default_schema_id", "") or "")
             self.store.upsert(u)
             _json_response(self, HTTPStatus.OK, u.to_dict())
             return
 
         if path.startswith("/api/evidence/") and path.endswith("/reject"):
-            eid = path[len("/api/evidence/") : -len("/reject")].strip().rstrip("/")
+            eid_raw = path[len("/api/evidence/") : -len("/reject")].strip().rstrip("/")
+            eid = unquote(eid_raw)
             u = self.store.get(eid)
             if u is None:
                 _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -534,6 +564,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 conf = 0.9
             u.status = "rejected"
             u.rejection = {"code": code, "message": message, "details": details, "confidence": conf}
+            if not str(u.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
+                u.schema_id = str(getattr(self, "default_schema_id", "") or "")
             self.store.upsert(u)
             _json_response(self, HTTPStatus.OK, u.to_dict())
             return
@@ -546,7 +578,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
         if not path.startswith("/api/evidence/"):
             _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
-        eid = path[len("/api/evidence/") :].strip().rstrip("/")
+        eid_raw = path[len("/api/evidence/") :].strip().rstrip("/")
+        eid = unquote(eid_raw)
         obj, err = _read_body_json(self)
         if err or not isinstance(obj, dict):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
@@ -557,6 +590,8 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
             return
         eu.evidence_id = eid  # path is source of truth
+        if not str(eu.schema_id or "").strip() and str(getattr(self, "default_schema_id", "") or "").strip():
+            eu.schema_id = str(getattr(self, "default_schema_id", "") or "")
         saved = self.store.upsert(eu)
         _json_response(self, HTTPStatus.OK, saved.to_dict())
 

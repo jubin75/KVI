@@ -44,6 +44,7 @@ function prettyJson(obj) {
 let current = null;
 let rejectionCodes = [];
 let paging = { offset: 0, limit: 200, total: 0, lastQs: "" };
+let serverDefaultSchemaId = "";
 
 async function refreshList() {
   const qs = new URLSearchParams();
@@ -86,7 +87,8 @@ async function refreshList() {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = `semantic_type=${it.semantic_type || ""}  schema_id=${it.schema_id || ""}  polarity=${it.polarity || ""}`;
+    const sid = it.schema_id || it.effective_schema_id || "";
+    meta.textContent = `semantic_type=${it.semantic_type || ""}  schema_id=${sid}  polarity=${it.polarity || ""}`;
 
     card.appendChild(top);
     card.appendChild(claim);
@@ -108,7 +110,7 @@ function fillForm(u) {
   $("evidence_id").value = u.evidence_id || "";
   $("status").value = u.status || "draft";
   $("semantic_type").value = u.semantic_type || "generic";
-  $("schema_id").value = u.schema_id || "";
+  $("schema_id").value = u.schema_id || serverDefaultSchemaId || "";
   $("polarity").value = u.polarity || "neutral";
   $("claim").value = u.claim || "";
   $("slot_projection").value = prettyJson(u.slot_projection || {});
@@ -166,6 +168,16 @@ async function createNew() {
 
 async function saveDraft() {
   const payload = buildPayloadFromForm();
+  // Required fields (product-facing):
+  // - claim: required
+  // - semantic_type: required (fixed set)
+  // - schema_id: required (auto-filled from server default when available)
+  if (!String(payload.claim || "").trim()) throw new Error("claim * is required.");
+  if (!String(payload.semantic_type || "").trim()) throw new Error("semantic_type * is required.");
+  if (!String(payload.schema_id || "").trim() && serverDefaultSchemaId) payload.schema_id = serverDefaultSchemaId;
+  if (!String(payload.schema_id || "").trim()) {
+    throw new Error("schema_id * is required (or start server with --default_schema_id).");
+  }
   if (!payload.evidence_id) {
     // create
     const saved = await apiSend("/api/evidence", "POST", payload);
@@ -208,6 +220,7 @@ async function init() {
   try {
     const cfg = await apiGet("/api/config");
     if (cfg && cfg.default_schema_id) {
+      serverDefaultSchemaId = cfg.default_schema_id;
       $("import_schema_id").value = cfg.default_schema_id;
       $("schema_id").value = cfg.default_schema_id;
     }
