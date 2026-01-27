@@ -157,17 +157,26 @@ class EvidenceUnit:
         if not isinstance(obj, dict):
             raise TypeError("EvidenceUnit.from_dict expects a dict")
 
-        # Accept either `claim` (preferred) or `semantic_text` (legacy)
+        # Accept either `claim` (preferred) or common legacy fields.
+        # - `semantic_text`: older drafts / docs/012
+        # - `text`: evidence_units.jsonl from docs/078 pipelines
         claim = obj.get("claim", None)
         if not isinstance(claim, str) or not claim.strip():
             st = obj.get("semantic_text", None)
-            claim = str(st or "")
+            if isinstance(st, str) and st.strip():
+                claim = str(st or "")
+            else:
+                txt = obj.get("text", None)
+                claim = str(txt or "")
 
         prov = obj.get("provenance") if isinstance(obj.get("provenance"), dict) else {}
         exr = obj.get("external_refs") if isinstance(obj.get("external_refs"), dict) else {}
 
+        # Back-compat: some pipelines use `unit_id` as the unique id.
+        evidence_id = str(obj.get("evidence_id") or obj.get("id") or obj.get("unit_id") or "").strip()
+
         return cls(
-            evidence_id=str(obj.get("evidence_id") or obj.get("id") or ""),
+            evidence_id=evidence_id,
             semantic_type=str(obj.get("semantic_type") or "generic").lower(),  # type: ignore[arg-type]
             schema_id=str(obj.get("schema_id") or obj.get("schema") or ""),
             claim=str(claim or ""),

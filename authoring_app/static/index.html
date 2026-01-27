@@ -50,6 +50,7 @@
           <input id="filter_schema" placeholder="schema:..." />
         </div>
         <div class="btns">
+          <button id="btn_search">Search</button>
           <button id="btn_refresh">Refresh</button>
           <button class="primary" id="btn_new">New Draft</button>
         </div>
@@ -58,7 +59,7 @@
       <div class="notice">
         <div><b>Import（从 PDF 原始 blocks 导入草稿）</b></div>
         <div class="field">
-          <label>schema_id（导入后写到每条 EvidenceUnit）</label>
+          <label>schema_id（可选；不填则使用 server 启动参数 --default_schema_id）</label>
           <input id="import_schema_id" placeholder="schema:infectious_disease" />
         </div>
         <div class="row">
@@ -164,7 +165,7 @@
 
       <div class="field">
         <label>claim（原始文本不可隐藏）</label>
-        <textarea id="claim" placeholder="Textual statement of a single evidence unit."></textarea>
+        <textarea id="claim" placeholder="（建议用单条、原子化陈述知识）"></textarea>
       </div>
 
       <div class="field">

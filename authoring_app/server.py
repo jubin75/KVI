@@ -100,8 +100,7 @@ class JsonlEvidenceStore:
                     units.append(EvidenceUnit.from_dict(obj))
                 except Exception:
                     continue
-        # stable sort by id (human friendly)
-        units.sort(key=lambda u: str(u.evidence_id))
+        # IMPORTANT: keep file order (queue-like UX).
         return units
 
     def _write_all(self, units: List[EvidenceUnit]) -> None:
@@ -205,6 +204,7 @@ def _filter_units(units: List[EvidenceUnit], *, qs: Dict[str, List[str]]) -> Lis
 
 class AuthoringHandler(BaseHTTPRequestHandler):
     store: JsonlEvidenceStore
+    default_schema_id: str = ""
 
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003 (shadow builtin)
         # Keep console output minimal for MVP
@@ -316,6 +316,18 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.OK, {"ok": True})
             return
 
+        if path == "/api/config":
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "db_path": str(getattr(self.store, "path", "")),
+                    "default_schema_id": str(getattr(self, "default_schema_id", "") or ""),
+                },
+            )
+            return
+
         if path == "/api/rejection_codes":
             _json_response(
                 self,
@@ -334,7 +346,18 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/evidence":
-            units = _filter_units(self.store.list(), qs=qs)
+            units_all = _filter_units(self.store.list(), qs=qs)
+            try:
+                offset = int((qs.get("offset", ["0"])[0] or "0").strip())
+            except Exception:
+                offset = 0
+            try:
+                limit = int((qs.get("limit", ["200"])[0] or "200").strip())
+            except Exception:
+                limit = 200
+            offset = max(0, offset)
+            limit = min(2000, max(1, limit))
+            units = units_all[offset : offset + limit]
             payload = [
                 {
                     "evidence_id": u.evidence_id,
@@ -348,7 +371,11 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 }
                 for u in units
             ]
-            _json_response(self, HTTPStatus.OK, {"items": payload, "count": int(len(payload))})
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {"items": payload, "count": int(len(payload)), "total": int(len(units_all)), "offset": int(offset), "limit": int(limit)},
+            )
             return
 
         if path.startswith("/api/evidence/"):
@@ -372,12 +399,16 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
                 return
             blocks_jsonl = str(obj.get("blocks_jsonl") or "").strip()
-            schema_id = str(obj.get("schema_id") or "").strip()
+            schema_id = str(obj.get("schema_id") or "").strip() or str(getattr(self, "default_schema_id", "") or "").strip()
             default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
             evidence_type = str(obj.get("evidence_type") or "pdf_block").strip()
             max_blocks = int(obj.get("max_blocks") or 0)
             if not blocks_jsonl or not schema_id:
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "blocks_jsonl and schema_id required"})
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "bad_request", "message": "blocks_jsonl required; schema_id is optional if server has --default_schema_id"},
+                )
                 return
             try:
                 try:
@@ -406,14 +437,14 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
                 return
             blocks_evidence_jsonl = str(obj.get("blocks_evidence_jsonl") or obj.get("blocks_jsonl") or "").strip()
-            schema_id = str(obj.get("schema_id") or "").strip()
+            schema_id = str(obj.get("schema_id") or "").strip() or str(getattr(self, "default_schema_id", "") or "").strip()
             default_semantic_type = str(obj.get("default_semantic_type") or "generic").strip()
             evidence_type = str(obj.get("evidence_type") or "extractive_suggestion").strip()
             if not blocks_evidence_jsonl or not schema_id:
                 _json_response(
                     self,
                     HTTPStatus.BAD_REQUEST,
-                    {"error": "bad_request", "message": "blocks_evidence_jsonl (or blocks_jsonl) and schema_id required"},
+                    {"error": "bad_request", "message": "blocks_evidence_jsonl required; schema_id is optional if server has --default_schema_id"},
                 )
                 return
             try:
@@ -535,10 +566,12 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--db", required=True, help="Path to authoring evidence_units.jsonl")
+    ap.add_argument("--default_schema_id", default="", help="Default schema_id used for imports/new drafts (optional).")
     args = ap.parse_args()
 
     store = JsonlEvidenceStore(Path(str(args.db)))
     AuthoringHandler.store = store  # type: ignore[assignment]
+    AuthoringHandler.default_schema_id = str(args.default_schema_id or "")
 
     server = ThreadingHTTPServer((str(args.host), int(args.port)), AuthoringHandler)
     print(f"[authoring_app] Serving on http://{args.host}:{int(args.port)}  db={args.db}", flush=True)

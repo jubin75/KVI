@@ -43,6 +43,7 @@ function prettyJson(obj) {
 
 let current = null;
 let rejectionCodes = [];
+let paging = { offset: 0, limit: 200, total: 0, lastQs: "" };
 
 async function refreshList() {
   const qs = new URLSearchParams();
@@ -54,10 +55,13 @@ async function refreshList() {
   if (schema) qs.set("schema_id", schema);
   if (sem) qs.set("semantic_type", sem);
   if (q) qs.set("q", q);
+  qs.set("offset", String(paging.offset || 0));
+  qs.set("limit", String(paging.limit || 200));
   const data = await apiGet(`/api/evidence?${qs.toString()}`);
-  $("count").textContent = `${data.count} items`;
+  paging.total = data.total || data.count || 0;
+  $("count").textContent = `${data.count} / ${paging.total} items (offset=${data.offset || 0})`;
   const el = $("list");
-  el.innerHTML = "";
+  if ((paging.offset || 0) === 0) el.innerHTML = "";
   for (const it of data.items || []) {
     const card = document.createElement("div");
     card.className = "card";
@@ -67,7 +71,7 @@ async function refreshList() {
 
     const left = document.createElement("div");
     left.className = "id";
-    left.textContent = it.evidence_id;
+    left.textContent = it.evidence_id || "(no id)";
 
     const badge = document.createElement("div");
     badge.className = badgeClass(it.status);
@@ -200,6 +204,15 @@ async function reject() {
 }
 
 async function init() {
+  // Load server defaults (schema_id etc.)
+  try {
+    const cfg = await apiGet("/api/config");
+    if (cfg && cfg.default_schema_id) {
+      $("import_schema_id").value = cfg.default_schema_id;
+      $("schema_id").value = cfg.default_schema_id;
+    }
+  } catch {}
+
   const codes = await apiGet("/api/rejection_codes");
   rejectionCodes = codes.codes || [];
   const sel = $("rej_code");
@@ -214,12 +227,16 @@ async function init() {
   $("btn_import_blocks").onclick = () => importBlocksJsonl().catch(showErr);
   $("btn_import_evidence_blocks").onclick = () => importEvidenceBlocksJsonl().catch(showErr);
 
+  $("btn_search").onclick = () => {
+    paging.offset = 0;
+    refreshList().catch(showErr);
+  };
   $("btn_refresh").onclick = () => refreshList().catch(showErr);
   $("btn_new").onclick = () => createNew().catch(showErr);
   $("btn_save").onclick = () => saveDraft().catch(showErr);
   $("btn_approve").onclick = () => approve().catch(showErr);
   $("btn_reject").onclick = () => reject().catch(showErr);
-  $("filters").oninput = debounce(() => refreshList().catch(showErr), 300);
+  $("filters").oninput = debounce(() => { paging.offset = 0; refreshList().catch(showErr); }, 300);
 
   await refreshList();
   await createNew();
@@ -230,17 +247,17 @@ async function importBlocksJsonl() {
   const sem = $("import_semantic_type").value;
   const pth = $("import_blocks_path").value.trim();
   const maxBlocks = Number(($("import_max_blocks").value || "0").trim());
-  if (!schemaId) throw new Error("Import requires schema_id.");
   if (!pth) throw new Error("Import requires blocks.jsonl path.");
   $("import_result").value = "Importing blocks.jsonl ...";
   const out = await apiSend("/api/import/blocks", "POST", {
     blocks_jsonl: pth,
-    schema_id: schemaId,
+    schema_id: schemaId || null,
     default_semantic_type: sem,
     max_blocks: Number.isFinite(maxBlocks) ? maxBlocks : 0,
     evidence_type: "pdf_block",
   });
   $("import_result").value = prettyJson(out);
+  paging.offset = 0;
   await refreshList();
 }
 
@@ -248,16 +265,16 @@ async function importEvidenceBlocksJsonl() {
   const schemaId = $("import_schema_id").value.trim();
   const sem = $("import_semantic_type").value;
   const pth = $("import_evidence_blocks_path").value.trim();
-  if (!schemaId) throw new Error("Import requires schema_id.");
   if (!pth) throw new Error("Import requires blocks.evidence.jsonl path.");
   $("import_result").value = "Importing blocks.evidence.jsonl ...";
   const out = await apiSend("/api/import/blocks.evidence", "POST", {
     blocks_evidence_jsonl: pth,
-    schema_id: schemaId,
+    schema_id: schemaId || null,
     default_semantic_type: sem,
     evidence_type: "extractive_suggestion",
   });
   $("import_result").value = prettyJson(out);
+  paging.offset = 0;
   await refreshList();
 }
 
