@@ -45,6 +45,7 @@ let current = null;
 let rejectionCodes = [];
 let paging = { offset: 0, limit: 200, total: 0, lastQs: "" };
 let serverDefaultKbId = "";
+let docBundle = { docsMetaPath: "", blocksPath: "" };
 
 async function refreshList() {
   const qs = new URLSearchParams();
@@ -242,6 +243,7 @@ async function init() {
 
   $("btn_import_blocks").onclick = () => importBlocksJsonl().catch(showErr);
   $("btn_import_evidence_blocks").onclick = () => importEvidenceBlocksJsonl().catch(showErr);
+  $("btn_load_docs").onclick = () => loadDocs().catch(showErr);
 
   $("btn_search").onclick = () => {
     paging.offset = 0;
@@ -256,6 +258,79 @@ async function init() {
 
   await refreshList();
   await createNew();
+}
+
+async function loadDocs() {
+  const docsMeta = $("docmeta_path").value.trim();
+  const blocks = $("evidenceblocks_path").value.trim();
+  if (!docsMeta || !blocks) throw new Error("Doc preview requires docs.meta.jsonl and blocks.evidence.jsonl paths.");
+  docBundle.docsMetaPath = docsMeta;
+  docBundle.blocksPath = blocks;
+  const resp = await apiSend("/api/doc_bundle/list", "POST", { docs_meta_jsonl: docsMeta, blocks_evidence_jsonl: blocks });
+  const el = $("doc_list");
+  el.innerHTML = "";
+  for (const d of resp.items || []) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.onclick = () => loadDocDetail(d.doc_id).catch(showErr);
+    const top = document.createElement("div");
+    top.className = "top";
+    const left = document.createElement("div");
+    left.className = "id";
+    left.textContent = d.doc_id;
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = `${d.evidence_count || 0} blocks`;
+    top.appendChild(left);
+    top.appendChild(badge);
+    const claim = document.createElement("div");
+    claim.className = "claim";
+    claim.textContent = truncate(d.title || d.doc_id || "", 220);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `year=${d.publication_year || ""} doi=${d.doi || ""}`;
+    card.appendChild(top);
+    card.appendChild(claim);
+    card.appendChild(meta);
+    el.appendChild(card);
+  }
+}
+
+async function loadDocDetail(docId) {
+  if (!docBundle.blocksPath) throw new Error("Load Docs first.");
+  const resp = await apiSend("/api/doc_bundle/doc", "POST", {
+    docs_meta_jsonl: docBundle.docsMetaPath || null,
+    blocks_evidence_jsonl: docBundle.blocksPath,
+    doc_id: docId,
+  });
+  const host = $("doc_preview");
+  host.innerHTML = "";
+  const h = document.createElement("div");
+  h.style.marginBottom = "8px";
+  const title = (resp.doc_meta && resp.doc_meta.meta && resp.doc_meta.meta.title) ? resp.doc_meta.meta.title : docId;
+  h.innerHTML = `<div><b>${title}</b></div><div style="color: var(--muted); font-size: 12px;">doc_id=${docId}</div>`;
+  host.appendChild(h);
+  const blocks = resp.blocks || [];
+  for (const b of blocks) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const top = document.createElement("div");
+    top.className = "top";
+    const left = document.createElement("div");
+    left.className = "id";
+    left.textContent = b.block_type || "paragraph_summary";
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = b.block_id || "";
+    top.appendChild(left);
+    top.appendChild(badge);
+    const text = document.createElement("div");
+    text.className = "claim";
+    text.textContent = (b.text || "").trim();
+    card.appendChild(top);
+    card.appendChild(text);
+    host.appendChild(card);
+  }
 }
 
 async function importBlocksJsonl() {

@@ -56,6 +56,24 @@ def _split_paragraphs(text: str) -> List[str]:
     parts = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
     return [p for p in parts if len(p) >= 30]
 
+def _strip_table_markdown(text: str) -> str:
+    """
+    Remove table markdown blocks so DS doesn't extract from tables.
+    """
+    out_lines: List[str] = []
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if not s:
+            out_lines.append("")
+            continue
+        if s.lower().startswith("<!-- table:"):
+            continue
+        # markdown table rows
+        if s.startswith("|") and "|" in s:
+            continue
+        out_lines.append(ln)
+    return "\n".join(out_lines)
+
 
 def _approx_token_count(text: str) -> int:
     """
@@ -148,7 +166,7 @@ def main() -> None:
                     + "\n"
                 )
 
-            txt = str(rec.get("text") or "")
+            txt = _strip_table_markdown(str(rec.get("text") or ""))
             paras = _split_paragraphs(txt)
             for p_idx, para in enumerate(paras):
                 total_paras += 1

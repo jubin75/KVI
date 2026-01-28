@@ -42,7 +42,7 @@ You MUST ONLY copy exact substrings from the provided raw_block_text into the 'q
 
 
 USER_TEMPLATE = """topic_goal: {topic_goal}
-task: Extract up to {max_sentences} evidence sentences for the topic_goal (HIGH RECALL).
+task: Extract up to {max_sentences} COMPLETE evidence sentences for the topic_goal (HIGH RECALL).
 
 Rules (MUST follow):
 1) Output JSON only. No markdown, no explanation.
@@ -53,6 +53,8 @@ Rules (MUST follow):
    pathogenesis/mechanisms/immune response, diagnosis, prevention, treatment and guideline recommendations (if present in raw_block_text).
 5) Only return keep=false if there is truly NOTHING relevant to the topic_goal in raw_block_text.
 6) Do NOT create new medical advice; you may extract recommendations ONLY if they already appear in the raw_block_text.
+7) Quotes MUST be complete sentences (not fragments). Prefer quotes that end with sentence punctuation: . ! ? 。 ！ ？
+8) Do NOT output table rows or partial clauses.
 
 Return JSON schema:
 {{
@@ -80,7 +82,8 @@ class ExtractiveEvidenceConfig:
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     api_key_env: str = "DEEPSEEK_API_KEY"
-    max_sentences: int = 3
+    # Default to 1 to reduce fragmentation; callers can override for recall.
+    max_sentences: int = 1
     # Allow a bit more context to increase recall (still bounded to avoid overly long requests).
     max_chars: int = 9000
 
@@ -114,17 +117,33 @@ class DeepSeekExtractiveEvidence:
 
         cleaned: List[Dict[str, Any]] = []
         norm_raw = _normalize_ws(clipped)
+        seen: set[str] = set()
+        sent_end = re.compile(r"[\.!\?。！？]$")
         for it in sents[: int(self.cfg.max_sentences)]:
             if not isinstance(it, dict):
                 continue
             quote = str(it.get("quote") or "").strip()
             if not quote:
                 continue
+            # Enforce "sentence-like" shape to avoid fragmentary evidence blocks.
+            if len(quote) < 20:
+                continue
+            if len(quote) > 800:
+                continue
+            if not sent_end.search(quote):
+                # Allow rare cases where the PDF has no punctuation; keep only if it's long enough.
+                if len(quote) < 80:
+                    continue
             # Try to validate quote appears in raw text (whitespace-normalized fallback).
             if quote not in clipped:
                 if _normalize_ws(quote) not in norm_raw:
                     # reject invalid quote (non-extractive hallucination)
                     continue
+            # Dedupe within one call.
+            k = _normalize_ws(quote).lower()
+            if k in seen:
+                continue
+            seen.add(k)
             span = it.get("span") if isinstance(it.get("span"), dict) else {}
             cs = span.get("char_start")
             ce = span.get("char_end")

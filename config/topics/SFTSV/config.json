@@ -99,7 +99,7 @@
       "default_semantic_type": "generic",
       "evidence_type": "extractive_suggestion",
 
-      "max_sentences_per_paragraph": 3,
+      "max_sentences_per_paragraph": 1,
       "max_paragraphs": 0,
 
       "legacy_build_kvbank": false

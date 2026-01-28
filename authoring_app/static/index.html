@@ -106,6 +106,25 @@
       </div>
 
       <div class="notice">
+        <div><b>Doc 预览（按 doc meta 聚合查看 DS 抽取结果）</b></div>
+        <div class="field">
+          <label>docs.meta.jsonl（服务器路径）</label>
+          <input id="docmeta_path" placeholder="/home/jb/topics/SFTSV/work/docs.meta.jsonl" />
+        </div>
+        <div class="field">
+          <label>blocks.evidence.jsonl（服务器路径）</label>
+          <input id="evidenceblocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.evidence.jsonl" />
+        </div>
+        <div class="btns">
+          <button id="btn_load_docs">Load Docs</button>
+        </div>
+        <div class="field">
+          <label>Docs</label>
+          <div class="list" id="doc_list"></div>
+        </div>
+      </div>
+
+      <div class="notice">
         <div><b>原则（冻结）</b></div>
         <div>Evidence 是“语义条目”，不是问题答案；不包含 intent/topic 路由信息。</div>
         <div><b>重要</b>：Rejected evidence will never be injected into answers. This does not mean the evidence is wrong — only that it is not suitable for the current knowledge slot.</div>
@@ -118,6 +137,13 @@
       <div class="title">
         <h1 id="editor_title">Evidence Editor</h1>
         <div class="hint">MVP · Authoring + Review</div>
+      </div>
+
+      <div class="notice">
+        <div><b>Doc Preview（选中某 doc 后显示其 blocks.evidence 全量文本）</b></div>
+        <div id="doc_preview" class="field">
+          <div class="muted" style="color: var(--muted); font-size: 12px;">未选择 doc</div>
+        </div>
       </div>
 
       <div id="err" class="rejection" style="display:none"></div>

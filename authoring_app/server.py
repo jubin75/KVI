@@ -79,6 +79,19 @@ def _safe_json_loads(s: str) -> Optional[Any]:
         return None
 
 
+def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            obj = _safe_json_loads(s)
+            if isinstance(obj, dict):
+                out.append(obj)
+    return out
+
+
 class JsonlEvidenceStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -422,6 +435,109 @@ class AuthoringHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path or "/"
+
+        if path == "/api/doc_bundle/list":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            docs_meta_jsonl = str(obj.get("docs_meta_jsonl") or "").strip()
+            blocks_evidence_jsonl = str(obj.get("blocks_evidence_jsonl") or "").strip()
+            if not docs_meta_jsonl or not blocks_evidence_jsonl:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "bad_request", "message": "docs_meta_jsonl and blocks_evidence_jsonl required"},
+                )
+                return
+            try:
+                docs = _read_jsonl(Path(docs_meta_jsonl))
+                blocks = _read_jsonl(Path(blocks_evidence_jsonl))
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
+
+            meta_by_doc: Dict[str, Dict[str, Any]] = {}
+            for d in docs:
+                did = str(d.get("doc_id") or "").strip()
+                if did:
+                    meta_by_doc[did] = d
+
+            counts: Dict[str, int] = {}
+            type_counts: Dict[str, Dict[str, int]] = {}
+            for b in blocks:
+                did = str(b.get("doc_id") or "").strip()
+                if not did:
+                    continue
+                counts[did] = int(counts.get(did, 0)) + 1
+                bt = str(b.get("block_type") or "paragraph_summary")
+                type_counts.setdefault(did, {})[bt] = int(type_counts[did].get(bt, 0)) + 1
+
+            items: List[Dict[str, Any]] = []
+            for did, drec in meta_by_doc.items():
+                meta = drec.get("meta") if isinstance(drec.get("meta"), dict) else {}
+                items.append(
+                    {
+                        "doc_id": did,
+                        "source_uri": drec.get("source_uri"),
+                        "kb_id": drec.get("kb_id"),
+                        "title": meta.get("title") or did,
+                        "journal": meta.get("journal"),
+                        "doi": meta.get("doi"),
+                        "publication_year": meta.get("publication_year"),
+                        "published_at": meta.get("published_at"),
+                        "authors": meta.get("authors") if isinstance(meta.get("authors"), list) else [],
+                        "evidence_count": int(counts.get(did, 0)),
+                        "block_type_counts": type_counts.get(did, {}),
+                    }
+                )
+            # Sort by evidence_count desc
+            items.sort(key=lambda x: int(x.get("evidence_count") or 0), reverse=True)
+            _json_response(self, HTTPStatus.OK, {"items": items, "count": len(items)})
+            return
+
+        if path == "/api/doc_bundle/doc":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            blocks_evidence_jsonl = str(obj.get("blocks_evidence_jsonl") or "").strip()
+            doc_id = str(obj.get("doc_id") or "").strip()
+            docs_meta_jsonl = str(obj.get("docs_meta_jsonl") or "").strip()
+            if not blocks_evidence_jsonl or not doc_id:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "blocks_evidence_jsonl and doc_id required"})
+                return
+            try:
+                blocks = _read_jsonl(Path(blocks_evidence_jsonl))
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
+            doc_meta: Optional[Dict[str, Any]] = None
+            if docs_meta_jsonl:
+                try:
+                    docs = _read_jsonl(Path(docs_meta_jsonl))
+                    for d in docs:
+                        if str(d.get("doc_id") or "").strip() == doc_id:
+                            doc_meta = d
+                            break
+                except Exception:
+                    doc_meta = None
+
+            out_blocks: List[Dict[str, Any]] = []
+            for b in blocks:
+                if str(b.get("doc_id") or "").strip() != doc_id:
+                    continue
+                out_blocks.append(
+                    {
+                        "block_id": b.get("block_id"),
+                        "block_type": b.get("block_type") or "paragraph_summary",
+                        "text": b.get("text") or "",
+                        "source_uri": b.get("source_uri"),
+                        "metadata": b.get("metadata") if isinstance(b.get("metadata"), dict) else {},
+                    }
+                )
+            _json_response(self, HTTPStatus.OK, {"doc_id": doc_id, "doc_meta": doc_meta, "blocks": out_blocks, "count": len(out_blocks)})
+            return
 
         if path == "/api/import/blocks":
             obj, err = _read_body_json(self)
