@@ -15,6 +15,102 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
 
+def _load_semantic_type_specs(*, pattern_index_dir: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Scheme B (productized): semantic relevance is configured by lightweight "type descriptions"
+    and filtered by embedding similarity (no hard-coded semantic types).
+    """
+    pdir = Path(str(pattern_index_dir or "").strip())
+    # Default location under work_dir/pattern_sidecar
+    cand = pdir / "semantic_type_specs.json"
+    if cand.exists():
+        try:
+            obj = json.loads(cand.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                return {str(k): (v if isinstance(v, dict) else {"description": str(v)}) for k, v in obj.items()}
+        except Exception:
+            pass
+    # Built-in defaults (generic, works across medical topics).
+    return {
+        "symptom": {
+            "description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。",
+            "threshold": 0.28,
+        },
+        "drug": {
+            "description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。",
+            "threshold": 0.28,
+        },
+        "location": {
+            "description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。",
+            "threshold": 0.28,
+        },
+        "mechanism": {
+            "description": "作用机制/发病机制：感染哪些细胞、免疫应答/免疫抑制、炎症反应、病理过程、通透性改变、多器官损伤等。",
+            "threshold": 0.26,
+        },
+    }
+
+
+def _semantic_filter_units_by_embedding(
+    *,
+    enc: Any,
+    units: List[str],
+    query: str,
+    semantic_type: str,
+    specs: Dict[str, Dict[str, Any]],
+) -> Tuple[List[str], Dict[str, Any]]:
+    """
+    Embedding-based semantic relevance filter (Scheme B).
+    - anchor_text = (semantic_type description + query)
+    - keep units above threshold; if none, keep a small top slice as a safe fallback (avoid empty).
+    Returns (filtered_units, debug_info).
+    """
+    st = str(semantic_type or "").strip().lower()
+    q = str(query or "").strip()
+    us = [str(u or "").strip() for u in (units or []) if str(u or "").strip()]
+    if not st or not us:
+        return us, {"method": "embedding", "semantic_type": st, "kept": len(us), "reason": "empty_input"}
+
+    spec = specs.get(st) if isinstance(specs, dict) else None
+    desc = ""
+    thr = 0.28
+    if isinstance(spec, dict):
+        desc = str(spec.get("description") or spec.get("desc") or "").strip()
+        try:
+            thr = float(spec.get("threshold")) if spec.get("threshold") is not None else thr
+        except Exception:
+            thr = thr
+    if not desc:
+        # Unknown semantic types: use the label itself as a weak description (no code change needed).
+        desc = st
+        thr = 0.24
+
+    anchor_text = f"[semantic_type]\n{st}\n\n[description]\n{desc}\n\n[query]\n{q}\n"
+    try:
+        import numpy as np  # type: ignore
+
+        a = enc.encode([anchor_text], batch_size=1)[0]
+        m = enc.encode(us, batch_size=min(16, max(1, len(us))))
+        sims = (m @ a).astype(float)  # cosine sim if encoder normalized
+        order = list(np.argsort(-sims))
+        kept = [us[i] for i in order if float(sims[i]) >= float(thr)]
+        # Avoid fail-closed: keep a tiny top slice if everything is below threshold.
+        if not kept:
+            topk = min(2, len(us))
+            kept = [us[i] for i in order[:topk]]
+        dbg = {
+            "method": "embedding",
+            "semantic_type": st,
+            "threshold": float(thr),
+            "units_in": len(us),
+            "units_kept": len(kept),
+            "top_sims": [float(sims[i]) for i in order[: min(5, len(order))]],
+        }
+        return kept, dbg
+    except Exception as e:
+        # If encoder fails, fall back to keeping units (do not drop to empty).
+        return us, {"method": "embedding", "semantic_type": st, "kept": len(us), "fallback": f"{type(e).__name__}"}
+
 def _load_block_text_lookup(path: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     p = Path(path)
@@ -448,13 +544,19 @@ def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query
     symptom_cues = ["临床表现", "症状", "表现", "manifestation", "symptom", "present with", "including", "includes", "表现包括", "包括"]
     drug_cues = ["治疗", "药物", "用药", "获批", "批准", "fda", "approved", "approval", "drug", "therapy", "treatment"]
     loc_cues = ["地区", "分布", "省", "市", "县", "区域", "reported in", "distributed in", "occurred in", "found in"]
+    mech_cues = ["机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism", "免疫", "免疫应答", "免疫抑制", "感染", "内皮细胞", "单核", "巨噬", "树突", "细胞因子", "炎症", "通透性", "多器官"]
 
     has_symptom = any(c in t for c in symptom_cues) or any(c in tl for c in symptom_cues)
     has_drug = any(c in t for c in drug_cues) or any(c in tl for c in drug_cues)
     has_loc = any(c in t for c in loc_cues) or any(c in tl for c in loc_cues)
+    has_mech = any(c in t for c in mech_cues) or any(c in tl for c in mech_cues)
 
     # Allow explicit query overlap as a weak signal.
-    query_overlap = sum(1 for c in ["临床表现", "症状", "治疗", "药物", "分布", "地区", "fda", "approved"] if (c in ql or c in q) and (c in tl or c in t))
+    query_overlap = sum(
+        1
+        for c in ["临床表现", "症状", "治疗", "药物", "分布", "地区", "fda", "approved", "机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism"]
+        if (c in ql or c in q) and (c in tl or c in t)
+    )
 
     if st == "symptom":
         if has_drug and not any(c in ql or c in q for c in drug_cues):
@@ -474,6 +576,13 @@ def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query
         if has_symptom and not any(c in ql or c in q for c in symptom_cues):
             return False
         return has_loc or query_overlap >= 1
+    if st == "mechanism":
+        # Mechanism queries are often phrased without explicit keywords besides "机制".
+        # Keep deletion-only filtering: prefer mech-ish sentences, but don't fail-closed if query is clearly mechanism.
+        if any(k in q for k in ["机制", "作用机制", "发病机制", "致病机制"]) or any(k in ql for k in ["mechanism", "pathogenesis"]):
+            return has_mech or query_overlap >= 1 or (len(t) >= 12)
+        # If query isn't explicitly mechanism, be conservative.
+        return has_mech or query_overlap >= 2
     return False
 
 def main() -> None:
@@ -583,6 +692,7 @@ def main() -> None:
                 kv_dir=str(args.kv_dir),
                 pattern_index_dir=str(args.pattern_index_dir),
             )
+            specs = _load_semantic_type_specs(pattern_index_dir=str(args.pattern_index_dir))
             try:
                 from external_kv_injection.src.evidence.evidence_unit_extractor import EvidenceUnitExtractor  # type: ignore
             except ModuleNotFoundError:
@@ -597,21 +707,28 @@ def main() -> None:
                     text=str(txt or ""),
                     metadata=meta,
                 )
-                # Scheme #1: semantic_type-aware relevance filter (deletion-only).
-                # IMPORTANT: in simple pipeline, do NOT fail-closed to empty when unknown.
-                # Unknown intent is common (e.g., "作用机制/发病机制") and we still want evidence grounding.
+                # Scheme B: embedding-based semantic relevance filter (no hard-coded semantic types).
                 if target_semantic_type == "multi":
                     sts = router_dbg.get("semantic_types") if isinstance(router_dbg, dict) else None
                     sts = list(sts) if isinstance(sts, list) else []
-                    units = [u for u in units if _unit_relevant_to_any_semantic_type(unit_text=u, semantic_types=sts, query=user_prompt)]
+                    # union keep: keep if matches ANY semantic type
+                    kept: List[str] = []
+                    dbg_multi: List[Dict[str, Any]] = []
+                    for st in sts:
+                        k, d = _semantic_filter_units_by_embedding(enc=enc, units=units, query=user_prompt, semantic_type=str(st), specs=specs)
+                        dbg_multi.append(d)
+                        for x in k:
+                            if x not in kept:
+                                kept.append(x)
+                    units = kept
+                    router_dbg["semantic_filter"] = {"method": "embedding", "multi": dbg_multi}
                 elif target_semantic_type != "unknown":
-                    units = [
-                        u
-                        for u in units
-                        if _unit_relevant_to_semantic_type(unit_text=u, semantic_type=target_semantic_type, query=user_prompt)
-                    ]
+                    units, fdbg = _semantic_filter_units_by_embedding(
+                        enc=enc, units=units, query=user_prompt, semantic_type=target_semantic_type, specs=specs
+                    )
+                    router_dbg["semantic_filter"] = fdbg
                 else:
-                    # Keep units as-is (no semantic filter).
+                    # Unknown intent: keep units as-is (no semantic filter).
                     units = list(units or [])
                 unit_lookup[str(bid)] = units
 
