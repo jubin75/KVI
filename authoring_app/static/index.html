@@ -12,11 +12,11 @@
       <h1>知识注入KVI（Key Value Injection）</h1>
       <div class="sub">
         KVI 是用于大模型幻觉定点消除和长期记忆外挂的开源框架。<br/>
-        本控制台提供两条人工闭环：① simple 流程（编辑 Evidence Sets(JSONL) → 编译 KVBank → 注入调试）；② Doc 导入（doc_meta → blocks.evidence → 导入到 Evidence Sets）。
+        本控制台提供两条人工闭环：① 人工编制知识（编辑 sentence+meta → 编译 KVBank → 注入调试）；② 从文献编制知识（doc_meta → blocks.evidence → 导入 sentence+meta）。
       </div>
       <div class="tabs">
-        <button class="tab active" id="tab_simple">Simple：Evidence Sets</button>
-        <button class="tab" id="tab_docs">Doc：doc_meta → blocks</button>
+        <button class="tab active" id="tab_simple">人工编制知识</button>
+        <button class="tab" id="tab_docs">从文献编制知识</button>
         <button class="tab" id="tab_debug">调试：Prompt → 输出</button>
       </div>
     </div>
@@ -29,14 +29,14 @@
           <div class="note" id="topic_goal"></div>
         </div>
         <div class="field">
-          <label>Evidence Sets 目录</label>
+          <label>知识文件目录（sentence + meta）</label>
           <input id="evidence_sets_dir" class="mono" disabled />
           <div class="note">每条 sentence 是一行 JSON（JSONL）。支持多文件（evidence_001.jsonl 等），便于规模化维护与协作。</div>
         </div>
       </div>
 
       <div class="field">
-        <label>Evidence Sets</label>
+        <label>知识文件（可多文件）</label>
         <div class="row">
           <div class="field">
             <label>选择 evidence set</label>
@@ -118,7 +118,7 @@
           <div class="btns">
             <button class="primary" id="btn_load_docs_topic">加载 doc_meta 列表</button>
           </div>
-          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到 Evidence Sets（会写入一个启用的 evidence_*.jsonl）。</div>
+          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到知识文件（会写入一个启用的 evidence_*.jsonl）。</div>
         </div>
       </div>
 
@@ -132,7 +132,7 @@
       <div id="doc_detail_view" style="display:none">
         <div class="btns">
           <button id="btn_back_to_docs">返回 doc 列表</button>
-          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → Evidence Sets</button>
+          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → 知识文件</button>
         </div>
         <div class="field">
           <label>doc 详情（blocks.evidence 按序展示，仅显示 claim）</label>

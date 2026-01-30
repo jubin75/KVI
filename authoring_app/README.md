@@ -1,24 +1,17 @@
-## Authoring UI (MVP)
+## KVI UI (MVP)
 
-This is a **zero-dependency** local web UI for `docs/11_Knowledge_Authoring_Layer.md`:
+This is a **zero-dependency** local web UI for KVI (Key Value Injection) knowledge curation:
 
-- Evidence list (semantic_type / schema / status)
-- Evidence edit (structured fields + original text)
-- Evidence review (approve / reject)
-- Rejection reason rendering using the **frozen** `rejection.code` set
+- Simple: manage sentence+meta Evidence Sets (JSONL) and compile KVBank
+- Doc: curate knowledge from doc_meta + blocks.evidence.jsonl, then import to Evidence Sets
+- Debug: run simple pipeline injection tests
 
 ### Run
-
-Prepare an authoring DB file (JSONL):
-
-```bash
-cp external_kv_injection/examples/authoring_evidence_units.sample.jsonl /tmp/evidence_units.jsonl
-```
 
 Start server:
 
 ```bash
-python -u external_kv_injection/authoring_app/server.py --db /tmp/evidence_units.jsonl --port 8765
+python -u external_kv_injection/authoring_app/server.py --port 8765
 ```
 
 Open:
@@ -27,6 +20,5 @@ Open:
 
 ### Notes
 
-- This UI edits the JSONL file **in place** (rewrites the file on each save).
-- Only **approved** evidence should be exported to runtime KVBank (see `scripts/export_authoring_evidence_runtime_jsonl.py`).
+- Evidence Sets are stored under each topic `build.work_dir/evidence_sets/`.
 

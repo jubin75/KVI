@@ -34,7 +34,7 @@ _INDEX_FALLBACK_HTML = f"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Authoring UI (static missing)</title>
+  <title>KVI UI (static missing)</title>
   <style>
     body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }}
     code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }}
@@ -44,9 +44,9 @@ _INDEX_FALLBACK_HTML = f"""<!doctype html>
 </head>
 <body>
   <div class="box">
-    <h2>Authoring UI static files not found</h2>
+    <h2>KVI UI static files not found</h2>
     <p class="muted">
-      The HTTP server is running, but <code>authoring_app/static/index.html</code> was not found on disk.
+      The HTTP server is running, but <code>static/index.html</code> was not found on disk.
     </p>
     <p>
       Expected directory: <code>{STATIC_DIR.as_posix()}</code>
@@ -146,7 +146,7 @@ def _topic_evidence_txt_path(topic: str) -> Path:
 
 def _topic_evidence_sets_dir(topic: str) -> Path:
     """
-    Runtime-authoring artifacts SHOULD live in topic build.work_dir, not the code directory.
+    Runtime artifacts SHOULD live in topic build.work_dir, not the code directory.
     Fallback to repo topic_dir only if work_dir is not configured.
     """
     build = _topic_build_cfg(topic)
@@ -389,9 +389,9 @@ def _read_body_json(handler: BaseHTTPRequestHandler) -> Tuple[Optional[Any], Opt
         return None, "Invalid JSON body"
     return obj, None
 
-class AuthoringHandler(BaseHTTPRequestHandler):
+class KVIHandler(BaseHTTPRequestHandler):
     """
-    KVI Simple Evidence Sets UI server (no EvidenceUnit authoring DB).
+    KVI UI server (Evidence Sets only).
     """
 
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003 (shadow builtin)
@@ -1097,13 +1097,13 @@ class AuthoringHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="KVI Simple Evidence Sets UI server (no dependencies).")
+    ap = argparse.ArgumentParser(description="KVI UI server (no dependencies).")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
 
-    server = ThreadingHTTPServer((str(args.host), int(args.port)), AuthoringHandler)
-    print(f"[authoring_app] Serving on http://{args.host}:{int(args.port)}", flush=True)
+    server = ThreadingHTTPServer((str(args.host), int(args.port)), KVIHandler)
+    print(f"[kvi_ui] Serving on http://{args.host}:{int(args.port)}", flush=True)
     server.serve_forever()
 
 
