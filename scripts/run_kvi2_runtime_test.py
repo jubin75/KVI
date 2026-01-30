@@ -111,6 +111,39 @@ def _semantic_filter_units_by_embedding(
         # If encoder fails, fall back to keeping units (do not drop to empty).
         return us, {"method": "embedding", "semantic_type": st, "kept": len(us), "fallback": f"{type(e).__name__}"}
 
+
+def _rank_units_by_anchor_similarity(
+    *,
+    enc: Any,
+    units: List[str],
+    query: str,
+    semantic_type: str,
+    specs: Dict[str, Dict[str, Any]],
+) -> Tuple[List[str], Dict[str, Any]]:
+    """
+    Rank units by similarity to the semantic anchor (description + query).
+    Returns (sorted_units, debug).
+    """
+    st = str(semantic_type or "").strip().lower()
+    us = [str(u or "").strip() for u in (units or []) if str(u or "").strip()]
+    if not us:
+        return [], {"method": "embedding_rank", "semantic_type": st, "reason": "no_units"}
+    spec = specs.get(st) if isinstance(specs, dict) else None
+    desc = str((spec or {}).get("description") or "").strip() if isinstance(spec, dict) else ""
+    if not desc:
+        desc = st or "generic"
+    anchor_text = f"[semantic_type]\n{st}\n\n[description]\n{desc}\n\n[query]\n{str(query or '').strip()}\n"
+    try:
+        import numpy as np  # type: ignore
+
+        a = enc.encode([anchor_text], batch_size=1)[0]
+        m = enc.encode(us, batch_size=min(16, max(1, len(us))))
+        sims = (m @ a).astype(float)
+        order = list(np.argsort(-sims))
+        ranked = [us[i] for i in order]
+        return ranked, {"method": "embedding_rank", "semantic_type": st, "top_sims": [float(sims[i]) for i in order[: min(5, len(order))]]}
+    except Exception as e:
+        return us, {"method": "embedding_rank", "semantic_type": st, "fallback": f"{type(e).__name__}"}
 def _load_block_text_lookup(path: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     p = Path(path)
@@ -737,6 +770,7 @@ def main() -> None:
         # by at least one Evidence Unit and MUST include the citation marker [E#] in that sentence.
         prose_guard = (
             "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
+            "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
             "回答必须严格与证据一致，不要编造。\n"
             "【引用规则】当你使用 Evidence Units 的信息时，请在对应句子末尾添加引用标记，如 [E1]。[E#] 只在使用证据处出现。\n"
             "【强约束】任何具体事实句（含地点/省份/数字/症状清单/机构来源/缩写解释等）必须带至少一个 [E#]；"
@@ -803,7 +837,20 @@ def main() -> None:
                     evidence_sents.extend(unit_lookup.get(bid) or [])
                     if len(evidence_sents) >= max_unit_sents:
                         break
-            evidence_sents = evidence_sents[: max(0, max_unit_sents)]
+            # Rank & trim evidence units by embedding similarity to the semantic anchor + query.
+            evidence_rank_dbg: Dict[str, Any] = {}
+            if unit_lookup and target_semantic_type not in {"unknown", "multi"} and max_unit_sents > 0:
+                ranked, rdbg = _rank_units_by_anchor_similarity(
+                    enc=enc,
+                    units=evidence_sents,
+                    query=user_prompt,
+                    semantic_type=target_semantic_type,
+                    specs=specs if 'specs' in locals() else {},
+                )
+                evidence_rank_dbg = rdbg if isinstance(rdbg, dict) else {}
+                evidence_sents = ranked[: max(0, max_unit_sents)]
+            else:
+                evidence_sents = evidence_sents[: max(0, max_unit_sents)]
             evidence_appendix = ""
             evidence_pairs: List[Tuple[str, str]] = []
             if evidence_sents:
@@ -849,6 +896,7 @@ def main() -> None:
                     "selected_ids": selected_ids,
                     "selected_unit_counts": {bid: int(len(unit_lookup.get(bid) or [])) for bid in selected_ids} if unit_lookup else {},
                     "evidence_units_shown": evidence_sents[: min(3, len(evidence_sents))],
+                    "evidence_unit_rank": evidence_rank_dbg,
                     "answer_postprocess": post_dbg,
                 }
             )

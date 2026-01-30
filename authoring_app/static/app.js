@@ -283,7 +283,7 @@ async function runDebug() {
   const maxSteps = Number(($("debug_max_steps").value || "1").trim());
   const stepNewTokens = Number(($("debug_step_new_tokens").value || "192").trim());
   const maxBlocks = Number(($("debug_max_blocks").value || "4").trim());
-  const maxUnitSents = Number(($("debug_max_unit_sentences").value || "6").trim());
+  const maxUnitSents = Number(($("debug_max_unit_sentences").value || "2").trim());
   const useUnits = ($("debug_use_units").value || "true") === "true";
   const requireUnits = ($("debug_require_units").value || "true") === "true";
   $("out_cli").textContent = "运行中...";
@@ -343,6 +343,14 @@ function wire() {
     $("doc_detail_view").style.display = "none";
   };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
+  // slider reflect
+  const slider = $("debug_max_unit_sentences");
+  const show = $("debug_units_n");
+  if (slider && show) {
+    const sync = () => { show.textContent = String(slider.value || "2"); };
+    slider.addEventListener("input", sync);
+    sync();
+  }
 }
 
 async function init() {
