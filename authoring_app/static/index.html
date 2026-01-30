@@ -3,254 +3,133 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Knowledge Authoring (EvidenceUnit)</title>
+  <title>知识注入KVI（Key Value Injection）</title>
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <div class="container">
-    <div class="panel">
-      <div class="title">
-        <h1>Evidence 列表</h1>
-        <div class="hint" id="count">0 items</div>
+  <div class="app">
+    <div class="header">
+      <h1>知识注入KVI（Key Value Injection）</h1>
+      <div class="sub">
+        KVI 是用于大模型幻觉定点消除和长期记忆外挂的开源框架。<br/>
+        本控制台提供两条人工闭环：① simple 流程（编辑 Evidence.txt → 编译 KVBank → 注入调试）；② Doc 导入（doc_meta → blocks.evidence → 导入到 Evidence.txt）。
       </div>
-
-      <div id="filters">
-        <div class="field">
-          <label>搜索（evidence_id / claim / kb_id / semantic_type）</label>
-          <input id="filter_q" placeholder="关键词..." />
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>Status</label>
-            <select id="filter_status">
-              <option value="">(all)</option>
-              <option value="draft">draft</option>
-              <option value="reviewed">reviewed</option>
-              <option value="approved">approved</option>
-              <option value="rejected">rejected</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>semantic_type</label>
-            <select id="filter_semantic_type">
-              <option value="">(all)</option>
-              <option value="drug">drug</option>
-              <option value="symptom">symptom</option>
-              <option value="location">location</option>
-              <option value="procedure">procedure</option>
-              <option value="laboratory">laboratory</option>
-              <option value="population">population</option>
-              <option value="outcome">outcome</option>
-              <option value="generic">generic</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
-          <label>kb_id（知识库/专题 ID）</label>
-          <input id="filter_kb" placeholder="kb:SFTSV" />
-        </div>
-        <div class="btns">
-          <button id="btn_search">Search</button>
-          <button id="btn_refresh">Refresh</button>
-          <button class="primary" id="btn_new">New Draft</button>
-        </div>
+      <div class="tabs">
+        <button class="tab active" id="tab_simple">Simple：Evidence.txt</button>
+        <button class="tab" id="tab_docs">Doc：doc_meta → blocks</button>
+        <button class="tab" id="tab_debug">调试：Prompt → 输出</button>
       </div>
-
-      <div class="notice">
-        <div><b>Import（从 PDF 原始 blocks 导入草稿）</b></div>
-        <div class="field">
-          <label>kb_id（可选；不填则使用 server 启动参数 --default_kb_id）</label>
-          <input id="import_kb_id" placeholder="SFTSV" />
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>default semantic_type（导入时默认，后续你在编辑器里改）</label>
-            <select id="import_semantic_type">
-              <option value="generic">generic</option>
-              <option value="drug">drug</option>
-              <option value="symptom">symptom</option>
-              <option value="location">location</option>
-              <option value="procedure">procedure</option>
-              <option value="laboratory">laboratory</option>
-              <option value="population">population</option>
-              <option value="outcome">outcome</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>max_blocks（0=全部）</label>
-            <input id="import_max_blocks" placeholder="0" />
-          </div>
-        </div>
-        <div class="field">
-          <label>blocks.jsonl 路径（服务器路径，例如 /home/jb/topics/SFTSV/work/blocks.jsonl）</label>
-          <input id="import_blocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.jsonl" />
-        </div>
-        <div class="btns">
-          <button id="btn_import_blocks">Import blocks.jsonl → draft EvidenceUnits</button>
-        </div>
-        <div class="field">
-          <label>blocks.evidence.jsonl 路径（可选：DS 抽取 evidence blocks，导入为 draft 供审核）</label>
-          <input id="import_evidence_blocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.evidence.jsonl" />
-        </div>
-        <div class="field">
-          <label>docs.meta.jsonl 路径（可选：doc-level 元信息，增强 provenance/refs）</label>
-          <input id="import_docs_meta_path" placeholder="/home/jb/topics/SFTSV/work/docs.meta.jsonl" />
-        </div>
-        <div class="btns">
-          <button id="btn_import_evidence_blocks">Import blocks.evidence.jsonl → draft EvidenceUnits</button>
-        </div>
-        <div class="field">
-          <label>Import result</label>
-          <textarea id="import_result" placeholder="导入结果会显示在这里" style="min-height:90px"></textarea>
-        </div>
-      </div>
-
-      <div class="notice">
-        <div><b>Doc 预览（按 doc meta 聚合查看 DS 抽取结果）</b></div>
-        <div class="field">
-          <label>docs.meta.jsonl（服务器路径）</label>
-          <input id="docmeta_path" placeholder="/home/jb/topics/SFTSV/work/docs.meta.jsonl" />
-        </div>
-        <div class="field">
-          <label>blocks.evidence.jsonl（服务器路径）</label>
-          <input id="evidenceblocks_path" placeholder="/home/jb/topics/SFTSV/work/blocks.evidence.jsonl" />
-        </div>
-        <div class="btns">
-          <button id="btn_load_docs">Load Docs</button>
-        </div>
-        <div class="field">
-          <label>Docs</label>
-          <div class="list" id="doc_list"></div>
-        </div>
-      </div>
-
-      <div class="notice">
-        <div><b>原则（冻结）</b></div>
-        <div>Evidence 是“语义条目”，不是问题答案；不包含 intent/topic 路由信息。</div>
-        <div><b>重要</b>：Rejected evidence will never be injected into answers. This does not mean the evidence is wrong — only that it is not suitable for the current knowledge slot.</div>
-      </div>
-
-      <div class="list" id="list"></div>
     </div>
 
-    <div class="panel">
-      <div class="title">
-        <h1 id="editor_title">Evidence Editor</h1>
-        <div class="hint">MVP · Authoring + Review</div>
-      </div>
-
-      <div class="notice">
-        <div><b>Doc Preview（选中某 doc 后显示其 blocks.evidence 全量文本）</b></div>
-        <div id="doc_preview" class="field">
-          <div class="muted" style="color: var(--muted); font-size: 12px;">未选择 doc</div>
-        </div>
-      </div>
-
-      <div id="err" class="rejection" style="display:none"></div>
-
+    <div class="panel" id="view_simple">
       <div class="row">
         <div class="field">
-          <label>evidence_id（新建留空自动生成）</label>
-          <input id="evidence_id" placeholder="EVIDENCE_..." />
+          <label>Topic（主题库）</label>
+          <select id="topic_select"></select>
+          <div class="note" id="topic_goal"></div>
         </div>
         <div class="field">
-          <label>status</label>
-          <select id="status">
-            <option value="draft">draft</option>
-            <option value="reviewed">reviewed</option>
-            <option value="approved">approved</option>
-            <option value="rejected">rejected</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="field">
-            <label>semantic_type *</label>
-          <select id="semantic_type">
-            <option value="drug">drug</option>
-            <option value="symptom">symptom</option>
-            <option value="location">location</option>
-            <option value="procedure">procedure</option>
-            <option value="laboratory">laboratory</option>
-            <option value="population">population</option>
-            <option value="outcome">outcome</option>
-            <option value="generic">generic</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>polarity</label>
-          <select id="polarity">
-            <option value="neutral">neutral</option>
-            <option value="positive">positive</option>
-            <option value="negative">negative</option>
-          </select>
+          <label>Evidence.txt 路径</label>
+          <input id="evidence_path" class="mono" disabled />
+          <div class="note">每行一条 Evidence sentence（用于 simple 流程检索 + Evidence Units + 注入生成，不走 LIST_ONLY 投影）。</div>
         </div>
       </div>
 
       <div class="field">
-        <label>kb_id *（知识库/专题 ID）</label>
-        <input id="kb_id" placeholder="SFTSV" />
+        <label>Evidence.txt 内容（可编辑）</label>
+        <textarea id="evidence_editor" placeholder="每行一条证据句..."></textarea>
+        <div class="btns">
+          <button class="primary" id="btn_save_evidence">保存到 Evidence.txt</button>
+          <button class="ok" id="btn_compile">编译：生成 KVBank（kvbank_blocks）</button>
+        </div>
       </div>
 
       <div class="field">
-        <label>claim *（原始文本不可隐藏）</label>
-        <textarea id="claim" placeholder="（建议用单条、原子化陈述知识）"></textarea>
+        <label>编译日志 / 状态</label>
+        <div class="pre" id="compile_log">等待操作...</div>
       </div>
+    </div>
 
-      <div class="field">
-        <label>slot_projection（JSON）</label>
-        <textarea id="slot_projection" placeholder='{"slot_name":["value1","value2"]}'></textarea>
-      </div>
-
+    <div class="panel" id="view_docs" style="display:none">
       <div class="row">
         <div class="field">
-          <label>provenance（JSON）</label>
-          <textarea id="provenance"></textarea>
+          <label>Topic（主题库）</label>
+          <select id="topic_select_docs"></select>
+          <div class="note">来源：该 topic 的 work_dir 下 `docs.meta.jsonl` + `blocks.evidence.jsonl`</div>
         </div>
         <div class="field">
-          <label>external_refs（JSON）</label>
-          <textarea id="external_refs"></textarea>
-        </div>
-      </div>
-
-      <div id="rej_block" class="rejection" style="display:none">
-        <div><b>拒绝原因（后端 → 前端结构冻结）</b></div>
-        <div class="row">
-          <div class="field">
-            <label>rejection.code（有限集）</label>
-            <select id="rej_code"></select>
+          <label>操作</label>
+          <div class="btns">
+            <button class="primary" id="btn_load_docs_topic">加载 doc_meta 列表</button>
           </div>
-          <div class="field">
-            <label>confidence</label>
-            <input id="rej_confidence" placeholder="0.93" />
+          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到 Evidence.txt。</div>
+        </div>
+      </div>
+
+      <div id="docs_list_view">
+        <div class="field">
+          <label>doc_meta 列表（PDF 名 + 是否 approved）</label>
+          <div class="list" id="docs_list"></div>
+        </div>
+      </div>
+
+      <div id="doc_detail_view" style="display:none">
+        <div class="btns">
+          <button id="btn_back_to_docs">返回 doc 列表</button>
+          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → Evidence.txt</button>
+        </div>
+        <div class="field">
+          <label>doc 详情（blocks.evidence 按序展示，仅显示 claim）</label>
+          <div class="pre" id="doc_detail">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="view_debug" style="display:none">
+      <div class="row">
+        <div class="field">
+          <label>Topic（主题库）</label>
+          <select id="topic_select_debug"></select>
+          <div class="note">运行 `scripts/run_kvi2_runtime_test.py --pipeline simple`，输出 baseline 与 injected answer。</div>
+        </div>
+        <div class="field">
+          <label>参数</label>
+          <div class="row">
+            <div class="field">
+              <label>top_k</label>
+              <input id="debug_top_k" value="8" />
+            </div>
+            <div class="field">
+              <label>show_baseline</label>
+              <select id="debug_show_baseline">
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+          </div>
+          <div class="btns">
+            <button class="primary" id="btn_run_debug">运行：注入调试</button>
           </div>
         </div>
-        <div class="field">
-          <label>message</label>
-          <input id="rej_message" placeholder="Evidence semantic_type does not match target slot." />
-        </div>
-        <div class="field">
-          <label>details（JSON）</label>
-          <textarea id="rej_details" placeholder='{"expected":"drug","actual":"location"}'></textarea>
-        </div>
-        <div class="notice">
-          <b>What you can do:</b>
-          <div>• Change semantic type</div>
-          <div>• Move to a different schema</div>
-          <div>• Edit the evidence text</div>
-          <div>• Leave it rejected</div>
-        </div>
       </div>
 
-      <div class="btns">
-        <button class="primary" id="btn_save">Save</button>
-        <button class="ok" id="btn_approve">Approve</button>
-        <button class="bad" id="btn_reject">Reject</button>
+      <div class="field">
+        <label>提问 prompt</label>
+        <textarea id="debug_prompt" placeholder="例如：SFTSV的主要临床症状有哪些？"></textarea>
       </div>
 
-      <div class="footer">
-        说明：本 UI 只做“编辑/审核/解释为什么不能注入”，不提供“加规则/自动修补”。
+      <div class="field">
+        <label>Base LLM（无注入）</label>
+        <div class="pre" id="out_base">等待运行...</div>
+      </div>
+      <div class="field">
+        <label>Injected（KVI 注入输出）</label>
+        <div class="pre" id="out_injected">等待运行...</div>
+      </div>
+
+      <div class="field">
+        <label>Debug（steps / evidence units / selected blocks）</label>
+        <div class="pre" id="out_debug">等待运行...</div>
       </div>
     </div>
   </div>

@@ -4,387 +4,212 @@ async function apiGet(path) {
   return await res.json();
 }
 
-async function apiSend(path, method, body) {
+async function apiPost(path, body) {
   const res = await fetch(path, {
-    method,
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : "{}",
+    body: JSON.stringify(body || {}),
   });
   const txt = await res.text();
   let obj = null;
   try { obj = JSON.parse(txt); } catch { obj = { raw: txt }; }
-  if (!res.ok) throw new Error(`${method} ${path} ${res.status}: ${obj?.message || obj?.error || txt}`);
+  if (!res.ok) throw new Error(`${path} ${res.status}: ${obj?.message || obj?.error || txt}`);
   return obj;
 }
 
 function $(id) { return document.getElementById(id); }
 
-function badgeClass(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "approved") return "badge approved";
-  if (s === "rejected") return "badge rejected";
-  if (s === "reviewed") return "badge reviewed";
-  return "badge draft";
+function setTab(active) {
+  const tabs = [
+    { id: "tab_simple", view: "view_simple", key: "simple" },
+    { id: "tab_docs", view: "view_docs", key: "docs" },
+    { id: "tab_debug", view: "view_debug", key: "debug" },
+  ];
+  for (const t of tabs) {
+    $(t.id).classList.toggle("active", t.key === active);
+    $(t.view).style.display = (t.key === active) ? "block" : "none";
+  }
 }
 
-function truncate(s, n) {
-  s = (s || "").trim();
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + "…";
+function pretty(obj) {
+  try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
 }
 
-function safeJsonParse(s) {
-  try { return JSON.parse(s); } catch { return null; }
-}
+let topics = [];
+let selectedTopic = "";
+let selectedDoc = null; // {doc_id, approved, ...}
 
-function prettyJson(obj) {
-  try { return JSON.stringify(obj, null, 2); } catch { return ""; }
-}
-
-let current = null;
-let rejectionCodes = [];
-let paging = { offset: 0, limit: 200, total: 0, lastQs: "" };
-let serverDefaultKbId = "";
-let docBundle = { docsMetaPath: "", blocksPath: "" };
-
-async function refreshList() {
-  const qs = new URLSearchParams();
-  const status = $("filter_status").value;
-  const kb = $("filter_kb").value.trim();
-  const sem = $("filter_semantic_type").value;
-  const q = $("filter_q").value.trim();
-  if (status) qs.set("status", status);
-  if (kb) qs.set("kb_id", kb);
-  if (sem) qs.set("semantic_type", sem);
-  if (q) qs.set("q", q);
-  qs.set("offset", String(paging.offset || 0));
-  qs.set("limit", String(paging.limit || 200));
-  const data = await apiGet(`/api/evidence?${qs.toString()}`);
-  paging.total = data.total || data.count || 0;
-  $("count").textContent = `${data.count} / ${paging.total} items (offset=${data.offset || 0})`;
-  const el = $("list");
-  if ((paging.offset || 0) === 0) el.innerHTML = "";
-  for (const it of data.items || []) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.onclick = () => loadEvidence(it.evidence_id);
-    const top = document.createElement("div");
-    top.className = "top";
-
-    const left = document.createElement("div");
-    left.className = "id";
-    left.textContent = it.evidence_id || "(no id)";
-
-    const badge = document.createElement("div");
-    badge.className = badgeClass(it.status);
-    badge.textContent = (it.status || "draft").toUpperCase();
-
-    top.appendChild(left);
-    top.appendChild(badge);
-
-    const claim = document.createElement("div");
-    claim.className = "claim";
-    claim.textContent = truncate(it.claim || "", 220) || "(empty claim)";
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const kid = it.kb_id || it.effective_kb_id || "";
-    meta.textContent = `semantic_type=${it.semantic_type || ""}  kb_id=${kid}  polarity=${it.polarity || ""}`;
-
-    card.appendChild(top);
-    card.appendChild(claim);
-    card.appendChild(meta);
-
-    if ((it.status || "").toLowerCase() === "rejected" && it.rejection) {
-      const rej = document.createElement("div");
-      rej.className = "rejection";
-      rej.innerHTML = `<div class="code">${it.rejection.code || "REJECTED"}</div><div class="msg">${it.rejection.message || ""}</div>`;
-      card.appendChild(rej);
+async function loadTopics() {
+  const resp = await apiGet("/api/kvi/topics");
+  topics = resp.items || [];
+  const sels = ["topic_select", "topic_select_docs", "topic_select_debug"];
+  for (const sid of sels) {
+    const sel = $(sid);
+    sel.innerHTML = "";
+    for (const t of topics) {
+      const opt = document.createElement("option");
+      opt.value = t.topic;
+      opt.textContent = t.topic;
+      sel.appendChild(opt);
     }
-
-    el.appendChild(card);
   }
+  selectedTopic = (topics[0] && topics[0].topic) ? topics[0].topic : "";
+  $("topic_select").value = selectedTopic;
+  $("topic_select_docs").value = selectedTopic;
+  $("topic_select_debug").value = selectedTopic;
+  await onTopicChange(selectedTopic);
 }
 
-function fillForm(u) {
-  current = u;
-  $("evidence_id").value = u.evidence_id || "";
-  $("status").value = u.status || "draft";
-  $("semantic_type").value = u.semantic_type || "generic";
-  $("kb_id").value = u.kb_id || u.schema_id || serverDefaultKbId || "";
-  $("polarity").value = u.polarity || "neutral";
-  $("claim").value = u.claim || "";
-  $("slot_projection").value = prettyJson(u.slot_projection || {});
-  $("provenance").value = prettyJson(u.provenance || {});
-  $("external_refs").value = prettyJson(u.external_refs || {});
-
-  const rej = u.rejection || null;
-  $("rej_block").style.display = rej ? "block" : "none";
-  $("rej_code").value = rej?.code || (rejectionCodes[0] || "");
-  $("rej_message").value = rej?.message || "";
-  $("rej_details").value = prettyJson(rej?.details || {});
-  $("rej_confidence").value = (rej?.confidence != null ? String(rej.confidence) : "0.9");
+function topicByName(name) {
+  return (topics || []).find(x => x.topic === name) || null;
 }
 
-async function loadEvidence(evidenceId) {
-  const u = await apiGet(`/api/evidence/${encodeURIComponent(evidenceId)}`);
-  fillForm(u);
-  $("editor_title").textContent = `Evidence ${u.evidence_id}`;
+async function onTopicChange(topic) {
+  selectedTopic = topic;
+  const t = topicByName(topic);
+  $("topic_goal").textContent = t && t.goal ? String(t.goal) : "";
+  await loadEvidenceTxt();
 }
 
-function buildPayloadFromForm() {
-  const slotProj = safeJsonParse($("slot_projection").value) || {};
-  const prov = safeJsonParse($("provenance").value) || {};
-  const exr = safeJsonParse($("external_refs").value) || {};
-  return {
-    evidence_id: $("evidence_id").value.trim(),
-    status: $("status").value,
-    semantic_type: $("semantic_type").value,
-    // Backing field is still `schema_id` in JSON for runtime compat, but UI calls it kb_id.
-    schema_id: $("kb_id").value.trim(),
-    kb_id: $("kb_id").value.trim(),
-    polarity: $("polarity").value,
-    claim: $("claim").value,
-    slot_projection: slotProj,
-    provenance: prov,
-    external_refs: exr,
-    rejection: current?.rejection || null,
-  };
+async function loadEvidenceTxt() {
+  if (!selectedTopic) return;
+  const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_txt`);
+  $("evidence_path").value = resp.path || "";
+  $("evidence_editor").value = resp.content || "";
 }
 
-async function createNew() {
-  const u = {
-    evidence_id: "",
-    status: "draft",
-    semantic_type: "generic",
-    schema_id: serverDefaultKbId || "",
-    kb_id: serverDefaultKbId || "",
-    polarity: "neutral",
-    claim: "",
-    slot_projection: {},
-    provenance: { source_type: "guideline", organization: null, document_title: "", publication_year: null, page_range: null },
-    external_refs: { document_id: null, pmid: null, orcid: null, title: null, abstract: null, authors: [], published_at: null },
-    rejection: null,
-  };
-  fillForm(u);
-  $("editor_title").textContent = "New Evidence (draft)";
+async function saveEvidenceTxt() {
+  const content = $("evidence_editor").value || "";
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_txt`, { content });
+  $("compile_log").textContent = `已保存：${resp.path}\n`;
 }
 
-async function saveDraft() {
-  const payload = buildPayloadFromForm();
-  // Required fields (product-facing):
-  // - claim: required
-  // - semantic_type: required (fixed set)
-  // - kb_id: required (auto-filled from server default when available)
-  if (!String(payload.claim || "").trim()) throw new Error("claim * is required.");
-  if (!String(payload.semantic_type || "").trim()) throw new Error("semantic_type * is required.");
-  if (!String(payload.schema_id || "").trim() && serverDefaultKbId) payload.schema_id = serverDefaultKbId;
-  if (!String(payload.schema_id || "").trim()) {
-    throw new Error("kb_id * is required (or start server with --default_kb_id).");
-  }
-  if (!payload.evidence_id) {
-    // create
-    const saved = await apiSend("/api/evidence", "POST", payload);
-    fillForm(saved);
-  } else {
-    const saved = await apiSend(`/api/evidence/${encodeURIComponent(payload.evidence_id)}`, "PUT", payload);
-    fillForm(saved);
-  }
-  await refreshList();
+async function compileSimple() {
+  $("compile_log").textContent = "编译中...（该过程会跑 tokenizer 分块、pattern 侧车、KVBank 构建，可能需要数分钟）\n";
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {});
+  $("compile_log").textContent = pretty(resp);
 }
 
-async function approve() {
-  const id = $("evidence_id").value.trim();
-  if (!id) throw new Error("Save before approve (needs evidence_id).");
-  const saved = await apiSend(`/api/evidence/${encodeURIComponent(id)}/approve`, "POST", {});
-  fillForm(saved);
-  await refreshList();
-}
-
-async function reject() {
-  const id = $("evidence_id").value.trim();
-  if (!id) throw new Error("Save before reject (needs evidence_id).");
-  const details = safeJsonParse($("rej_details").value) || {};
-  const conf = Number($("rej_confidence").value || "0.9");
-  const payload = {
-    rejection: {
-      code: $("rej_code").value,
-      message: $("rej_message").value.trim(),
-      details,
-      confidence: Number.isFinite(conf) ? conf : 0.9,
-    },
-  };
-  const saved = await apiSend(`/api/evidence/${encodeURIComponent(id)}/reject`, "POST", payload);
-  fillForm(saved);
-  await refreshList();
-}
-
-async function init() {
-  // Load server defaults (kb_id etc.)
-  try {
-    const cfg = await apiGet("/api/config");
-    if (cfg && cfg.default_kb_id) {
-      serverDefaultKbId = cfg.default_kb_id;
-      $("import_kb_id").value = cfg.default_kb_id;
-      $("kb_id").value = cfg.default_kb_id;
-    }
-  } catch {}
-
-  const codes = await apiGet("/api/rejection_codes");
-  rejectionCodes = codes.codes || [];
-  const sel = $("rej_code");
-  sel.innerHTML = "";
-  for (const c of rejectionCodes) {
-    const opt = document.createElement("option");
-    opt.value = c;
-    opt.textContent = c;
-    sel.appendChild(opt);
-  }
-
-  $("btn_import_blocks").onclick = () => importBlocksJsonl().catch(showErr);
-  $("btn_import_evidence_blocks").onclick = () => importEvidenceBlocksJsonl().catch(showErr);
-  $("btn_load_docs").onclick = () => loadDocs().catch(showErr);
-
-  $("btn_search").onclick = () => {
-    paging.offset = 0;
-    refreshList().catch(showErr);
-  };
-  $("btn_refresh").onclick = () => refreshList().catch(showErr);
-  $("btn_new").onclick = () => createNew().catch(showErr);
-  $("btn_save").onclick = () => saveDraft().catch(showErr);
-  $("btn_approve").onclick = () => approve().catch(showErr);
-  $("btn_reject").onclick = () => reject().catch(showErr);
-  $("filters").oninput = debounce(() => { paging.offset = 0; refreshList().catch(showErr); }, 300);
-
-  await refreshList();
-  await createNew();
-}
-
-async function loadDocs() {
-  const docsMeta = $("docmeta_path").value.trim();
-  const blocks = $("evidenceblocks_path").value.trim();
-  if (!docsMeta || !blocks) throw new Error("Doc preview requires docs.meta.jsonl and blocks.evidence.jsonl paths.");
-  docBundle.docsMetaPath = docsMeta;
-  docBundle.blocksPath = blocks;
-  const resp = await apiSend("/api/doc_bundle/list", "POST", { docs_meta_jsonl: docsMeta, blocks_evidence_jsonl: blocks });
-  const el = $("doc_list");
+async function loadDocsList() {
+  const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/docs`);
+  const el = $("docs_list");
   el.innerHTML = "";
+  selectedDoc = null;
+  $("btn_import_doc_blocks").disabled = true;
+  $("docs_list_view").style.display = "block";
+  $("doc_detail_view").style.display = "none";
   for (const d of resp.items || []) {
     const card = document.createElement("div");
     card.className = "card";
-    card.onclick = () => loadDocDetail(d.doc_id).catch(showErr);
     const top = document.createElement("div");
     top.className = "top";
     const left = document.createElement("div");
-    left.className = "id";
-    left.textContent = d.doc_id;
-    const badge = document.createElement("div");
-    badge.className = "badge";
-    badge.textContent = `${d.evidence_count || 0} blocks`;
+    left.className = "mono";
+    left.textContent = d.pdf_name || d.doc_id;
+    const badge = document.createElement("span");
+    badge.className = "badge " + (d.approved ? "ok" : "warn");
+    badge.textContent = d.approved ? "approved" : "not approved";
     top.appendChild(left);
     top.appendChild(badge);
-    const claim = document.createElement("div");
-    claim.className = "claim";
-    claim.textContent = truncate(d.title || d.doc_id || "", 220);
     const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = `year=${d.publication_year || ""} doi=${d.doi || ""}`;
+    meta.className = "note";
+    meta.textContent = `doc_id=${d.doc_id}  year=${d.publication_year || ""}  doi=${d.doi || ""}`;
+    const btns = document.createElement("div");
+    btns.className = "btns";
+    const toggle = document.createElement("button");
+    toggle.className = d.approved ? "bad" : "ok";
+    toggle.textContent = d.approved ? "取消 approved" : "标记 approved";
+    toggle.onclick = async (ev) => {
+      ev.stopPropagation();
+      await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(d.doc_id)}/set_approved`, { approved: !d.approved });
+      await loadDocsList();
+    };
+    btns.appendChild(toggle);
+    const open = document.createElement("button");
+    open.className = "primary";
+    open.textContent = "打开";
+    open.onclick = async (ev) => {
+      ev.stopPropagation();
+      selectedDoc = d;
+      $("docs_list_view").style.display = "none";
+      $("doc_detail_view").style.display = "block";
+      await loadDocBlocks(d.doc_id);
+    };
+    btns.appendChild(open);
     card.appendChild(top);
-    card.appendChild(claim);
     card.appendChild(meta);
+    card.appendChild(btns);
     el.appendChild(card);
   }
 }
 
-async function loadDocDetail(docId) {
-  if (!docBundle.blocksPath) throw new Error("Load Docs first.");
-  const resp = await apiSend("/api/doc_bundle/doc", "POST", {
-    docs_meta_jsonl: docBundle.docsMetaPath || null,
-    blocks_evidence_jsonl: docBundle.blocksPath,
-    doc_id: docId,
-  });
-  const host = $("doc_preview");
-  host.innerHTML = "";
-  const h = document.createElement("div");
-  h.style.marginBottom = "8px";
-  const title = (resp.doc_meta && resp.doc_meta.meta && resp.doc_meta.meta.title) ? resp.doc_meta.meta.title : docId;
-  h.innerHTML = `<div><b>${title}</b></div><div style="color: var(--muted); font-size: 12px;">doc_id=${docId}</div>`;
-  host.appendChild(h);
-  const blocks = resp.blocks || [];
-  for (const b of blocks) {
-    const card = document.createElement("div");
-    card.className = "card";
-    const top = document.createElement("div");
-    top.className = "top";
-    const left = document.createElement("div");
-    left.className = "id";
-    left.textContent = b.block_type || "paragraph_summary";
-    const badge = document.createElement("div");
-    badge.className = "badge";
-    badge.textContent = b.block_id || "";
-    top.appendChild(left);
-    top.appendChild(badge);
-    const text = document.createElement("div");
-    text.className = "claim";
-    text.textContent = (b.text || "").trim();
-    card.appendChild(top);
-    card.appendChild(text);
-    host.appendChild(card);
+async function loadDocBlocks(docId) {
+  const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/blocks`);
+  const lines = [];
+  lines.push(`doc_id=${docId}`);
+  lines.push(`blocks=${resp.count}`);
+  lines.push("");
+  let idx = 0;
+  for (const b of resp.items || []) {
+    idx += 1;
+    lines.push(`[${String(idx).padStart(3,"0")}] (${b.block_type}) ${b.claim}`);
   }
+  $("doc_detail").textContent = lines.join("\n");
+  $("btn_import_doc_blocks").disabled = !(selectedDoc && selectedDoc.approved);
 }
 
-async function importBlocksJsonl() {
-  const kbId = $("import_kb_id").value.trim();
-  const sem = $("import_semantic_type").value;
-  const pth = $("import_blocks_path").value.trim();
-  const maxBlocks = Number(($("import_max_blocks").value || "0").trim());
-  if (!pth) throw new Error("Import requires blocks.jsonl path.");
-  $("import_result").value = "Importing blocks.jsonl ...";
-  const out = await apiSend("/api/import/blocks", "POST", {
-    blocks_jsonl: pth,
-    kb_id: kbId || null,
-    default_semantic_type: sem,
-    max_blocks: Number.isFinite(maxBlocks) ? maxBlocks : 0,
-    evidence_type: "pdf_block",
+async function importDocBlocks() {
+  if (!selectedDoc) throw new Error("请先选择一个 doc。");
+  if (!selectedDoc.approved) throw new Error("doc 未 approved，无法导入。");
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/import_to_evidence`, {});
+  $("doc_detail").textContent = $("doc_detail").textContent + "\n\n---\n已导入到 Evidence.txt：appended=" + resp.appended;
+  await loadEvidenceTxt();
+}
+
+async function runDebug() {
+  const prompt = ($("debug_prompt").value || "").trim();
+  if (!prompt) throw new Error("请先输入 prompt。");
+  const topK = Number(($("debug_top_k").value || "8").trim());
+  const showBaseline = ($("debug_show_baseline").value || "true") === "true";
+  $("out_base").textContent = "运行中...";
+  $("out_injected").textContent = "运行中...";
+  $("out_debug").textContent = "运行中...";
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/run_simple`, {
+    prompt,
+    top_k: Number.isFinite(topK) ? topK : 8,
+    show_baseline: showBaseline,
   });
-  $("import_result").value = prettyJson(out);
-  paging.offset = 0;
-  await refreshList();
+  const r = resp.result || {};
+  $("out_base").textContent = r.base_answer || "(baseline disabled or empty)";
+  $("out_injected").textContent = r.injected_answer || "";
+  $("out_debug").textContent = pretty({ steps: r.steps, semantic_type_router: r.semantic_type_router });
 }
 
-async function importEvidenceBlocksJsonl() {
-  const kbId = $("import_kb_id").value.trim();
-  const sem = $("import_semantic_type").value;
-  const pth = $("import_evidence_blocks_path").value.trim();
-  const metaPath = $("import_docs_meta_path").value.trim();
-  if (!pth) throw new Error("Import requires blocks.evidence.jsonl path.");
-  $("import_result").value = "Importing blocks.evidence.jsonl ...";
-  const out = await apiSend("/api/import/blocks.evidence", "POST", {
-    blocks_evidence_jsonl: pth,
-    docs_meta_jsonl: metaPath || null,
-    kb_id: kbId || null,
-    default_semantic_type: sem,
-    evidence_type: "extractive_suggestion",
-  });
-  $("import_result").value = prettyJson(out);
-  paging.offset = 0;
-  await refreshList();
-}
+function wire() {
+  $("tab_simple").onclick = () => setTab("simple");
+  $("tab_docs").onclick = () => setTab("docs");
+  $("tab_debug").onclick = () => setTab("debug");
 
-function showErr(e) {
-  const msg = (e && e.message) ? e.message : String(e);
-  $("err").textContent = msg;
-  $("err").style.display = "block";
-  setTimeout(() => { $("err").style.display = "none"; }, 6000);
-}
+  $("topic_select").onchange = async (e) => { await onTopicChange(e.target.value); };
+  $("topic_select_docs").onchange = async (e) => { selectedTopic = e.target.value; await loadDocsList(); };
+  $("topic_select_debug").onchange = async (e) => { selectedTopic = e.target.value; };
 
-function debounce(fn, ms) {
-  let t = null;
-  return () => {
-    if (t) clearTimeout(t);
-    t = setTimeout(fn, ms);
+  $("btn_save_evidence").onclick = () => saveEvidenceTxt().catch(err => { $("compile_log").textContent = String(err.message || err); });
+  $("btn_compile").onclick = () => compileSimple().catch(err => { $("compile_log").textContent = String(err.message || err); });
+  $("btn_load_docs_topic").onclick = () => loadDocsList().catch(err => { $("doc_detail").textContent = String(err.message || err); });
+  $("btn_import_doc_blocks").onclick = () => importDocBlocks().catch(err => { $("doc_detail").textContent = String(err.message || err); });
+  $("btn_back_to_docs").onclick = () => {
+    selectedDoc = null;
+    $("docs_list_view").style.display = "block";
+    $("doc_detail_view").style.display = "none";
   };
+  $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
 }
 
-window.addEventListener("DOMContentLoaded", () => init().catch(showErr));
+async function init() {
+  wire();
+  await loadTopics();
+}
+
+window.addEventListener("DOMContentLoaded", () => init().catch(err => console.error(err)));
 

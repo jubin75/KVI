@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +34,8 @@ except ModuleNotFoundError:
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # external_kv_injection/
+TOPICS_DIR = PROJECT_ROOT / "config" / "topics"
 
 _INDEX_FALLBACK_HTML = f"""<!doctype html>
 <html lang="en">
@@ -90,6 +94,89 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
             if isinstance(obj, dict):
                 out.append(obj)
     return out
+
+
+def _safe_parse_last_json_obj(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract the last JSON object from a mixed stdout (common for CLIs).
+    """
+    import re
+
+    s = str(text or "").strip()
+    if not s:
+        return None
+    # Try to locate a JSON object at the end.
+    m = re.search(r"\{[\s\S]*\}\s*$", s)
+    if m:
+        obj = _safe_json_loads(m.group(0))
+        return obj if isinstance(obj, dict) else None
+    # Fallback: first JSON object
+    m2 = re.search(r"\{[\s\S]*\}", s)
+    if not m2:
+        return None
+    obj2 = _safe_json_loads(m2.group(0))
+    return obj2 if isinstance(obj2, dict) else None
+
+
+def _topic_dir(topic: str) -> Path:
+    t = str(topic or "").strip()
+    if not t:
+        raise ValueError("topic is required")
+    p = (TOPICS_DIR / t).resolve()
+    if not str(p).startswith(str(TOPICS_DIR.resolve())):
+        raise ValueError("invalid topic")
+    if not p.exists() or not p.is_dir():
+        raise FileNotFoundError(f"topic dir not found: {p}")
+    return p
+
+
+def _load_topic_config(topic: str) -> Dict[str, Any]:
+    td = _topic_dir(topic)
+    cfg_path = td / "config.json"
+    if not cfg_path.exists():
+        return {}
+    try:
+        obj = json.loads(cfg_path.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _topic_build_cfg(topic: str) -> Dict[str, Any]:
+    cfg = _load_topic_config(topic)
+    build = cfg.get("build") if isinstance(cfg.get("build"), dict) else {}
+    return build if isinstance(build, dict) else {}
+
+
+def _topic_evidence_txt_path(topic: str) -> Path:
+    return _topic_dir(topic) / "evidence.txt"
+
+
+def _read_text_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+
+
+def _write_text_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(content or ""), encoding="utf-8")
+
+
+def _load_doc_approvals(work_dir: Path) -> Dict[str, bool]:
+    p = work_dir / "docs.approvals.json"
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(obj, dict):
+            return {str(k): bool(v) for k, v in obj.items()}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_doc_approvals(work_dir: Path, approvals: Dict[str, bool]) -> None:
+    p = work_dir / "docs.approvals.json"
+    p.write_text(json.dumps(approvals, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class JsonlEvidenceStore:
@@ -341,8 +428,88 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "db_path": str(getattr(self.store, "path", "")),
                     "default_kb_id": str(getattr(self, "default_kb_id", "") or ""),
+                    "project_root": str(PROJECT_ROOT),
                 },
             )
+            return
+
+        # -----------------------------
+        # KVI Simple UI APIs (new)
+        # -----------------------------
+        if path == "/api/kvi/topics":
+            items: List[Dict[str, Any]] = []
+            if TOPICS_DIR.exists():
+                for d in sorted([x for x in TOPICS_DIR.iterdir() if x.is_dir()]):
+                    topic = d.name
+                    cfg = _load_topic_config(topic)
+                    build = cfg.get("build") if isinstance(cfg.get("build"), dict) else {}
+                    items.append(
+                        {
+                            "topic": topic,
+                            "goal": cfg.get("goal"),
+                            "evidence_txt": str(d / "evidence.txt"),
+                            "config_json": str(d / "config.json"),
+                            "base_llm": (build.get("base_llm") if isinstance(build, dict) else None),
+                            "domain_encoder_model": (build.get("retrieval_encoder_model") if isinstance(build, dict) else None),
+                            "work_dir": (build.get("work_dir") if isinstance(build, dict) else None),
+                        }
+                    )
+            _json_response(self, HTTPStatus.OK, {"items": items, "count": len(items)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_txt"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_txt")].strip("/"))
+            pth = _topic_evidence_txt_path(topic)
+            txt = _read_text_file(pth)
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {"topic": topic, "path": str(pth), "content": txt, "lines": int(len([ln for ln in txt.splitlines() if ln.strip()]))},
+            )
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/docs"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/docs")].strip("/"))
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            docs_meta = work_dir / "docs.meta.jsonl"
+            if not docs_meta.exists():
+                _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found", "message": f"docs.meta.jsonl not found: {docs_meta}"})
+                return
+            approvals = _load_doc_approvals(work_dir)
+            docs = _read_jsonl(docs_meta)
+            items: List[Dict[str, Any]] = []
+            for d in docs:
+                did = str(d.get("doc_id") or "").strip()
+                meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
+                title = (meta.get("title") if isinstance(meta, dict) else None) or did
+                items.append(
+                    {
+                        "doc_id": did,
+                        "pdf_name": str(d.get("source_uri") or "").split("/")[-1],
+                        "source_uri": d.get("source_uri"),
+                        "title": title,
+                        "doi": meta.get("doi") if isinstance(meta, dict) else None,
+                        "publication_year": meta.get("publication_year") if isinstance(meta, dict) else None,
+                        "approved": bool(approvals.get(did, False)),
+                    }
+                )
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "docs_meta_jsonl": str(docs_meta)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/blocks"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/blocks")])
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            blocks_path = work_dir / "blocks.evidence.jsonl"
+            if not blocks_path.exists():
+                _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found", "message": f"blocks.evidence.jsonl not found: {blocks_path}"})
+                return
+            blocks = [b for b in _read_jsonl(blocks_path) if str(b.get("doc_id") or "").strip() == str(doc_id)]
+            items = [{"block_id": b.get("block_id"), "block_type": b.get("block_type") or "paragraph_summary", "claim": (b.get("text") or "")} for b in blocks]
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "doc_id": doc_id, "items": items, "count": len(items), "blocks_jsonl": str(blocks_path)})
             return
 
         if path == "/api/rejection_codes":
@@ -435,6 +602,275 @@ class AuthoringHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path or "/"
+
+        # -----------------------------
+        # KVI Simple UI APIs (new)
+        # -----------------------------
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_txt"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_txt")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            content = str(obj.get("content") or "")
+            pth = _topic_evidence_txt_path(topic)
+            _write_text_file(pth, content)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "path": str(pth)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/compile_simple"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/compile_simple")].strip("/"))
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+
+            topic_dir = _topic_dir(topic)
+            evidence_txt = topic_dir / "evidence.txt"
+            if not evidence_txt.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"evidence.txt not found: {evidence_txt}"})
+                return
+
+            # Optional overrides
+            obj, _ = _read_body_json(self)
+            obj = obj if isinstance(obj, dict) else {}
+            device = str(obj.get("device") or "").strip()
+            dtype = str(obj.get("dtype") or "").strip()
+
+            blocks_jsonl = topic_dir / "blocks.jsonl"
+            blocks_enriched = topic_dir / "blocks.enriched.jsonl"
+            kv_dir = topic_dir / "kvbank_blocks"
+
+            cmds: List[List[str]] = []
+            cmds.append(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "build_blocks_from_raw_text.py"),
+                    "--raw_text",
+                    str(evidence_txt),
+                    "--out",
+                    str(blocks_jsonl),
+                    "--tokenizer",
+                    base_llm,
+                    "--chunk_tokens",
+                    "4096",
+                    "--chunk_overlap",
+                    "256",
+                    "--block_tokens",
+                    "256",
+                    "--keep_last_incomplete_block",
+                ]
+            )
+            cmds.append(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "build_pattern_index_from_blocks_v2.py"),
+                    "--blocks_jsonl_in",
+                    str(blocks_jsonl),
+                    "--blocks_jsonl_out",
+                    str(blocks_enriched),
+                    "--pattern_out_dir",
+                    str(topic_dir),
+                ]
+            )
+            cmds.append(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "pattern_contract_autogen.py"),
+                    "--blocks_jsonl_in",
+                    str(blocks_enriched),
+                    "--out",
+                    str(topic_dir / "pattern_contract.json"),
+                    "--topic",
+                    str(topic),
+                    "--min_abbr_count",
+                    "1",
+                    "--min_slot_count",
+                    "1",
+                    "--max_abbr",
+                    "50",
+                    "--max_slots",
+                    "50",
+                ]
+            )
+            cmd_kv = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "build_kvbank_from_blocks_jsonl.py"),
+                "--blocks_jsonl",
+                str(blocks_enriched),
+                "--out_dir",
+                str(kv_dir),
+                "--base_llm",
+                base_llm,
+                "--domain_encoder_model",
+                encoder,
+                "--layers",
+                "0,1,2,3",
+                "--block_tokens",
+                "256",
+                "--shard_size",
+                "1024",
+            ]
+            if device:
+                cmd_kv.extend(["--device", device])
+            if dtype:
+                cmd_kv.extend(["--dtype", dtype])
+            cmds.append(cmd_kv)
+
+            logs: List[Dict[str, Any]] = []
+            for c in cmds:
+                r = subprocess.run(c, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+                logs.append(
+                    {
+                        "cmd": " ".join(c),
+                        "returncode": int(r.returncode),
+                        "stdout": (r.stdout or "")[-8000:],
+                        "stderr": (r.stderr or "")[-8000:],
+                    }
+                )
+                if r.returncode != 0:
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(c), "logs": logs})
+                    return
+
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "topic_dir": str(topic_dir),
+                    "evidence_txt": str(evidence_txt),
+                    "blocks_jsonl": str(blocks_jsonl),
+                    "blocks_enriched_jsonl": str(blocks_enriched),
+                    "kv_dir": str(kv_dir),
+                    "logs": logs,
+                },
+            )
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/run_simple"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/run_simple")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+            topic_dir = _topic_dir(topic)
+            kv_dir = topic_dir / "kvbank_blocks"
+            blocks_enriched = topic_dir / "blocks.enriched.jsonl"
+            if not kv_dir.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_blocks not found: {kv_dir}. Click 编译 first."})
+                return
+            if not blocks_enriched.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"blocks.enriched.jsonl not found: {blocks_enriched}. Click 编译 first."})
+                return
+
+            top_k = int(obj.get("top_k") or 8)
+            show_baseline = bool(obj.get("show_baseline", True))
+
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
+                "--pipeline",
+                "simple",
+                "--model",
+                base_llm,
+                "--prompt",
+                prompt,
+                "--kv_dir",
+                str(kv_dir),
+                "--blocks_jsonl",
+                str(blocks_enriched),
+                "--pattern_index_dir",
+                str(topic_dir),
+                "--sidecar_dir",
+                str(topic_dir),
+                "--domain_encoder_model",
+                encoder,
+                "--use_chat_template",
+                "--top_k",
+                str(top_k),
+                "--simple_use_evidence_units",
+                "--simple_require_units",
+                "--simple_max_steps",
+                "1",
+                "--simple_max_blocks_per_step",
+                "4",
+                "--simple_max_unit_sentences",
+                "6",
+            ]
+            if show_baseline:
+                cmd.append("--show_baseline")
+            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "result": out, "stderr_tail": (r.stderr or "")[-2000:]})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/set_approved"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/set_approved")])
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            approved = bool(obj.get("approved", False))
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            approvals = _load_doc_approvals(work_dir)
+            approvals[str(doc_id)] = bool(approved)
+            _save_doc_approvals(work_dir, approvals)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "doc_id": doc_id, "approved": approved})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/import_to_evidence"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/import_to_evidence")])
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            blocks_path = work_dir / "blocks.evidence.jsonl"
+            if not blocks_path.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"blocks.evidence.jsonl not found: {blocks_path}"})
+                return
+            approvals = _load_doc_approvals(work_dir)
+            if not bool(approvals.get(str(doc_id), False)):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "doc is not approved; approve it first"})
+                return
+            blocks = [b for b in _read_jsonl(blocks_path) if str(b.get("doc_id") or "").strip() == str(doc_id)]
+            lines: List[str] = []
+            for b in blocks:
+                t = str(b.get("text") or "").strip()
+                if t:
+                    lines.append(t)
+            ev_path = _topic_evidence_txt_path(topic)
+            existing = [ln.strip() for ln in _read_text_file(ev_path).splitlines() if ln.strip()]
+            seen = set(existing)
+            appended = 0
+            out_lines = list(existing)
+            for ln in lines:
+                if ln in seen:
+                    continue
+                seen.add(ln)
+                out_lines.append(ln)
+                appended += 1
+            _write_text_file(ev_path, "\n".join(out_lines) + ("\n" if out_lines else ""))
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "doc_id": doc_id, "evidence_txt": str(ev_path), "appended": appended})
+            return
 
         if path == "/api/doc_bundle/list":
             obj, err = _read_body_json(self)
@@ -724,7 +1160,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Authoring MVP UI server (no dependencies).")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--db", required=True, help="Path to authoring evidence_units.jsonl")
+    ap.add_argument(
+        "--db",
+        default=str((PROJECT_ROOT / "authoring_app" / "authoring_db.jsonl").resolve()),
+        help="Path to authoring evidence_units.jsonl (optional; kept for back-compat).",
+    )
     ap.add_argument("--default_kb_id", default="", help="Default kb_id used for imports/new drafts (optional).")
     ap.add_argument(
         "--default_schema_id",
