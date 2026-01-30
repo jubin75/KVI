@@ -1,2 +1,5 @@
 jubin
 jubin.pub
+
+# Topic runtime artifacts (if present under repo topics)
+config/topics/**/evidence_sets/
