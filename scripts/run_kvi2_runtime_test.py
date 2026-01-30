@@ -67,7 +67,10 @@ def _extract_sentence_units_only(
 ) -> List[str]:
     """
     Evidence Unit Pipeline (sentence-level only; no list-item fallback).
-    Keep only injectable sentence_enumerative units.
+    In simple pipeline, keep:
+    - sentence_enumerative units (injectable)
+    - OR "sentence fragments" that look like self-contained factual sentences (soft evidence units),
+      so mechanism/pathogenesis claims can still be grounded.
     """
     bid = str(block_id or "").strip()
     t = str(text or "")
@@ -88,14 +91,29 @@ def _extract_sentence_units_only(
     for u in units or []:
         if not isinstance(u, dict):
             continue
-        if str(u.get("unit_type") or "") != "sentence_enumerative":
-            continue
         inj = u.get("injectability") if isinstance(u.get("injectability"), dict) else {}
-        if not bool(inj.get("allowed")):
-            continue
         s = str(u.get("text") or "").strip()
-        if s:
+        if not s:
+            continue
+        ut = str(u.get("unit_type") or "").strip()
+        # Primary: enumerative facts (best quality)
+        if ut == "sentence_enumerative" and bool(inj.get("allowed")):
             out.append(s)
+            continue
+        # Secondary: allow well-formed factual sentence fragments (mechanism/pathogenesis, definitions, etc.)
+        # Skip if explicitly blocked by section type / metadata.
+        br = inj.get("blocking_reasons") if isinstance(inj.get("blocking_reasons"), list) else []
+        br = [str(x) for x in br if str(x)]
+        if any(b.startswith("section_excluded:") for b in br):
+            continue
+        if any(b in {"procedural_or_metadata"} for b in br):
+            continue
+        # Heuristic: keep only sentence-like strings (end punctuation) and medium length.
+        if len(s) < 12 or len(s) > 360:
+            continue
+        if not re.search(r"[\.\!\?\。\！\？]\s*$", s):
+            continue
+        out.append(s)
     # dedupe keep order
     seen: set[str] = set()
     dedup: List[str] = []
@@ -212,6 +230,16 @@ def _infer_target_semantic_type_for_query(
         "drug": bool(drug),
         "location": bool(location),
     }
+    # Mechanism/pathogenesis is common for scientific topics; treat it as its own intent.
+    mechanism = bool(
+        ("机制" in q)
+        or ("作用机制" in q)
+        or ("发病机制" in q)
+        or ("致病机制" in q)
+        or ("pathogenesis" in ql)
+        or ("mechanism" in ql)
+    )
+    intents["mechanism"] = bool(mechanism)
     active = [k for k, v in intents.items() if v]
     if len(active) != 1:
         # Multi-intent is common in Chinese: "哪些地区？主要症状有哪些？"
@@ -249,6 +277,14 @@ def _infer_target_semantic_type_for_query(
             return "drug", dbg
         dbg.update({"method": "heuristic", "semantic_type": "drug", "rationale": ["cue:drug"]})
         return "drug", dbg
+    if mechanism:
+        if dbg.get("method") == "contracts+scoring":
+            dbg["method"] = "contracts+scoring+heuristic"
+            dbg["semantic_type"] = "mechanism"
+            dbg["rationale"] = list(dbg.get("rationale") or []) + ["cue:mechanism"]
+            return "mechanism", dbg
+        dbg.update({"method": "heuristic", "semantic_type": "mechanism", "rationale": ["cue:mechanism"]})
+        return "mechanism", dbg
     if dbg.get("method") == "contracts+scoring":
         dbg["method"] = "contracts+scoring+heuristic"
         dbg["semantic_type"] = "location"
@@ -561,7 +597,9 @@ def main() -> None:
                     text=str(txt or ""),
                     metadata=meta,
                 )
-                # Scheme #1: semantic_type-aware relevance filter (deletion-only; fail-closed to empty if unknown)
+                # Scheme #1: semantic_type-aware relevance filter (deletion-only).
+                # IMPORTANT: in simple pipeline, do NOT fail-closed to empty when unknown.
+                # Unknown intent is common (e.g., "作用机制/发病机制") and we still want evidence grounding.
                 if target_semantic_type == "multi":
                     sts = router_dbg.get("semantic_types") if isinstance(router_dbg, dict) else None
                     sts = list(sts) if isinstance(sts, list) else []
@@ -573,7 +611,8 @@ def main() -> None:
                         if _unit_relevant_to_semantic_type(unit_text=u, semantic_type=target_semantic_type, query=user_prompt)
                     ]
                 else:
-                    units = []
+                    # Keep units as-is (no semantic filter).
+                    units = list(units or [])
                 unit_lookup[str(bid)] = units
 
         # We want a prose answer (no bullets) in this debug mode.

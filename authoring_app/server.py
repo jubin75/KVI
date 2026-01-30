@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -150,6 +152,186 @@ def _topic_build_cfg(topic: str) -> Dict[str, Any]:
 
 def _topic_evidence_txt_path(topic: str) -> Path:
     return _topic_dir(topic) / "evidence.txt"
+
+
+def _topic_evidence_sets_dir(topic: str) -> Path:
+    return _topic_dir(topic) / "evidence_sets"
+
+
+def _evidence_manifest_path(topic: str) -> Path:
+    return _topic_evidence_sets_dir(topic) / "manifest.json"
+
+
+def _safe_now_iso() -> str:
+    # local time is fine for UI traces; keep ISO-like formatting
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+
+
+def _stable_sentence_id(*, topic: str, claim: str, source_id: str) -> str:
+    h = hashlib.sha1()
+    h.update(str(topic or "").encode("utf-8", errors="ignore"))
+    h.update(b"\n")
+    h.update(str(source_id or "").encode("utf-8", errors="ignore"))
+    h.update(b"\n")
+    h.update(str(claim or "").strip().encode("utf-8", errors="ignore"))
+    return h.hexdigest()[:16]
+
+
+def _load_manifest(topic: str) -> Dict[str, Any]:
+    p = _evidence_manifest_path(topic)
+    if not p.exists():
+        return {"version": 1, "sets": {}}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(obj, dict):
+            obj.setdefault("version", 1)
+            obj.setdefault("sets", {})
+            if not isinstance(obj.get("sets"), dict):
+                obj["sets"] = {}
+            return obj
+    except Exception:
+        pass
+    return {"version": 1, "sets": {}}
+
+
+def _save_manifest(topic: str, manifest: Dict[str, Any]) -> None:
+    d = _topic_evidence_sets_dir(topic)
+    d.mkdir(parents=True, exist_ok=True)
+    p = _evidence_manifest_path(topic)
+    p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _ensure_migrated_txt_to_sets(topic: str) -> None:
+    """
+    One-time migration: if evidence_sets is empty but evidence.txt exists,
+    create evidence_000_legacy.jsonl with doi=null.
+    """
+    d = _topic_evidence_sets_dir(topic)
+    d.mkdir(parents=True, exist_ok=True)
+    has_any = any(x.is_file() and x.suffix == ".jsonl" for x in d.iterdir())
+    if has_any:
+        return
+    txt_path = _topic_evidence_txt_path(topic)
+    if not txt_path.exists():
+        return
+    lines = [ln.strip() for ln in _read_text_file(txt_path).splitlines() if ln.strip()]
+    if not lines:
+        return
+    out_path = d / "evidence_000_legacy.jsonl"
+    now = _safe_now_iso()
+    recs: List[Dict[str, Any]] = []
+    for ln in lines:
+        recs.append(
+            {
+                "id": _stable_sentence_id(topic=topic, claim=ln, source_id=""),
+                "topic": topic,
+                "claim": ln,
+                "source_id": None,
+                "source_ref": {"doi": None, "title": None},
+                "created_at": now,
+                "updated_at": now,
+                "author": None,
+                "tags": [],
+            }
+        )
+    with out_path.open("w", encoding="utf-8") as f:
+        for r in recs:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    mf = _load_manifest(topic)
+    mf.setdefault("sets", {})
+    mf["sets"][out_path.name] = {"enabled": True, "note": "migrated_from_evidence_txt", "created_at": now}
+    _save_manifest(topic, mf)
+
+
+def _list_evidence_sets(topic: str) -> List[Dict[str, Any]]:
+    _ensure_migrated_txt_to_sets(topic)
+    d = _topic_evidence_sets_dir(topic)
+    d.mkdir(parents=True, exist_ok=True)
+    mf = _load_manifest(topic)
+    sets_cfg = mf.get("sets") if isinstance(mf.get("sets"), dict) else {}
+    items: List[Dict[str, Any]] = []
+    for fp in sorted([x for x in d.iterdir() if x.is_file() and x.suffix == ".jsonl"]):
+        cfg = sets_cfg.get(fp.name) if isinstance(sets_cfg, dict) else None
+        enabled = True if not isinstance(cfg, dict) else bool(cfg.get("enabled", True))
+        # quick count
+        cnt = 0
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        cnt += 1
+        except Exception:
+            cnt = 0
+        items.append(
+            {
+                "name": fp.name,
+                "path": str(fp),
+                "enabled": bool(enabled),
+                "count": int(cnt),
+                "note": (cfg.get("note") if isinstance(cfg, dict) else None),
+            }
+        )
+    return items
+
+
+def _read_sentence_set(path: Path) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not path.exists():
+        return out
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            obj = _safe_json_loads(s)
+            if isinstance(obj, dict):
+                out.append(obj)
+    return out
+
+
+def _write_sentence_set(path: Path, records: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for r in (records or []):
+            if not isinstance(r, dict):
+                continue
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    tmp.replace(path)
+
+
+def _collect_compiled_claims(topic: str, enabled_only: bool = True) -> Tuple[List[str], Dict[str, Any]]:
+    """
+    Collect claims from enabled evidence sets.
+    Returns (claims, stats).
+    """
+    items = _list_evidence_sets(topic)
+    claims: List[str] = []
+    stats: Dict[str, Any] = {"sets": [], "total": 0}
+    for it in items:
+        if enabled_only and not bool(it.get("enabled")):
+            continue
+        fp = Path(str(it.get("path") or ""))
+        recs = _read_sentence_set(fp)
+        added = 0
+        for r in recs:
+            c = str(r.get("claim") or "").strip()
+            if not c:
+                continue
+            claims.append(c)
+            added += 1
+        stats["sets"].append({"name": it.get("name"), "enabled": bool(it.get("enabled")), "count": int(added)})
+        stats["total"] = int(stats.get("total") or 0) + int(added)
+    # dedupe keep order
+    seen: set[str] = set()
+    dedup: List[str] = []
+    for c in claims:
+        if c in seen:
+            continue
+        seen.add(c)
+        dedup.append(c)
+    stats["dedup_total"] = len(dedup)
+    return dedup, stats
 
 
 def _read_text_file(path: Path) -> str:
@@ -448,6 +630,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                             "topic": topic,
                             "goal": cfg.get("goal"),
                             "evidence_txt": str(d / "evidence.txt"),
+                            "evidence_sets_dir": str(_topic_evidence_sets_dir(topic)),
                             "config_json": str(d / "config.json"),
                             "base_llm": (build.get("base_llm") if isinstance(build, dict) else None),
                             "domain_encoder_model": (build.get("retrieval_encoder_model") if isinstance(build, dict) else None),
@@ -455,6 +638,50 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                         }
                     )
             _json_response(self, HTTPStatus.OK, {"items": items, "count": len(items)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_sets"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_sets")].strip("/"))
+            items = _list_evidence_sets(topic)
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "manifest": str(_evidence_manifest_path(topic))})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/evidence_set/" in path:
+            # /api/kvi/topic/<topic>/evidence_set/<name>
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/evidence_set/")
+            name = unquote(tail)
+            if not name.endswith(".jsonl"):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "evidence_set name must end with .jsonl"})
+                return
+            d = _topic_evidence_sets_dir(topic)
+            fp = (d / name).resolve()
+            if not str(fp).startswith(str(d.resolve())):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "invalid evidence_set path"})
+                return
+            recs = _read_sentence_set(fp)
+            # group counts by source_id for doc view
+            by_source: Dict[str, int] = {}
+            for r in recs:
+                sid = r.get("source_id")
+                sid = str(sid) if sid is not None else "null"
+                by_source[sid] = int(by_source.get(sid, 0)) + 1
+            mf = _load_manifest(topic)
+            cfg = (mf.get("sets") or {}).get(name) if isinstance(mf.get("sets"), dict) else None
+            enabled = True if not isinstance(cfg, dict) else bool(cfg.get("enabled", True))
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "topic": topic,
+                    "name": name,
+                    "path": str(fp),
+                    "enabled": bool(enabled),
+                    "records": recs,
+                    "count": len(recs),
+                    "by_source": by_source,
+                },
+            )
             return
 
         if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_txt"):
@@ -618,6 +845,112 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "path": str(pth)})
             return
 
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_sets/create"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_sets/create")].strip("/"))
+            d = _topic_evidence_sets_dir(topic)
+            d.mkdir(parents=True, exist_ok=True)
+            obj, _ = _read_body_json(self)
+            obj = obj if isinstance(obj, dict) else {}
+            base = str(obj.get("base_name") or "evidence").strip() or "evidence"
+            note = str(obj.get("note") or "").strip() or None
+            # find next index
+            used = {p.name for p in d.iterdir() if p.is_file() and p.suffix == ".jsonl"}
+            idx = 1
+            while True:
+                name = f"{base}_{idx:03d}.jsonl"
+                if name not in used:
+                    break
+                idx += 1
+                if idx > 9999:
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "too many evidence sets"})
+                    return
+            fp = d / name
+            fp.write_text("", encoding="utf-8")
+            mf = _load_manifest(topic)
+            mf.setdefault("sets", {})
+            mf["sets"][name] = {"enabled": True, "note": note, "created_at": _safe_now_iso()}
+            _save_manifest(topic, mf)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "name": name, "path": str(fp), "enabled": True})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_set/save"):
+            # POST /api/kvi/topic/<topic>/evidence_set/save {name, enabled?, records:[...]}
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_set/save")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            name = str(obj.get("name") or "").strip()
+            if not name.endswith(".jsonl"):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "name must end with .jsonl"})
+                return
+            records = obj.get("records")
+            if not isinstance(records, list):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "records must be a list"})
+                return
+            d = _topic_evidence_sets_dir(topic)
+            d.mkdir(parents=True, exist_ok=True)
+            fp = (d / name).resolve()
+            if not str(fp).startswith(str(d.resolve())):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "invalid evidence_set path"})
+                return
+            now = _safe_now_iso()
+            cleaned: List[Dict[str, Any]] = []
+            for r in records:
+                if not isinstance(r, dict):
+                    continue
+                claim = str(r.get("claim") or "").strip()
+                if not claim:
+                    continue
+                src_id = r.get("source_id")
+                src_id_s = str(src_id).strip() if src_id is not None and str(src_id).strip() else ""
+                sid = str(r.get("id") or "").strip() or _stable_sentence_id(topic=topic, claim=claim, source_id=src_id_s)
+                created_at = str(r.get("created_at") or "").strip() or now
+                updated_at = now
+                cleaned.append(
+                    {
+                        "id": sid,
+                        "topic": topic,
+                        "claim": claim,
+                        "source_id": (src_id_s if src_id_s else None),
+                        "source_ref": r.get("source_ref") if isinstance(r.get("source_ref"), dict) else {"doi": None, "title": None},
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                        "author": r.get("author"),
+                        "tags": r.get("tags") if isinstance(r.get("tags"), list) else [],
+                    }
+                )
+            _write_sentence_set(fp, cleaned)
+            mf = _load_manifest(topic)
+            mf.setdefault("sets", {})
+            if name not in mf["sets"]:
+                mf["sets"][name] = {"enabled": True, "created_at": now}
+            if "enabled" in obj:
+                mf["sets"][name]["enabled"] = bool(obj.get("enabled"))
+            _save_manifest(topic, mf)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "name": name, "path": str(fp), "count": len(cleaned), "enabled": bool((mf["sets"][name] or {}).get("enabled", True))})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_set/set_enabled"):
+            # POST /api/kvi/topic/<topic>/evidence_set/set_enabled {name, enabled}
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_set/set_enabled")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            name = str(obj.get("name") or "").strip()
+            enabled = bool(obj.get("enabled", True))
+            if not name.endswith(".jsonl"):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "name must end with .jsonl"})
+                return
+            mf = _load_manifest(topic)
+            mf.setdefault("sets", {})
+            mf["sets"].setdefault(name, {})
+            mf["sets"][name]["enabled"] = bool(enabled)
+            _save_manifest(topic, mf)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "name": name, "enabled": bool(enabled)})
+            return
+
         if path.startswith("/api/kvi/topic/") and path.endswith("/compile_simple"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/compile_simple")].strip("/"))
             build = _topic_build_cfg(topic)
@@ -628,9 +961,14 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 return
 
             topic_dir = _topic_dir(topic)
-            evidence_txt = topic_dir / "evidence.txt"
-            if not evidence_txt.exists():
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"evidence.txt not found: {evidence_txt}"})
+            # Build a compiled raw text from enabled evidence sets.
+            claims, claim_stats = _collect_compiled_claims(topic, enabled_only=True)
+            if not claims:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "bad_request", "message": "No claims found in enabled evidence sets. Create/enable an evidence set first."},
+                )
                 return
 
             # Optional overrides
@@ -639,9 +977,20 @@ class AuthoringHandler(BaseHTTPRequestHandler):
             device = str(obj.get("device") or "").strip()
             dtype = str(obj.get("dtype") or "").strip()
 
-            blocks_jsonl = topic_dir / "blocks.jsonl"
-            blocks_enriched = topic_dir / "blocks.enriched.jsonl"
-            kv_dir = topic_dir / "kvbank_blocks"
+            # Prefer writing artifacts to configured work_dir (matches your CLI usage),
+            # but fallback to topic_dir for minimal setups.
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            pattern_dir = out_dir / "pattern_sidecar"
+            pattern_dir.mkdir(parents=True, exist_ok=True)
+
+            compiled_txt = out_dir / "evidence.compiled.txt"
+            compiled_txt.write_text("\n".join(claims) + ("\n" if claims else ""), encoding="utf-8")
+
+            blocks_jsonl = out_dir / "blocks.jsonl"
+            blocks_enriched = out_dir / "blocks.enriched.jsonl"
+            kv_dir = out_dir / "kvbank_blocks"
 
             cmds: List[List[str]] = []
             cmds.append(
@@ -649,7 +998,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     sys.executable,
                     str(PROJECT_ROOT / "scripts" / "build_blocks_from_raw_text.py"),
                     "--raw_text",
-                    str(evidence_txt),
+                    str(compiled_txt),
                     "--out",
                     str(blocks_jsonl),
                     "--tokenizer",
@@ -672,7 +1021,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     "--blocks_jsonl_out",
                     str(blocks_enriched),
                     "--pattern_out_dir",
-                    str(topic_dir),
+                    str(pattern_dir),
                 ]
             )
             cmds.append(
@@ -682,7 +1031,7 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     "--blocks_jsonl_in",
                     str(blocks_enriched),
                     "--out",
-                    str(topic_dir / "pattern_contract.json"),
+                    str(out_dir / "pattern_contract.json"),
                     "--topic",
                     str(topic),
                     "--min_abbr_count",
@@ -741,7 +1090,10 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "topic": topic,
                     "topic_dir": str(topic_dir),
-                    "evidence_txt": str(evidence_txt),
+                    "compiled_evidence_txt": str(compiled_txt),
+                    "compiled_stats": claim_stats,
+                    "out_dir": str(out_dir),
+                    "pattern_index_dir": str(pattern_dir),
                     "blocks_jsonl": str(blocks_jsonl),
                     "blocks_enriched_jsonl": str(blocks_enriched),
                     "kv_dir": str(kv_dir),
@@ -767,8 +1119,11 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
                 return
             topic_dir = _topic_dir(topic)
-            kv_dir = topic_dir / "kvbank_blocks"
-            blocks_enriched = topic_dir / "blocks.enriched.jsonl"
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            pattern_index_dir = out_dir / "pattern_sidecar"
+            kv_dir = out_dir / "kvbank_blocks"
+            blocks_enriched = out_dir / "blocks.enriched.jsonl"
             if not kv_dir.exists():
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_blocks not found: {kv_dir}. Click 编译 first."})
                 return
@@ -778,6 +1133,12 @@ class AuthoringHandler(BaseHTTPRequestHandler):
 
             top_k = int(obj.get("top_k") or 8)
             show_baseline = bool(obj.get("show_baseline", True))
+            simple_use_evidence_units = bool(obj.get("simple_use_evidence_units", True))
+            simple_require_units = bool(obj.get("simple_require_units", True))
+            simple_max_steps = int(obj.get("simple_max_steps") or 1)
+            simple_step_new_tokens = int(obj.get("simple_step_new_tokens") or 192)
+            simple_max_blocks_per_step = int(obj.get("simple_max_blocks_per_step") or 4)
+            simple_max_unit_sentences = int(obj.get("simple_max_unit_sentences") or 6)
 
             cmd = [
                 sys.executable,
@@ -793,23 +1154,27 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 "--blocks_jsonl",
                 str(blocks_enriched),
                 "--pattern_index_dir",
-                str(topic_dir),
+                str(pattern_index_dir),
                 "--sidecar_dir",
-                str(topic_dir),
+                str(out_dir),
                 "--domain_encoder_model",
                 encoder,
                 "--use_chat_template",
                 "--top_k",
                 str(top_k),
-                "--simple_use_evidence_units",
-                "--simple_require_units",
                 "--simple_max_steps",
-                "1",
+                str(simple_max_steps),
+                "--simple_step_new_tokens",
+                str(simple_step_new_tokens),
                 "--simple_max_blocks_per_step",
-                "4",
+                str(simple_max_blocks_per_step),
                 "--simple_max_unit_sentences",
-                "6",
+                str(simple_max_unit_sentences),
             ]
+            if simple_use_evidence_units:
+                cmd.append("--simple_use_evidence_units")
+            if simple_require_units:
+                cmd.append("--simple_require_units")
             if show_baseline:
                 cmd.append("--show_baseline")
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
@@ -817,7 +1182,21 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
                 return
             out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
-            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "result": out, "stderr_tail": (r.stderr or "")[-2000:]})
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "kv_dir": str(kv_dir),
+                    "blocks_jsonl": str(blocks_enriched),
+                    "pattern_index_dir": str(pattern_index_dir),
+                    "sidecar_dir": str(out_dir),
+                    "result": out,
+                    "stderr_tail": (r.stderr or "")[-2000:],
+                },
+            )
             return
 
         if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/set_approved"):
@@ -857,19 +1236,54 @@ class AuthoringHandler(BaseHTTPRequestHandler):
                 t = str(b.get("text") or "").strip()
                 if t:
                     lines.append(t)
-            ev_path = _topic_evidence_txt_path(topic)
-            existing = [ln.strip() for ln in _read_text_file(ev_path).splitlines() if ln.strip()]
-            seen = set(existing)
+            # Import into the first enabled evidence set; if none exist, create one.
+            sets = _list_evidence_sets(topic)
+            target: Optional[Dict[str, Any]] = None
+            for s in sets:
+                if bool(s.get("enabled")):
+                    target = s
+                    break
+            if target is None:
+                d = _topic_evidence_sets_dir(topic)
+                d.mkdir(parents=True, exist_ok=True)
+                name = "evidence_001.jsonl"
+                fp_new = d / name
+                fp_new.write_text("", encoding="utf-8")
+                mf = _load_manifest(topic)
+                mf.setdefault("sets", {})
+                mf["sets"][name] = {"enabled": True, "note": "auto_created_for_doc_import", "created_at": _safe_now_iso()}
+                _save_manifest(topic, mf)
+                target = {"name": name, "path": str(fp_new), "enabled": True}
+
+            fp = Path(str(target.get("path") or ""))
+            existing = _read_sentence_set(fp)
+            seen_claims = {str(r.get("claim") or "").strip() for r in existing if str(r.get("claim") or "").strip()}
+            now = _safe_now_iso()
             appended = 0
-            out_lines = list(existing)
             for ln in lines:
-                if ln in seen:
+                if ln in seen_claims:
                     continue
-                seen.add(ln)
-                out_lines.append(ln)
+                seen_claims.add(ln)
+                existing.append(
+                    {
+                        "id": _stable_sentence_id(topic=topic, claim=ln, source_id=str(doc_id)),
+                        "topic": topic,
+                        "claim": ln,
+                        "source_id": str(doc_id),
+                        "source_ref": {"doi": None, "title": None},
+                        "created_at": now,
+                        "updated_at": now,
+                        "author": None,
+                        "tags": [],
+                    }
+                )
                 appended += 1
-            _write_text_file(ev_path, "\n".join(out_lines) + ("\n" if out_lines else ""))
-            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "doc_id": doc_id, "evidence_txt": str(ev_path), "appended": appended})
+            _write_sentence_set(fp, existing)
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {"ok": True, "topic": topic, "doc_id": doc_id, "evidence_set": str(target.get("name")), "appended": appended},
+            )
             return
 
         if path == "/api/doc_bundle/list":

@@ -12,10 +12,10 @@
       <h1>知识注入KVI（Key Value Injection）</h1>
       <div class="sub">
         KVI 是用于大模型幻觉定点消除和长期记忆外挂的开源框架。<br/>
-        本控制台提供两条人工闭环：① simple 流程（编辑 Evidence.txt → 编译 KVBank → 注入调试）；② Doc 导入（doc_meta → blocks.evidence → 导入到 Evidence.txt）。
+        本控制台提供两条人工闭环：① simple 流程（编辑 Evidence Sets(JSONL) → 编译 KVBank → 注入调试）；② Doc 导入（doc_meta → blocks.evidence → 导入到 Evidence Sets）。
       </div>
       <div class="tabs">
-        <button class="tab active" id="tab_simple">Simple：Evidence.txt</button>
+        <button class="tab active" id="tab_simple">Simple：Evidence Sets</button>
         <button class="tab" id="tab_docs">Doc：doc_meta → blocks</button>
         <button class="tab" id="tab_debug">调试：Prompt → 输出</button>
       </div>
@@ -29,19 +29,75 @@
           <div class="note" id="topic_goal"></div>
         </div>
         <div class="field">
-          <label>Evidence.txt 路径</label>
-          <input id="evidence_path" class="mono" disabled />
-          <div class="note">每行一条 Evidence sentence（用于 simple 流程检索 + Evidence Units + 注入生成，不走 LIST_ONLY 投影）。</div>
+          <label>Evidence Sets 目录</label>
+          <input id="evidence_sets_dir" class="mono" disabled />
+          <div class="note">每条 sentence 是一行 JSON（JSONL）。支持多文件（evidence_001.jsonl 等），便于规模化维护与协作。</div>
         </div>
       </div>
 
       <div class="field">
-        <label>Evidence.txt 内容（可编辑）</label>
-        <textarea id="evidence_editor" placeholder="每行一条证据句..."></textarea>
+        <label>Evidence Sets</label>
+        <div class="row">
+          <div class="field">
+            <label>选择 evidence set</label>
+            <select id="set_select"></select>
+          </div>
+          <div class="field">
+            <label>enabled（参与编译）</label>
+            <select id="set_enabled">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+        </div>
         <div class="btns">
-          <button class="primary" id="btn_save_evidence">保存到 Evidence.txt</button>
+          <button class="primary" id="btn_create_set">新建 evidence set</button>
+          <button id="btn_reload_sets">刷新列表</button>
           <button class="ok" id="btn_compile">编译：生成 KVBank（kvbank_blocks）</button>
         </div>
+        <div class="note" id="set_stats">未选择</div>
+      </div>
+
+      <div class="field">
+        <label>新增 / 编辑 sentence（按 sentence 为主）</label>
+        <div class="row">
+          <div class="field">
+            <label>source_id（doc_id/DOI；可空）</label>
+            <input id="sent_source_id" placeholder="例如：10.1234/abcd 或 doc_id" />
+          </div>
+          <div class="field">
+            <label>DOI（可空）</label>
+            <input id="sent_doi" placeholder="10.xxxx/xxxx" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>title（可空）</label>
+            <input id="sent_title" placeholder="Paper title..." />
+          </div>
+          <div class="field">
+            <label>author（可空）</label>
+            <input id="sent_author" placeholder="your name" />
+          </div>
+        </div>
+        <div class="field">
+          <label>claim *</label>
+          <textarea id="sent_claim" placeholder="输入一条自洽的知识陈述句（建议以句号结尾）。"></textarea>
+        </div>
+        <div class="btns">
+          <button class="primary" id="btn_add_sentence">添加到当前 set</button>
+          <button id="btn_save_set">保存当前 set</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>当前 set：按 doc/source 归类（只读概览）</label>
+        <div class="pre" id="doc_group_view">未加载</div>
+      </div>
+
+      <div class="field">
+        <label>当前 set：JSONL（高级/批量编辑）</label>
+        <textarea id="set_raw" placeholder="每行一个 JSON 对象（JSONL）"></textarea>
       </div>
 
       <div class="field">
@@ -62,7 +118,7 @@
           <div class="btns">
             <button class="primary" id="btn_load_docs_topic">加载 doc_meta 列表</button>
           </div>
-          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到 Evidence.txt。</div>
+          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到 Evidence Sets（会写入一个启用的 evidence_*.jsonl）。</div>
         </div>
       </div>
 
@@ -76,7 +132,7 @@
       <div id="doc_detail_view" style="display:none">
         <div class="btns">
           <button id="btn_back_to_docs">返回 doc 列表</button>
-          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → Evidence.txt</button>
+          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → Evidence Sets</button>
         </div>
         <div class="field">
           <label>doc 详情（blocks.evidence 按序展示，仅显示 claim）</label>
@@ -107,6 +163,42 @@
               </select>
             </div>
           </div>
+          <div class="row">
+            <div class="field">
+              <label>simple_max_steps</label>
+              <input id="debug_max_steps" value="1" />
+            </div>
+            <div class="field">
+              <label>simple_step_new_tokens（避免截断）</label>
+              <input id="debug_step_new_tokens" value="192" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>simple_max_blocks_per_step</label>
+              <input id="debug_max_blocks" value="4" />
+            </div>
+            <div class="field">
+              <label>simple_max_unit_sentences</label>
+              <input id="debug_max_unit_sentences" value="6" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>simple_use_evidence_units</label>
+              <select id="debug_use_units">
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>simple_require_units</label>
+              <select id="debug_require_units">
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+          </div>
           <div class="btns">
             <button class="primary" id="btn_run_debug">运行：注入调试</button>
           </div>
@@ -116,6 +208,11 @@
       <div class="field">
         <label>提问 prompt</label>
         <textarea id="debug_prompt" placeholder="例如：SFTSV的主要临床症状有哪些？"></textarea>
+      </div>
+
+      <div class="field">
+        <label>CLI（本次运行实际执行的命令）</label>
+        <div class="pre" id="out_cli">等待运行...</div>
       </div>
 
       <div class="field">
