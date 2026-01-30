@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import hashlib
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -120,6 +121,41 @@ def _topic_dir(topic: str) -> Path:
     if not p.exists() or not p.is_dir():
         raise FileNotFoundError(f"topic dir not found: {p}")
     return p
+
+
+def _validate_topic_name(name: str) -> str:
+    t = str(name or "").strip()
+    if not t:
+        raise ValueError("topic name is required")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}", t):
+        raise ValueError("invalid topic name (use letters/digits/_/- , max 32 chars)")
+    return t
+
+
+def _create_topic(topic: str) -> Path:
+    """
+    Create a new topic directory with a minimal config.json.
+    Default work_dir follows your remote convention: /home/jb/topics/<TOPIC>/work
+    """
+    t = _validate_topic_name(topic)
+    td = (TOPICS_DIR / t).resolve()
+    if not str(td).startswith(str(TOPICS_DIR.resolve())):
+        raise ValueError("invalid topic path")
+    if td.exists():
+        raise FileExistsError(f"topic already exists: {t}")
+    td.mkdir(parents=True, exist_ok=False)
+    cfg = {
+        "topic_name": t,
+        "goal": "",
+        "build": {
+            "work_dir": f"/home/jb/topics/{t}/work",
+            "base_llm": "Qwen/Qwen2.5-7B-Instruct",
+            "retrieval_encoder_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "layers": [0, 1, 2, 3],
+        },
+    }
+    (td / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return td
 
 
 def _load_topic_config(topic: str) -> Dict[str, Any]:
@@ -640,6 +676,20 @@ class KVIHandler(BaseHTTPRequestHandler):
         # -----------------------------
         # KVI Simple UI APIs (new)
         # -----------------------------
+        if path == "/api/kvi/topics/create":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            name = str(obj.get("topic") or obj.get("name") or "").strip()
+            try:
+                td = _create_topic(name)
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": name, "topic_dir": str(td), "config_json": str(td / "config.json")})
+            return
+
         if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_txt"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/evidence_txt")].strip("/"))
             obj, err = _read_body_json(self)

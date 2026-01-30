@@ -25,6 +25,14 @@
       <div class="row">
         <div class="field">
           <label>Topic（主题库）</label>
+          <div class="row">
+            <div class="field">
+              <input id="topic_new_name" placeholder="输入主题库名字，例如 SFTSV" />
+            </div>
+            <div class="field">
+              <button class="primary" id="btn_create_topic">新建主题库</button>
+            </div>
+          </div>
           <select id="topic_select"></select>
           <div class="note" id="topic_goal"></div>
         </div>
@@ -81,8 +89,8 @@
           </div>
         </div>
         <div class="field">
-          <label>claim *</label>
-          <textarea id="sent_claim" placeholder="输入一条自洽的知识陈述句（建议以句号结尾）。"></textarea>
+          <label>claim *（支持多条：用 ### 作为每条知识结束标记）</label>
+          <textarea id="sent_claim" placeholder="可一次输入多条知识，每条以 ### 结尾。例如：\nSFTSV 的主要传播媒介为蜱虫。###\nSFTSV 可引起血小板减少。###"></textarea>
         </div>
         <div class="btns">
           <button class="primary" id="btn_add_sentence">添加到当前 set</button>

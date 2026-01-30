@@ -41,6 +41,21 @@ let selectedDoc = null; // {doc_id, approved, ...}
 let evidenceSets = []; // [{name,path,enabled,count}]
 let currentSet = null; // {name, enabled, records, by_source}
 
+async function createTopicFromUi() {
+  const name = ($("topic_new_name").value || "").trim();
+  if (!name) throw new Error("请输入主题库名字。");
+  await apiPost("/api/kvi/topics/create", { topic: name });
+  await loadTopics();
+  // select the newly created topic if present
+  if (topics.some(t => t.topic === name)) {
+    $("topic_select").value = name;
+    $("topic_select_docs").value = name;
+    $("topic_select_debug").value = name;
+    await onTopicChange(name);
+  }
+  $("topic_new_name").value = "";
+}
+
 async function loadTopics() {
   const resp = await apiGet("/api/kvi/topics");
   topics = resp.items || [];
@@ -148,9 +163,12 @@ async function createEvidenceSet() {
   await loadEvidenceSet(resp.name);
 }
 
-function buildNewSentenceRecord() {
-  const claim = ($("sent_claim").value || "").trim();
-  if (!claim) throw new Error("claim * 必填");
+function buildNewSentenceRecords() {
+  const raw = ($("sent_claim").value || "");
+  // Split by delimiter "###" (each claim ends with ###). Also allow plain single claim.
+  const parts = raw.includes("###") ? raw.split("###") : [raw];
+  const claims = parts.map(x => String(x || "").trim()).filter(x => x);
+  if (claims.length === 0) throw new Error("claim * 必填");
   const sourceId = ($("sent_source_id").value || "").trim() || null;
   const doi = ($("sent_doi").value || "").trim() || null;
   const title = ($("sent_title").value || "").trim() || null;
@@ -158,7 +176,7 @@ function buildNewSentenceRecord() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const ts = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  return {
+  return claims.map((claim) => ({
     id: null,
     topic: selectedTopic,
     claim,
@@ -168,14 +186,14 @@ function buildNewSentenceRecord() {
     updated_at: ts,
     author,
     tags: [],
-  };
+  }));
 }
 
 async function addSentenceToSet() {
   if (!currentSet) throw new Error("未选择 evidence set。");
-  const rec = buildNewSentenceRecord();
+  const recs = buildNewSentenceRecords();
   const records = parseJsonl($("set_raw").value || "");
-  records.push(rec);
+  for (const r of recs) records.push(r);
   $("set_raw").value = toJsonl(records);
   $("sent_claim").value = "";
   await saveCurrentSet();
@@ -311,6 +329,7 @@ function wire() {
   };
 
   $("btn_compile").onclick = () => compileSimple().catch(err => { $("compile_log").textContent = String(err.message || err); });
+  $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_reload_sets").onclick = () => loadEvidenceSets().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("set_select").onchange = async (e) => { await loadEvidenceSet(e.target.value).catch(err => { $("compile_log").textContent = String(err.message || err); }); };
   $("btn_save_set").onclick = () => saveCurrentSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
