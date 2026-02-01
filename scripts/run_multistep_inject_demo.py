@@ -115,8 +115,7 @@ def main() -> None:
     p.add_argument(
         "--append_evidence_to_prompt",
         action="store_true",
-        help="(debug) If set, append a short evidence slice into the final generation prompt. "
-        "Default OFF for pure KV injection.",
+        help="FORBIDDEN (iron law): do not append any evidence text into prompt.",
     )
     p.add_argument(
         "--rewrite_query_for_retrieval",
@@ -203,9 +202,7 @@ def main() -> None:
     p.add_argument(
         "--ground_with_selected_text",
         action="store_true",
-        help="If set, append a few evidence sentences extracted from the selected blocks to the prompt during final decode. "
-        "This greatly reduces hallucinations like 'mosquito transmission' when selected blocks clearly say 'tick bites'. "
-        "Requires --blocks_jsonl.",
+        help="FORBIDDEN (iron law): do not append any evidence text into prompt.",
     )
     p.add_argument(
         "--use_struct_slots",
@@ -284,6 +281,8 @@ def main() -> None:
         help="When printing top candidates full text, truncate each candidate to first N chars (0 = no truncation).",
     )
     args = p.parse_args()
+    if bool(getattr(args, "append_evidence_to_prompt", False)) or bool(getattr(args, "ground_with_selected_text", False)):
+        raise SystemExit("Forbidden by iron law: do not append any evidence text into prompt. Use KV injection only.")
 
     class AnswerMode(str, Enum):
         GROUNDED = "GROUNDED"  # schema injection + evidence appended grounding

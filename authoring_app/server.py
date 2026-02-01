@@ -990,12 +990,9 @@ class KVIHandler(BaseHTTPRequestHandler):
 
             top_k = int(obj.get("top_k") or 8)
             show_baseline = bool(obj.get("show_baseline", True))
-            simple_use_evidence_units = bool(obj.get("simple_use_evidence_units", True))
-            simple_require_units = bool(obj.get("simple_require_units", True))
             simple_max_steps = int(obj.get("simple_max_steps") or 1)
             simple_step_new_tokens = int(obj.get("simple_step_new_tokens") or 192)
             simple_max_blocks_per_step = int(obj.get("simple_max_blocks_per_step") or 4)
-            simple_max_unit_sentences = int(obj.get("simple_max_unit_sentences") or 6)
 
             cmd = [
                 sys.executable,
@@ -1025,13 +1022,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 str(simple_step_new_tokens),
                 "--simple_max_blocks_per_step",
                 str(simple_max_blocks_per_step),
-                "--simple_max_unit_sentences",
-                str(simple_max_unit_sentences),
             ]
-            if simple_use_evidence_units:
-                cmd.append("--simple_use_evidence_units")
-            if simple_require_units:
-                cmd.append("--simple_require_units")
             if show_baseline:
                 cmd.append("--show_baseline")
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)

@@ -652,10 +652,8 @@ def main() -> None:
     p.add_argument("--simple_max_steps", type=int, default=3)
     p.add_argument("--simple_step_new_tokens", type=int, default=96)
     p.add_argument("--simple_max_blocks_per_step", type=int, default=8)
-    # Evidence Unit Pipeline knobs (sentence-level only; no LIST_ONLY)
-    p.add_argument("--simple_use_evidence_units", action="store_true", help="Use sentence-level evidence units to select/ground injected blocks")
-    p.add_argument("--simple_max_unit_sentences", type=int, default=6)
-    p.add_argument("--simple_require_units", action="store_true", help="If set, only inject blocks that have injectable sentence-level units (fallback to ANN if none)")
+    # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
+    # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
     p.add_argument("--show_baseline", action="store_true", help="Include baseline_answer in JSON output")
     p.add_argument("--final_only", action="store_true", help="Print only final_answer (rim_answer) and exit")
@@ -715,73 +713,18 @@ def main() -> None:
             )
         )
 
-        # Evidence Unit Pipeline (sentence-level only; no list-item / no LIST_ONLY)
-        unit_lookup: Dict[str, List[str]] = {}
-        router_dbg: Dict[str, Any] = {}
-        target_semantic_type = "unknown"
-        if bool(args.simple_use_evidence_units):
-            target_semantic_type, router_dbg = _infer_target_semantic_type_for_query(
-                query=user_prompt,
-                kv_dir=str(args.kv_dir),
-                pattern_index_dir=str(args.pattern_index_dir),
-            )
-            specs = _load_semantic_type_specs(pattern_index_dir=str(args.pattern_index_dir))
-            try:
-                from external_kv_injection.src.evidence.evidence_unit_extractor import EvidenceUnitExtractor  # type: ignore
-            except ModuleNotFoundError:
-                from src.evidence.evidence_unit_extractor import EvidenceUnitExtractor  # type: ignore
-            eu = EvidenceUnitExtractor()
-            meta_lookup = _load_block_metadata_lookup(str(args.blocks_jsonl))
-            for bid, txt in (block_text_lookup or {}).items():
-                meta = meta_lookup.get(str(bid), {})
-                units = _extract_sentence_units_only(
-                    extractor=eu,
-                    block_id=str(bid),
-                    text=str(txt or ""),
-                    metadata=meta,
-                )
-                # Scheme B: embedding-based semantic relevance filter (no hard-coded semantic types).
-                if target_semantic_type == "multi":
-                    sts = router_dbg.get("semantic_types") if isinstance(router_dbg, dict) else None
-                    sts = list(sts) if isinstance(sts, list) else []
-                    # union keep: keep if matches ANY semantic type
-                    kept: List[str] = []
-                    dbg_multi: List[Dict[str, Any]] = []
-                    for st in sts:
-                        k, d = _semantic_filter_units_by_embedding(enc=enc, units=units, query=user_prompt, semantic_type=str(st), specs=specs)
-                        dbg_multi.append(d)
-                        for x in k:
-                            if x not in kept:
-                                kept.append(x)
-                    units = kept
-                    router_dbg["semantic_filter"] = {"method": "embedding", "multi": dbg_multi}
-                elif target_semantic_type != "unknown":
-                    units, fdbg = _semantic_filter_units_by_embedding(
-                        enc=enc, units=units, query=user_prompt, semantic_type=target_semantic_type, specs=specs
-                    )
-                    router_dbg["semantic_filter"] = fdbg
-                else:
-                    # Unknown intent: keep units as-is (no semantic filter).
-                    units = list(units or [])
-                unit_lookup[str(bid)] = units
-
         # We want a prose answer (no bullets) in this debug mode.
-        # Citation rule: only cite when you use Evidence Units; but any concrete factual claim must be supported
-        # by at least one Evidence Unit and MUST include the citation marker [E#] in that sentence.
+        # Iron law: do NOT append any evidence text into prompt; rely on KV injection only.
         prose_guard = (
             "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
             "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
             "回答必须严格与证据一致，不要编造。\n"
-            "【引用规则】当你使用 Evidence Units 的信息时，请在对应句子末尾添加引用标记，如 [E1]。[E#] 只在使用证据处出现。\n"
-            "【强约束】任何具体事实句（含地点/省份/数字/症状清单/机构来源/缩写解释等）必须带至少一个 [E#]；"
-            "没有引用的句子只能是非常泛化的过渡句，且不得引入新实体名。\n"
-            "【缩写规则】除非 Evidence Units 中原文出现该括号形式，否则禁止输出类似 “SFTSV（……）” 的括号扩展。"
+            "【缩写规则】除非检索/注入的知识内容原文出现该括号形式，否则禁止输出类似 “SFTSV（……）” 的括号扩展。"
         )
 
         max_steps = int(args.simple_max_steps)
         step_new_tokens = int(args.simple_step_new_tokens)
         max_blocks = int(args.simple_max_blocks_per_step)
-        max_unit_sents = int(args.simple_max_unit_sentences)
         top_k = int(args.top_k)
         used: set[str] = set()
         generated = ""
@@ -791,71 +734,27 @@ def main() -> None:
             qtxt = user_prompt + ("\n" + generated if generated.strip() else "")
             qv = enc.encode(qtxt)[0]
             rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
-            # Rank candidates by evidence-unit richness first (if enabled), then ANN score.
-            candidates: List[Tuple[int, float, Any, str]] = []
+            # Rank candidates by ANN score only (KV injection).
+            candidates: List[Tuple[float, Any, str]] = []
             cand_ids: List[str] = []
             for it in (rr.items or []):
                 bid = _kv_id(it)
                 if not bid:
                     continue
                 cand_ids.append(bid)
-                unit_cnt = len(unit_lookup.get(bid) or []) if unit_lookup else 0
                 score = float(getattr(it, "score", 0.0) or 0.0)
-                candidates.append((int(unit_cnt), float(score), it, bid))
-            candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                candidates.append((float(score), it, bid))
+            candidates.sort(key=lambda x: x[0], reverse=True)
             selected: List[Any] = []
             selected_ids: List[str] = []
-            require_units = bool(args.simple_require_units) and bool(unit_lookup)
-            # First pass: pick blocks with sentence-level injectable units.
-            if unit_lookup:
-                for unit_cnt, _score, it, bid in candidates:
-                    if bid in used:
-                        continue
-                    if require_units and int(unit_cnt) <= 0:
-                        continue
-                    if int(unit_cnt) <= 0:
-                        continue
-                    selected.append(it)
-                    selected_ids.append(bid)
-                    used.add(bid)
-                    if len(selected) >= max_blocks:
-                        break
-            # Fallback: pick top ANN hits if no unit-rich blocks found.
-            if not selected:
-                for _unit_cnt, _score, it, bid in candidates:
-                    if bid in used:
-                        continue
-                    selected.append(it)
-                    selected_ids.append(bid)
-                    used.add(bid)
-                    if len(selected) >= max_blocks:
-                        break
-
-            evidence_sents: List[str] = []
-            if unit_lookup:
-                for bid in selected_ids:
-                    evidence_sents.extend(unit_lookup.get(bid) or [])
-                    if len(evidence_sents) >= max_unit_sents:
-                        break
-            # Rank & trim evidence units by embedding similarity to the semantic anchor + query.
-            evidence_rank_dbg: Dict[str, Any] = {}
-            if unit_lookup and target_semantic_type not in {"unknown", "multi"} and max_unit_sents > 0:
-                ranked, rdbg = _rank_units_by_anchor_similarity(
-                    enc=enc,
-                    units=evidence_sents,
-                    query=user_prompt,
-                    semantic_type=target_semantic_type,
-                    specs=specs if 'specs' in locals() else {},
-                )
-                evidence_rank_dbg = rdbg if isinstance(rdbg, dict) else {}
-                evidence_sents = ranked[: max(0, max_unit_sents)]
-            else:
-                evidence_sents = evidence_sents[: max(0, max_unit_sents)]
-            evidence_appendix = ""
-            evidence_pairs: List[Tuple[str, str]] = []
-            if evidence_sents:
-                formatted, evidence_pairs = _format_evidence_units_with_ids(evidence_sents)
-                evidence_appendix = "\n\n[Evidence Units]\n" + formatted + "\n"
+            for _score, it, bid in candidates:
+                if bid in used:
+                    continue
+                selected.append(it)
+                selected_ids.append(bid)
+                used.add(bid)
+                if len(selected) >= max_blocks:
+                    break
             # Build injected prefix from selected blocks (layers 0..3).
             dtype2 = next(model.parameters()).dtype
             ext_by_layer: Dict[int, Any] = {}
@@ -872,7 +771,7 @@ def main() -> None:
                     continue
             pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
 
-            step_prompt = (user_prompt + prose_guard + evidence_appendix + ("\n\n" + generated if generated.strip() else "")).strip()
+            step_prompt = (user_prompt + prose_guard + ("\n\n" + generated if generated.strip() else "")).strip()
             step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
             chunk = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
@@ -886,18 +785,11 @@ def main() -> None:
             )
             chunk = str(chunk or "").strip()
             generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
-            post_dbg: Dict[str, Any] = {}
-            if evidence_pairs:
-                generated, post_dbg = _postprocess_answer_citation_guardrails(answer=generated, evidence_pairs=evidence_pairs)
             step_debug.append(
                 {
                     "step": int(step),
                     "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
                     "selected_ids": selected_ids,
-                    "selected_unit_counts": {bid: int(len(unit_lookup.get(bid) or [])) for bid in selected_ids} if unit_lookup else {},
-                    "evidence_units_shown": evidence_sents[: min(3, len(evidence_sents))],
-                    "evidence_unit_rank": evidence_rank_dbg,
-                    "answer_postprocess": post_dbg,
                 }
             )
             if not chunk:
@@ -909,7 +801,6 @@ def main() -> None:
             "base_answer": base_answer,
             "injected_answer": generated.strip(),
             "steps": step_debug,
-            "semantic_type_router": {"target_semantic_type": target_semantic_type, **(router_dbg or {})}
         }
         if bool(args.final_only):
             # Per your requirement: include base LLM output as well.

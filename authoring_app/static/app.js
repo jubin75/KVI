@@ -282,10 +282,7 @@ async function runDebug() {
   const showBaseline = ($("debug_show_baseline").value || "true") === "true";
   const maxSteps = Number(($("debug_max_steps").value || "1").trim());
   const stepNewTokens = Number(($("debug_step_new_tokens").value || "192").trim());
-  const maxBlocks = Number(($("debug_max_blocks").value || "4").trim());
-  const maxUnitSents = Number(($("debug_max_unit_sentences").value || "2").trim());
-  const useUnits = ($("debug_use_units").value || "true") === "true";
-  const requireUnits = ($("debug_require_units").value || "true") === "true";
+  const maxBlocks = Number(($("debug_blocks_slider").value || $("debug_max_blocks").value || "2").trim());
   $("out_cli").textContent = "运行中...";
   $("out_base").textContent = "运行中...";
   $("out_injected").textContent = "运行中...";
@@ -297,9 +294,6 @@ async function runDebug() {
     simple_max_steps: Number.isFinite(maxSteps) ? maxSteps : 1,
     simple_step_new_tokens: Number.isFinite(stepNewTokens) ? stepNewTokens : 192,
     simple_max_blocks_per_step: Number.isFinite(maxBlocks) ? maxBlocks : 4,
-    simple_max_unit_sentences: Number.isFinite(maxUnitSents) ? maxUnitSents : 6,
-    simple_use_evidence_units: useUnits,
-    simple_require_units: requireUnits,
   });
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
@@ -343,11 +337,15 @@ function wire() {
     $("doc_detail_view").style.display = "none";
   };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
-  // slider reflect
-  const slider = $("debug_max_unit_sentences");
-  const show = $("debug_units_n");
+  // slider reflect (injected blocks)
+  const slider = $("debug_blocks_slider");
+  const show = $("debug_blocks_n");
+  const maxBlocksInput = $("debug_max_blocks");
   if (slider && show) {
-    const sync = () => { show.textContent = String(slider.value || "2"); };
+    const sync = () => {
+      show.textContent = String(slider.value || "2");
+      if (maxBlocksInput) maxBlocksInput.value = String(slider.value || "2");
+    };
     slider.addEventListener("input", sync);
     sync();
   }

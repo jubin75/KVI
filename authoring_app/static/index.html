@@ -187,24 +187,8 @@
               <input id="debug_max_blocks" value="4" />
             </div>
             <div class="field">
-              <label>回答简洁度 / 证据条数（top 1–2 推荐）: <span class="mono" id="debug_units_n">2</span></label>
-              <input id="debug_max_unit_sentences" type="range" min="1" max="6" step="1" value="2" />
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>simple_use_evidence_units</label>
-              <select id="debug_use_units">
-                <option value="true" selected>true</option>
-                <option value="false">false</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>simple_require_units</label>
-              <select id="debug_require_units">
-                <option value="true" selected>true</option>
-                <option value="false">false</option>
-              </select>
+              <label>注入强度 / 注入块数量（top 1–2 推荐）: <span class="mono" id="debug_blocks_n">2</span></label>
+              <input id="debug_blocks_slider" type="range" min="1" max="8" step="1" value="2" />
             </div>
           </div>
           <div class="btns">

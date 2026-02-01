@@ -917,36 +917,13 @@ class MultiStepInjector:
             return bool(re.search(r"[\u4e00-\u9fff]", s or ""))
 
         # -------------------------
-        # Final prompt construction (product logic)
+        # Final prompt construction (iron law)
         # -------------------------
-        # Default: rely on KV prefix injection; do NOT let slots/template code produce the answer string.
-        # Optional: append a tiny evidence slice into prompt only when explicitly enabled (debug/stability).
-        evidence = ""
-        if bool(getattr(self.cfg, "append_evidence_to_prompt", False)) and self.grounding_retriever is not None and self.block_text_lookup is not None:
-            qv = last_query_vec
-            if qv is None and query_embed_fn is not None:
-                qv = query_embed_fn(str(query_text or prompt))
-            if qv is not None:
-                gr = self.grounding_retriever.search(
-                    qv, top_k=int(self.cfg.top_k_blocks), filters=None, query_text=query_text
-                )
-                evidence_texts: List[str] = []  # grounding evidence texts
-                for it in (gr.items or []):
-                        bid = it.meta.get("block_id") or it.meta.get("chunk_id") or it.meta.get("id")
-                        if not bid:
-                            continue
-                        t = self.block_text_lookup(str(bid))
-                        if isinstance(t, str) and t.strip():
-                            src = (it.meta or {}).get("retrieval_source")
-                            if src == "evidence":
-                                evidence_texts.append(t.strip())
-                evidence = (
-                    _extract_evidence(evidence_texts, q=str(query_text or ""), keywords=None)
-                    if evidence_texts
-                    else ""
-                )
-
-        prompt_for_final = prompt + ("\n\n" + evidence if str(evidence or "").strip() else "")
+        # KV injection only. Do NOT append any evidence text into prompt.
+        # If you need traceability, export selected IDs/scores in step_debug (outside the model prompt).
+        if bool(getattr(self.cfg, "append_evidence_to_prompt", False)):
+            raise ValueError("append_evidence_to_prompt is forbidden (iron law: no prompt appendix; injection must be KV cache only).")
+        prompt_for_final = prompt
 
         # final generation using last injected state: simplest approach is do generate without further injection
         # NOTE: do NOT use `model.generate(past_key_values=...)` here; HF generation will treat

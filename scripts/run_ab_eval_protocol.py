@@ -11,7 +11,7 @@ Why this script exists
 
 NOTE
 - To produce quotes, the model must see the selected evidence text; therefore this script enables
-  "ground_with_selected_text" for the injection run (evidence sentences appended to the prompt).
+  NOTE (iron law): do NOT use any prompt appendix. KV injection only.
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def main() -> None:
                 max_new_tokens=int(args.max_new_tokens),
                 query_embed_fn=query_embed_fn,
                 no_repeat_ngram_size=int(args.no_repeat_ngram_size),
-                ground_with_selected_text=True,
+                ground_with_selected_text=False,
                 grounding_instructions=PROTOCOL_INSTRUCTIONS,
             )
             inj_obj = _extract_first_json_obj(inj_text)
