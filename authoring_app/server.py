@@ -1177,6 +1177,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 prompt,
                 "--kv_dir",
                 str(kv_dir),
+                "--sentences_jsonl",
+                str(out_dir / "sentences.jsonl"),
                 "--pattern_index_dir",
                 str(pattern_index_dir),
                 "--sidecar_dir",

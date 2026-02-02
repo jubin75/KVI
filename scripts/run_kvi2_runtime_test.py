@@ -164,6 +164,66 @@ def _load_block_text_lookup(path: str) -> Dict[str, str]:
     return out
 
 
+def _load_sentence_text_lookup(path: str) -> Dict[str, str]:
+    """
+    Load sentence texts (block_id -> text) from sentences.jsonl emitted by the UI compile step.
+    """
+    out: Dict[str, str] = {}
+    sp = str(path or "").strip()
+    if not sp:
+        return out
+    p = Path(sp)
+    if not p.exists():
+        return out
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                bid = rec.get("block_id") or (rec.get("metadata") or {}).get("block_id")
+                if bid:
+                    out[str(bid)] = str(rec.get("text") or "")
+    except Exception:
+        return out
+    return out
+
+
+_ABBR_PARENS_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_-]{1,})[（(]([^）)]{1,64})[）)]")
+
+
+def _strip_unapproved_abbr_expansions(*, text: str, evidence_texts: Sequence[str]) -> str:
+    """
+    Enforce "缩写规则" post-hoc: only allow acronym expansions if the exact form appears in
+    injected evidence texts. Otherwise strip the parenthetical part.
+    """
+    t = str(text or "")
+    ev = [str(x or "") for x in (evidence_texts or [])]
+    if not t or not ev:
+        # If we don't have evidence texts, still be conservative: strip expansions to reduce hallucinated glosses.
+        # This matches the product rule: do not add bracket expansions unless evidence shows it.
+        ev = []
+
+    def repl(m: re.Match) -> str:
+        abbr = m.group(1)
+        inner = m.group(2)
+        full_zh = f"{abbr}（{inner}）"
+        full_en = f"{abbr}({inner})"
+        if ev:
+            for e in ev:
+                if full_zh in e or full_en in e:
+                    return m.group(0)  # keep
+        # strip expansion
+        return abbr
+
+    return _ABBR_PARENS_RE.sub(repl, t)
+
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
@@ -632,6 +692,11 @@ def main() -> None:
         default="",
         help="blocks.enriched.jsonl path (required for pipeline=kvi2; unused for pipeline=simple)",
     )
+    p.add_argument(
+        "--sentences_jsonl",
+        default="",
+        help="sentences.jsonl path (optional for pipeline=simple; used for stricter postprocess rules)",
+    )
     p.add_argument("--pattern_index_dir", required=True, help="pattern sidecar directory")
     p.add_argument("--sidecar_dir", required=True, help="sidecar directory")
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
@@ -695,6 +760,12 @@ def main() -> None:
         if not str(args.blocks_jsonl or "").strip():
             raise SystemExit("--blocks_jsonl is required for pipeline=kvi2")
         block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
+
+    sentence_text_lookup: Dict[str, str] = {}
+    if str(args.pipeline) == "simple":
+        sj = str(args.sentences_jsonl or "").strip()
+        if sj:
+            sentence_text_lookup = _load_sentence_text_lookup(sj)
 
     # ----------------------------------------
     # SIMPLE PIPELINE (architecture debugging)
@@ -829,6 +900,16 @@ def main() -> None:
             )
             if not chunk:
                 break
+
+        # Postprocess: enforce "no acronym expansion unless evidence shows it"
+        ev_texts = []
+        if sentence_text_lookup:
+            for st in (step_debug[-1].get("selected_ids") if step_debug else []) or []:
+                try:
+                    ev_texts.append(sentence_text_lookup.get(str(st), ""))
+                except Exception:
+                    pass
+        generated = _strip_unapproved_abbr_expansions(text=generated.strip(), evidence_texts=ev_texts).strip()
 
         out_simple = {
             "pipeline": "simple",
