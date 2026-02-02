@@ -12,6 +12,7 @@ Design goals:
 
 from __future__ import annotations
 
+import sys
 import argparse
 import json
 from pathlib import Path
@@ -94,6 +95,22 @@ def main() -> None:
     p.add_argument("--semantic_type_specs", required=False, default="", help="semantic_type_specs.json path")
     p.add_argument("--device", default=None, help="cpu/cuda; default auto")
     args = p.parse_args()
+
+    # Make this script runnable from multiple repo layouts:
+    # - monorepo root contains `src/` and `scripts/`
+    # - or root contains `external_kv_injection/` which contains `src/`
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = [repo_root, repo_root.parent]
+    for c in candidates:
+        sp = str(c)
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
+    # If this script lives under a nested folder, also add that nested root.
+    nested = repo_root / "external_kv_injection"
+    if nested.exists() and nested.is_dir():
+        sp = str(nested)
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
 
     inp = Path(str(args.in_jsonl))
     outp = Path(str(args.out_jsonl))
