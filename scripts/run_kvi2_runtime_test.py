@@ -261,6 +261,8 @@ def _detect_violations(
     answer: str,
     user_prompt: str,
     evidence_texts: Sequence[str],
+    intent: str,
+    specs: Dict[str, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
     Lightweight validator for "regen-on-violation".
@@ -295,18 +297,23 @@ def _detect_violations(
         if full_zh not in ev and full_en not in ev:
             violations.append({"type": "alias_with_abbr_not_in_evidence", "span": m.group(0), "abbr": abbr, "alias": alias})
 
-    # 2) Scope drift (very conservative): if query is mechanism-ish but answer introduces obvious symptom-only terms
-    # that are not present in evidence texts, flag.
-    ql = q.lower()
-    mech_cues = ["机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism"]
-    symptom_cues = ["皮疹", "淋巴结", "水疱", "红斑", "脑膜炎", "脑炎", "格林-巴利", "gbs"]
-    if any(c in q for c in mech_cues) or any(c in ql for c in mech_cues):
-        leaked = []
-        for t in symptom_cues:
-            if (t in a) and (t not in ev):
-                leaked.append(t)
+    # 2) Config-driven deny terms: if answer contains deny terms for the inferred intent, flag.
+    it = str(intent or "").strip().lower()
+    spec = specs.get(it) if isinstance(specs, dict) and it else None
+    deny_terms = (spec or {}).get("deny_terms") if isinstance(spec, dict) else None
+    if isinstance(deny_terms, list) and deny_terms:
+        leaked: List[str] = []
+        for t in deny_terms:
+            tt = str(t or "").strip()
+            if not tt:
+                continue
+            # allow if user explicitly asked about it
+            if tt in q:
+                continue
+            if tt in a:
+                leaked.append(tt)
         if leaked:
-            violations.append({"type": "scope_drift_symptom_terms", "terms": leaked, "query_intent": "mechanism"})
+            violations.append({"type": "intent_drift_deny_terms", "intent": it, "terms": leaked})
 
     return violations
 
@@ -1075,10 +1082,29 @@ def main() -> None:
                         continue
                 pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
 
-                # Intent guard from config-driven type (keep wording generic; do not hard-code type list).
+                # Intent guard from config-driven type (no evidence text in prompt).
                 intent_guard = ""
                 if str(target_st) != "unknown":
-                    intent_guard = f"\n【意图约束】本轮目标语义维度：{str(target_st)}。只回答该维度相关内容；不要扩展到其他维度。"
+                    st_key = str(target_st).strip().lower()
+                    spec = specs.get(st_key) if isinstance(specs, dict) else None
+                    focus_terms = (spec or {}).get("focus_terms") if isinstance(spec, dict) else None
+                    deny_terms = (spec or {}).get("deny_terms") if isinstance(spec, dict) else None
+                    focus_line = ""
+                    if isinstance(focus_terms, list) and focus_terms:
+                        focus = [str(x).strip() for x in focus_terms if str(x).strip()]
+                        if focus:
+                            focus_line = f"\n【关注关键词】{', '.join(focus)}。"
+                    deny_line = ""
+                    if isinstance(deny_terms, list) and deny_terms:
+                        deny = [str(x).strip() for x in deny_terms if str(x).strip()]
+                        if deny:
+                            deny_line = f"\n【避免关键词】{', '.join(deny)}。"
+                    intent_guard = (
+                        f"\n【意图约束】本轮目标语义维度：{str(target_st)}。只回答该维度相关内容；不要扩展到其他维度。"
+                        + focus_line
+                        + deny_line
+                        + "\n【证据一致性】不得补充注入知识未支持的具体事实；如无法从注入知识确定，请明确说明“无法从注入知识确定”。"
+                    )
                 step_prompt = (
                     prompt_for_user + prose_guard + intent_guard + (extra_guard or "") + ("\n\n" + generated if generated.strip() else "")
                 ).strip()
@@ -1128,7 +1154,14 @@ def main() -> None:
 
         injected_round0, steps0 = _run_once(prompt_for_user=user_prompt, extra_guard="")
         ev_texts0 = _gather_ev_texts(steps0)
-        violations0 = _detect_violations(answer=injected_round0, user_prompt=user_prompt, evidence_texts=ev_texts0)
+        intent0, intent_dbg0 = _infer_intent_from_specs(enc=enc, query=user_prompt, specs=specs)
+        violations0 = _detect_violations(
+            answer=injected_round0,
+            user_prompt=user_prompt,
+            evidence_texts=ev_texts0,
+            intent=str(intent0),
+            specs=specs,
+        )
 
         injected_final = injected_round0
         steps_final = steps0
@@ -1140,7 +1173,7 @@ def main() -> None:
             # Keep it short and deterministic.
             deny_terms: List[str] = []
             for v in violations0:
-                if v.get("type") == "scope_drift_symptom_terms":
+                if v.get("type") in {"intent_drift_deny_terms"}:
                     deny_terms.extend([str(x) for x in (v.get("terms") or []) if str(x).strip()])
             deny_terms = list(dict.fromkeys([t for t in deny_terms if t]))
             deny_line = f"\n【禁止扩展】禁止提及：{', '.join(deny_terms)}。" if deny_terms else ""
@@ -1153,7 +1186,13 @@ def main() -> None:
             )
             injected_round1, steps1 = _run_once(prompt_for_user=user_prompt, extra_guard=regen_guard)
             ev_texts1 = _gather_ev_texts(steps1)
-            violations1 = _detect_violations(answer=injected_round1, user_prompt=user_prompt, evidence_texts=ev_texts1)
+            violations1 = _detect_violations(
+                answer=injected_round1,
+                user_prompt=user_prompt,
+                evidence_texts=ev_texts1,
+                intent=str(intent0),
+                specs=specs,
+            )
             injected_final = injected_round1
             steps_final = steps1
             violations_final = violations1
@@ -1164,6 +1203,13 @@ def main() -> None:
         stripped = _strip_unapproved_abbr_expansions(text=injected_final.strip(), evidence_texts=ev_texts_final).strip()
         postprocess_changed = stripped != injected_final.strip()
         injected_final = stripped
+        violations_after_postprocess = _detect_violations(
+            answer=injected_final.strip(),
+            user_prompt=user_prompt,
+            evidence_texts=ev_texts_final,
+            intent=str(intent0),
+            specs=specs,
+        )
 
         out_simple = {
             "pipeline": "simple",
@@ -1172,7 +1218,10 @@ def main() -> None:
             "injected_answer": injected_final.strip(),
             "injected_answer_round0": injected_round0.strip(),
             "violations_round0": violations0,
-            "violations_final": violations_final,
+            "violations_final": violations_after_postprocess,
+            "violations_before_postprocess": violations_final,
+            "intent": str(intent0),
+            "intent_debug": intent_dbg0,
             "regen_on_violation": bool(regen_enabled),
             "regen_rounds_used": int(regen_used),
             "postprocess_stripped_abbr": bool(postprocess_changed),

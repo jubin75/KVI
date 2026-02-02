@@ -39,12 +39,30 @@ HARD_MAX_INJECTED_SENTENCES_PER_STEP = 4
 HARD_MAX_TOTAL_INJECTED_TOKENS = 512
 
 _DEFAULT_SEMANTIC_TYPE_SPECS = {
-    "symptom": {"description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。", "threshold": 0.28},
-    "drug": {"description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。", "threshold": 0.28},
-    "location": {"description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。", "threshold": 0.28},
+    "symptom": {
+        "description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。",
+        "threshold": 0.28,
+        # Optional runtime guidance (config-driven; no evidence text in prompt).
+        "focus_terms": ["症状", "体征", "临床表现", "实验室异常", "出血", "呕吐", "腹泻", "白细胞", "血小板"],
+        "deny_terms": ["机制", "发病机制", "致病机制", "感染", "免疫", "内皮", "通透性", "复制", "通路"],
+    },
+    "drug": {
+        "description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。",
+        "threshold": 0.28,
+        "focus_terms": ["治疗", "用药", "药物", "疗效", "不良反应", "获批", "批准"],
+        "deny_terms": ["地区分布", "流行区域", "机制", "发病机制"],
+    },
+    "location": {
+        "description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。",
+        "threshold": 0.28,
+        "focus_terms": ["地区", "分布", "流行", "报告", "病例", "省", "市", "国家", "区域"],
+        "deny_terms": ["治疗", "用药", "药物", "机制", "发病机制"],
+    },
     "mechanism": {
         "description": "作用机制/发病机制：感染哪些细胞、免疫应答/免疫抑制、炎症反应、病理过程、通透性改变、多器官损伤等。",
         "threshold": 0.26,
+        "focus_terms": ["机制", "发病机制", "致病机制", "感染", "免疫", "炎症", "内皮", "通透性", "细胞", "病理过程"],
+        "deny_terms": ["临床表现", "症状", "体征", "治疗", "用药", "地区分布", "流行区域"],
     },
 }
 
