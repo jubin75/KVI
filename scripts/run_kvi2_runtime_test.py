@@ -196,6 +196,7 @@ def _load_sentence_text_lookup(path: str) -> Dict[str, str]:
 
 
 _ABBR_PARENS_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_-]{1,})[（(]([^）)]{1,64})[）)]")
+_ALIAS_PARENS_ABBR_RE = re.compile(r"([^\s]{2,64})[（(]([A-Za-z][A-Za-z0-9_-]{1,})[）)]")
 
 
 def _detect_violations(
@@ -224,6 +225,18 @@ def _detect_violations(
         full_en = f"{abbr}({inner})"
         if full_zh not in ev and full_en not in ev:
             violations.append({"type": "abbr_expansion_not_in_evidence", "span": m.group(0), "abbr": abbr})
+
+    # 1b) Alias-before-(ABBR) must also appear verbatim in evidence (e.g., "某某病毒（SFTSV）").
+    for m in _ALIAS_PARENS_ABBR_RE.finditer(a):
+        alias = m.group(1)
+        abbr = m.group(2)
+        # only treat as "alias expansion" if alias contains any CJK character (avoid punishing normal English parentheses too much)
+        if not re.search(r"[\u4e00-\u9fff]", alias):
+            continue
+        full_zh = f"{alias}（{abbr}）"
+        full_en = f"{alias}({abbr})"
+        if full_zh not in ev and full_en not in ev:
+            violations.append({"type": "alias_with_abbr_not_in_evidence", "span": m.group(0), "abbr": abbr, "alias": alias})
 
     # 2) Scope drift (very conservative): if query is mechanism-ish but answer introduces obvious symptom-only terms
     # that are not present in evidence texts, flag.
@@ -265,7 +278,22 @@ def _strip_unapproved_abbr_expansions(*, text: str, evidence_texts: Sequence[str
         # strip expansion
         return abbr
 
-    return _ABBR_PARENS_RE.sub(repl, t)
+    # First, strip alias-before-(ABBR) patterns that are not present in evidence, e.g. "宋热...病毒（SFTSV）" -> "SFTSV"
+    def repl_alias(m: re.Match) -> str:
+        alias = m.group(1)
+        abbr = m.group(2)
+        if not re.search(r"[\u4e00-\u9fff]", alias):
+            return m.group(0)
+        full_zh = f"{alias}（{abbr}）"
+        full_en = f"{alias}({abbr})"
+        if ev:
+            for e in ev:
+                if full_zh in e or full_en in e:
+                    return m.group(0)
+        return abbr
+
+    t2 = _ALIAS_PARENS_ABBR_RE.sub(repl_alias, t)
+    return _ABBR_PARENS_RE.sub(repl, t2)
 
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
@@ -880,6 +908,7 @@ def main() -> None:
                 selected: List[Any] = []
                 selected_ids: List[str] = []
                 selected_kv_lens: List[int] = []
+                selected_texts: List[Dict[str, Any]] = []
                 total_kv_tokens = 0
                 for _score, it, bid in candidates:
                     if bid in used:
@@ -901,6 +930,20 @@ def main() -> None:
                     used.add(bid)
                     if len(selected) >= max_blocks:
                         break
+
+                # Attach injected sentence texts for debug (if sentences_jsonl provided).
+                if sentence_text_lookup and selected_ids:
+                    for i, sid in enumerate(selected_ids):
+                        try:
+                            selected_texts.append(
+                                {
+                                    "id": str(sid),
+                                    "kv_len": int(selected_kv_lens[i]) if i < len(selected_kv_lens) else None,
+                                    "text": str(sentence_text_lookup.get(str(sid), "") or ""),
+                                }
+                            )
+                        except Exception:
+                            continue
 
                 dtype2 = next(model.parameters()).dtype
                 ext_by_layer: Dict[int, Any] = {}
@@ -937,6 +980,7 @@ def main() -> None:
                         "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
                         "selected_ids": selected_ids,
                         "selected_kv_lens": selected_kv_lens,
+                        "selected_texts": selected_texts,
                         "selected_total_kv_tokens": int(total_kv_tokens),
                         "max_injected_sentences_per_step": int(max_blocks),
                         "max_sentence_tokens": int(max_sentence_tokens),
