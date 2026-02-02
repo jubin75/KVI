@@ -627,7 +627,11 @@ def main() -> None:
     p.add_argument("--model", required=True, help="HF model name or local path")
     p.add_argument("--prompt", required=True, help="User prompt")
     p.add_argument("--kv_dir", required=True, help="KVBank directory")
-    p.add_argument("--blocks_jsonl", required=True, help="blocks.enriched.jsonl path")
+    p.add_argument(
+        "--blocks_jsonl",
+        default="",
+        help="blocks.enriched.jsonl path (required for pipeline=kvi2; unused for pipeline=simple)",
+    )
     p.add_argument("--pattern_index_dir", required=True, help="pattern sidecar directory")
     p.add_argument("--sidecar_dir", required=True, help="sidecar directory")
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
@@ -652,6 +656,8 @@ def main() -> None:
     p.add_argument("--simple_max_steps", type=int, default=3)
     p.add_argument("--simple_step_new_tokens", type=int, default=96)
     p.add_argument("--simple_max_blocks_per_step", type=int, default=8)
+    p.add_argument("--simple_max_sentence_tokens", type=int, default=128)
+    p.add_argument("--simple_max_total_injected_tokens", type=int, default=512)
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -683,7 +689,12 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
     model.to(device).eval()
 
-    block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
+    # blocks_jsonl is only needed for pipeline=kvi2 (LIST_ONLY, debug/citation helpers).
+    block_text_lookup = {}
+    if str(args.pipeline) != "simple":
+        if not str(args.blocks_jsonl or "").strip():
+            raise SystemExit("--blocks_jsonl is required for pipeline=kvi2")
+        block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
 
     # ----------------------------------------
     # SIMPLE PIPELINE (architecture debugging)
@@ -724,7 +735,12 @@ def main() -> None:
 
         max_steps = int(args.simple_max_steps)
         step_new_tokens = int(args.simple_step_new_tokens)
+        # Hard budgets (sentence-KVBank)
+        max_sentence_tokens = max(16, min(256, int(args.simple_max_sentence_tokens)))
+        max_total_injected_tokens = max(64, min(2048, int(args.simple_max_total_injected_tokens)))
         max_blocks = int(args.simple_max_blocks_per_step)
+        # UI hard-cap: at most 4 sentences per step.
+        max_blocks = max(1, min(4, int(max_blocks)))
         top_k = int(args.top_k)
         used: set[str] = set()
         generated = ""
@@ -747,11 +763,25 @@ def main() -> None:
             candidates.sort(key=lambda x: x[0], reverse=True)
             selected: List[Any] = []
             selected_ids: List[str] = []
+            selected_kv_lens: List[int] = []
+            total_kv_tokens = 0
             for _score, it, bid in candidates:
                 if bid in used:
                     continue
+                kv_len = None
+                try:
+                    if hasattr(it, "meta") and isinstance(getattr(it, "meta"), dict):
+                        kv_len = it.meta.get("kv_len")
+                except Exception:
+                    kv_len = None
+                kv_len_i = int(kv_len) if isinstance(kv_len, int) else int(max_sentence_tokens)
+                kv_len_i = max(0, min(int(max_sentence_tokens), int(kv_len_i)))
+                if (total_kv_tokens + kv_len_i) > int(max_total_injected_tokens):
+                    continue
                 selected.append(it)
                 selected_ids.append(bid)
+                selected_kv_lens.append(int(kv_len_i))
+                total_kv_tokens += int(kv_len_i)
                 used.add(bid)
                 if len(selected) >= max_blocks:
                     break
@@ -790,6 +820,11 @@ def main() -> None:
                     "step": int(step),
                     "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
                     "selected_ids": selected_ids,
+                    "selected_kv_lens": selected_kv_lens,
+                    "selected_total_kv_tokens": int(total_kv_tokens),
+                    "max_injected_sentences_per_step": int(max_blocks),
+                    "max_sentence_tokens": int(max_sentence_tokens),
+                    "max_total_injected_tokens": int(max_total_injected_tokens),
                 }
             )
             if not chunk:

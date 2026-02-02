@@ -30,6 +30,14 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # external_kv_injection/
 TOPICS_DIR = PROJECT_ROOT / "config" / "topics"
 
+# ----------------------------
+# Sentence-KVBank hard budgets
+# ----------------------------
+# These budgets are enforced server-side regardless of UI input.
+DEFAULT_MAX_SENTENCE_TOKENS = 128
+HARD_MAX_INJECTED_SENTENCES_PER_STEP = 4
+HARD_MAX_TOTAL_INJECTED_TOKENS = 512
+
 _INDEX_FALLBACK_HTML = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -211,6 +219,101 @@ def _stable_sentence_id(*, topic: str, claim: str, source_id: str) -> str:
     return h.hexdigest()[:16]
 
 
+_TOKENIZER_CACHE: Dict[str, Any] = {}
+
+
+def _get_topic_tokenizer(topic: str) -> Optional[Any]:
+    """
+    Load/cache the HF tokenizer for a topic's base LLM (used for token budget splitting).
+    Returns None if base_llm is missing or tokenizer load fails.
+    """
+    build = _topic_build_cfg(topic)
+    base_llm = str(build.get("base_llm") or "").strip()
+    if not base_llm:
+        return None
+    if base_llm in _TOKENIZER_CACHE:
+        return _TOKENIZER_CACHE[base_llm]
+    try:
+        from transformers import AutoTokenizer  # type: ignore
+
+        tok = AutoTokenizer.from_pretrained(base_llm, use_fast=True, trust_remote_code=True)
+        _TOKENIZER_CACHE[base_llm] = tok
+        return tok
+    except Exception:
+        return None
+
+
+def _token_len(tok: Any, text: str) -> int:
+    try:
+        ids = tok.encode(str(text or ""), add_special_tokens=False)
+        return int(len(ids))
+    except Exception:
+        # fallback heuristic: ~2 chars per token for zh/mixture
+        s = str(text or "")
+        return int(max(0, len(s) // 2))
+
+
+_SENT_SPLIT_RE = re.compile(r"(?<=[。！？.!?])\s+|\n+")
+_CLAUSE_SPLIT_RE = re.compile(r"(?<=[,，;；、])\s*")
+
+
+def _split_claim_to_budget(*, tok: Any, claim: str, max_sentence_tokens: int, max_chunks: int = 4) -> Tuple[List[str], Dict[str, Any]]:
+    """
+    Split a long claim into 2–4 more atomic sentences within token budget.
+    If still too long/too many, keep first max_chunks and mark as truncated.
+    Returns (chunks, stats).
+    """
+    c = str(claim or "").strip()
+    stats: Dict[str, Any] = {"was_split": False, "was_truncated": False, "orig_tokens": 0, "chunks": 0}
+    if not c:
+        return [], stats
+    orig_tokens = _token_len(tok, c)
+    stats["orig_tokens"] = int(orig_tokens)
+    if orig_tokens <= int(max_sentence_tokens):
+        stats["chunks"] = 1
+        return [c], stats
+
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split(c) if p.strip()]
+    if len(parts) <= 1:
+        parts = [c]
+
+    fine_parts: List[str] = []
+    for p in parts:
+        if _token_len(tok, p) <= int(max_sentence_tokens):
+            fine_parts.append(p)
+            continue
+        subs = [x.strip() for x in _CLAUSE_SPLIT_RE.split(p) if x.strip()]
+        fine_parts.extend(subs if subs else [p])
+
+    # Greedy pack into <=max_sentence_tokens chunks
+    chunks: List[str] = []
+    buf = ""
+    for seg in fine_parts:
+        if not buf:
+            buf = seg
+            continue
+        cand = (buf + " " + seg).strip()
+        if _token_len(tok, cand) <= int(max_sentence_tokens):
+            buf = cand
+        else:
+            chunks.append(buf)
+            buf = seg
+    if buf:
+        chunks.append(buf)
+
+    if len(chunks) > int(max_chunks):
+        chunks = chunks[: int(max_chunks)]
+        stats["was_truncated"] = True
+
+    # If we still ended up with a single overlong chunk, mark truncated (builder will also truncate)
+    if len(chunks) == 1 and _token_len(tok, chunks[0]) > int(max_sentence_tokens):
+        stats["was_truncated"] = True
+
+    stats["was_split"] = True
+    stats["chunks"] = int(len(chunks))
+    return chunks, stats
+
+
 def _load_manifest(topic: str) -> Dict[str, Any]:
     p = _evidence_manifest_path(topic)
     if not p.exists():
@@ -366,6 +469,46 @@ def _collect_compiled_claims(topic: str, enabled_only: bool = True) -> Tuple[Lis
         seen.add(c)
         dedup.append(c)
     stats["dedup_total"] = len(dedup)
+    return dedup, stats
+
+
+def _collect_enabled_sentence_records(topic: str, enabled_only: bool = True) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Collect full sentence records from enabled evidence sets.
+    Returns (records, stats).
+    """
+    items = _list_evidence_sets(topic)
+    out: List[Dict[str, Any]] = []
+    stats: Dict[str, Any] = {"sets": [], "total": 0}
+    for it in items:
+        if enabled_only and not bool(it.get("enabled")):
+            continue
+        fp = Path(str(it.get("path") or ""))
+        recs = _read_sentence_set(fp)
+        added = 0
+        for r in recs:
+            if not isinstance(r, dict):
+                continue
+            claim = str(r.get("claim") or "").strip()
+            if not claim:
+                continue
+            out.append(r)
+            added += 1
+        stats["sets"].append({"name": it.get("name"), "enabled": bool(it.get("enabled")), "count": int(added)})
+        stats["total"] = int(stats.get("total") or 0) + int(added)
+
+    # best-effort dedupe by (claim, source_id)
+    seen: set[Tuple[str, str]] = set()
+    dedup: List[Dict[str, Any]] = []
+    for r in out:
+        claim = str(r.get("claim") or "").strip()
+        src = str(r.get("source_id") or "").strip()
+        key = (claim, src)
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(r)
+    stats["dedup_total"] = int(len(dedup))
     return dedup, stats
 
 
@@ -751,8 +894,21 @@ class KVIHandler(BaseHTTPRequestHandler):
             if not str(fp).startswith(str(d.resolve())):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "invalid evidence_set path"})
                 return
+            # Token-budget split settings (server-side).
+            max_sentence_tokens = int(obj.get("max_sentence_tokens") or DEFAULT_MAX_SENTENCE_TOKENS)
+            if max_sentence_tokens <= 0:
+                max_sentence_tokens = DEFAULT_MAX_SENTENCE_TOKENS
+            max_sentence_tokens = max(16, min(256, int(max_sentence_tokens)))
+            tok = _get_topic_tokenizer(topic)
             now = _safe_now_iso()
             cleaned: List[Dict[str, Any]] = []
+            split_stats: Dict[str, Any] = {
+                "max_sentence_tokens": int(max_sentence_tokens),
+                "split_records": 0,
+                "generated_records": 0,
+                "truncated_records": 0,
+                "tokenizer_loaded": bool(tok is not None),
+            }
             for r in records:
                 if not isinstance(r, dict):
                     continue
@@ -761,22 +917,41 @@ class KVIHandler(BaseHTTPRequestHandler):
                     continue
                 src_id = r.get("source_id")
                 src_id_s = str(src_id).strip() if src_id is not None and str(src_id).strip() else ""
-                sid = str(r.get("id") or "").strip() or _stable_sentence_id(topic=topic, claim=claim, source_id=src_id_s)
                 created_at = str(r.get("created_at") or "").strip() or now
                 updated_at = now
-                cleaned.append(
-                    {
-                        "id": sid,
-                        "topic": topic,
-                        "claim": claim,
-                        "source_id": (src_id_s if src_id_s else None),
-                        "source_ref": r.get("source_ref") if isinstance(r.get("source_ref"), dict) else {"doi": None, "title": None},
-                        "created_at": created_at,
-                        "updated_at": updated_at,
-                        "author": r.get("author"),
-                        "tags": r.get("tags") if isinstance(r.get("tags"), list) else [],
-                    }
-                )
+                chunks = [claim]
+                ch_meta: Dict[str, Any] = {"was_split": False}
+                if tok is not None and _token_len(tok, claim) > int(max_sentence_tokens):
+                    chunks, ch_meta = _split_claim_to_budget(
+                        tok=tok,
+                        claim=claim,
+                        max_sentence_tokens=int(max_sentence_tokens),
+                        max_chunks=4,
+                    )
+                    if bool(ch_meta.get("was_split")):
+                        split_stats["split_records"] = int(split_stats["split_records"]) + 1
+                    if bool(ch_meta.get("was_truncated")):
+                        split_stats["truncated_records"] = int(split_stats["truncated_records"]) + 1
+                for ch in chunks:
+                    ch = str(ch or "").strip()
+                    if not ch:
+                        continue
+                    sid = _stable_sentence_id(topic=topic, claim=ch, source_id=src_id_s)
+                    cleaned.append(
+                        {
+                            "id": sid,
+                            "topic": topic,
+                            "claim": ch,
+                            "source_id": (src_id_s if src_id_s else None),
+                            "source_ref": r.get("source_ref") if isinstance(r.get("source_ref"), dict) else {"doi": None, "title": None},
+                            "created_at": created_at,
+                            "updated_at": updated_at,
+                            "author": r.get("author"),
+                            "tags": r.get("tags") if isinstance(r.get("tags"), list) else [],
+                            "split_from_id": (str(r.get("id") or "").strip() or None) if bool(ch_meta.get("was_split")) else None,
+                        }
+                    )
+                    split_stats["generated_records"] = int(split_stats["generated_records"]) + 1
             _write_sentence_set(fp, cleaned)
             mf = _load_manifest(topic)
             mf.setdefault("sets", {})
@@ -785,7 +960,19 @@ class KVIHandler(BaseHTTPRequestHandler):
             if "enabled" in obj:
                 mf["sets"][name]["enabled"] = bool(obj.get("enabled"))
             _save_manifest(topic, mf)
-            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "name": name, "path": str(fp), "count": len(cleaned), "enabled": bool((mf["sets"][name] or {}).get("enabled", True))})
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "name": name,
+                    "path": str(fp),
+                    "count": len(cleaned),
+                    "enabled": bool((mf["sets"][name] or {}).get("enabled", True)),
+                    "split_stats": split_stats,
+                },
+            )
             return
 
         if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_set/set_enabled"):
@@ -817,10 +1004,24 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
                 return
 
+            # Optional overrides
+            obj, _ = _read_body_json(self)
+            obj = obj if isinstance(obj, dict) else {}
+            device = str(obj.get("device") or "").strip()
+            dtype = str(obj.get("dtype") or "").strip()
+            max_sentence_tokens = int(obj.get("max_sentence_tokens") or DEFAULT_MAX_SENTENCE_TOKENS)
+            if max_sentence_tokens <= 0:
+                max_sentence_tokens = DEFAULT_MAX_SENTENCE_TOKENS
+            max_sentence_tokens = max(16, min(256, int(max_sentence_tokens)))
+
             topic_dir = _topic_dir(topic)
-            # Build a compiled raw text from enabled evidence sets.
-            claims, claim_stats = _collect_compiled_claims(topic, enabled_only=True)
-            if not claims:
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # Sentence-KVBank build input
+            recs, rec_stats = _collect_enabled_sentence_records(topic, enabled_only=True)
+            if not recs:
                 _json_response(
                     self,
                     HTTPStatus.BAD_REQUEST,
@@ -828,84 +1029,58 @@ class KVIHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            # Optional overrides
-            obj, _ = _read_body_json(self)
-            obj = obj if isinstance(obj, dict) else {}
-            device = str(obj.get("device") or "").strip()
-            dtype = str(obj.get("dtype") or "").strip()
-
-            # Prefer writing artifacts to configured work_dir (matches your CLI usage),
-            # but fallback to topic_dir for minimal setups.
-            work_dir_raw = str(build.get("work_dir") or "").strip()
-            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
-            out_dir.mkdir(parents=True, exist_ok=True)
-            pattern_dir = out_dir / "pattern_sidecar"
-            pattern_dir.mkdir(parents=True, exist_ok=True)
-
+            sentences_jsonl = out_dir / "sentences.jsonl"
             compiled_txt = out_dir / "evidence.compiled.txt"
-            compiled_txt.write_text("\n".join(claims) + ("\n" if claims else ""), encoding="utf-8")
+            seen_ids: set[str] = set()
+            written = 0
+            with sentences_jsonl.open("w", encoding="utf-8") as f:
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    claim = str(r.get("claim") or "").strip()
+                    if not claim:
+                        continue
+                    src = str(r.get("source_id") or "").strip()
+                    sid = str(r.get("id") or "").strip() or _stable_sentence_id(topic=topic, claim=claim, source_id=src)
+                    bid = f"sent_{sid}"
+                    if bid in seen_ids:
+                        continue
+                    seen_ids.add(bid)
+                    meta = {
+                        "kind": "sentence",
+                        "topic": topic,
+                        "source_ref": r.get("source_ref") if isinstance(r.get("source_ref"), dict) else {"doi": None, "title": None},
+                        "author": r.get("author"),
+                        "tags": r.get("tags") if isinstance(r.get("tags"), list) else [],
+                        "evidence_id": sid,
+                    }
+                    f.write(
+                        json.dumps(
+                            {
+                                "block_id": bid,
+                                "text": claim,
+                                "source_id": (src if src else None),
+                                "doc_id": (src if src else None),
+                                "metadata": meta,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    written += 1
 
-            blocks_jsonl = out_dir / "blocks.jsonl"
-            blocks_enriched = out_dir / "blocks.enriched.jsonl"
-            kv_dir = out_dir / "kvbank_blocks"
+            # Human-readable compiled txt (one sentence per line)
+            compiled_txt.write_text("\n".join([str(r.get("claim") or "").strip() for r in recs if str(r.get("claim") or "").strip()]) + "\n", encoding="utf-8")
 
-            cmds: List[List[str]] = []
-            cmds.append(
-                [
-                    sys.executable,
-                    str(PROJECT_ROOT / "scripts" / "build_blocks_from_raw_text.py"),
-                    "--raw_text",
-                    str(compiled_txt),
-                    "--out",
-                    str(blocks_jsonl),
-                    "--tokenizer",
-                    base_llm,
-                    "--chunk_tokens",
-                    "4096",
-                    "--chunk_overlap",
-                    "256",
-                    "--block_tokens",
-                    "256",
-                    "--keep_last_incomplete_block",
-                ]
-            )
-            cmds.append(
-                [
-                    sys.executable,
-                    str(PROJECT_ROOT / "scripts" / "build_pattern_index_from_blocks_v2.py"),
-                    "--blocks_jsonl_in",
-                    str(blocks_jsonl),
-                    "--blocks_jsonl_out",
-                    str(blocks_enriched),
-                    "--pattern_out_dir",
-                    str(pattern_dir),
-                ]
-            )
-            cmds.append(
-                [
-                    sys.executable,
-                    str(PROJECT_ROOT / "scripts" / "pattern_contract_autogen.py"),
-                    "--blocks_jsonl_in",
-                    str(blocks_enriched),
-                    "--out",
-                    str(out_dir / "pattern_contract.json"),
-                    "--topic",
-                    str(topic),
-                    "--min_abbr_count",
-                    "1",
-                    "--min_slot_count",
-                    "1",
-                    "--max_abbr",
-                    "50",
-                    "--max_slots",
-                    "50",
-                ]
-            )
+            kv_dir = out_dir / "kvbank_sentences"
+            kv_dir.mkdir(parents=True, exist_ok=True)
+
             cmd_kv = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "build_kvbank_from_blocks_jsonl.py"),
                 "--blocks_jsonl",
-                str(blocks_enriched),
+                str(sentences_jsonl),
+                "--disable_enriched",
                 "--out_dir",
                 str(kv_dir),
                 "--base_llm",
@@ -915,7 +1090,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--layers",
                 "0,1,2,3",
                 "--block_tokens",
-                "256",
+                str(int(max_sentence_tokens)),
                 "--shard_size",
                 "1024",
             ]
@@ -923,22 +1098,19 @@ class KVIHandler(BaseHTTPRequestHandler):
                 cmd_kv.extend(["--device", device])
             if dtype:
                 cmd_kv.extend(["--dtype", dtype])
-            cmds.append(cmd_kv)
 
-            logs: List[Dict[str, Any]] = []
-            for c in cmds:
-                r = subprocess.run(c, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
-                logs.append(
-                    {
-                        "cmd": " ".join(c),
-                        "returncode": int(r.returncode),
-                        "stdout": (r.stdout or "")[-8000:],
-                        "stderr": (r.stderr or "")[-8000:],
-                    }
-                )
-                if r.returncode != 0:
-                    _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(c), "logs": logs})
-                    return
+            r = subprocess.run(cmd_kv, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            logs: List[Dict[str, Any]] = [
+                {
+                    "cmd": " ".join(cmd_kv),
+                    "returncode": int(r.returncode),
+                    "stdout": (r.stdout or "")[-8000:],
+                    "stderr": (r.stderr or "")[-8000:],
+                }
+            ]
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(cmd_kv), "logs": logs})
+                return
 
             _json_response(
                 self,
@@ -946,13 +1118,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "topic": topic,
-                    "topic_dir": str(topic_dir),
-                    "compiled_evidence_txt": str(compiled_txt),
-                    "compiled_stats": claim_stats,
                     "out_dir": str(out_dir),
-                    "pattern_index_dir": str(pattern_dir),
-                    "blocks_jsonl": str(blocks_jsonl),
-                    "blocks_enriched_jsonl": str(blocks_enriched),
+                    "max_sentence_tokens": int(max_sentence_tokens),
+                    "compiled_evidence_txt": str(compiled_txt),
+                    "sentences_jsonl": str(sentences_jsonl),
+                    "compiled_stats": rec_stats,
+                    "written_sentences": int(written),
                     "kv_dir": str(kv_dir),
                     "logs": logs,
                 },
@@ -979,20 +1150,21 @@ class KVIHandler(BaseHTTPRequestHandler):
             work_dir_raw = str(build.get("work_dir") or "").strip()
             out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
             pattern_index_dir = out_dir / "pattern_sidecar"
-            kv_dir = out_dir / "kvbank_blocks"
-            blocks_enriched = out_dir / "blocks.enriched.jsonl"
+            kv_dir = out_dir / "kvbank_sentences"
             if not kv_dir.exists():
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_blocks not found: {kv_dir}. Click 编译 first."})
-                return
-            if not blocks_enriched.exists():
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"blocks.enriched.jsonl not found: {blocks_enriched}. Click 编译 first."})
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
 
             top_k = int(obj.get("top_k") or 8)
             show_baseline = bool(obj.get("show_baseline", True))
             simple_max_steps = int(obj.get("simple_max_steps") or 1)
             simple_step_new_tokens = int(obj.get("simple_step_new_tokens") or 192)
-            simple_max_blocks_per_step = int(obj.get("simple_max_blocks_per_step") or 4)
+            simple_max_blocks_per_step = int(obj.get("simple_max_blocks_per_step") or HARD_MAX_INJECTED_SENTENCES_PER_STEP)
+            simple_max_blocks_per_step = max(1, min(HARD_MAX_INJECTED_SENTENCES_PER_STEP, int(simple_max_blocks_per_step)))
+            max_sentence_tokens = int(obj.get("max_sentence_tokens") or DEFAULT_MAX_SENTENCE_TOKENS)
+            max_sentence_tokens = max(16, min(256, int(max_sentence_tokens)))
+            max_total_injected_tokens = int(obj.get("max_total_injected_tokens") or HARD_MAX_TOTAL_INJECTED_TOKENS)
+            max_total_injected_tokens = max(64, min(2048, int(max_total_injected_tokens)))
 
             cmd = [
                 sys.executable,
@@ -1005,8 +1177,6 @@ class KVIHandler(BaseHTTPRequestHandler):
                 prompt,
                 "--kv_dir",
                 str(kv_dir),
-                "--blocks_jsonl",
-                str(blocks_enriched),
                 "--pattern_index_dir",
                 str(pattern_index_dir),
                 "--sidecar_dir",
@@ -1022,6 +1192,10 @@ class KVIHandler(BaseHTTPRequestHandler):
                 str(simple_step_new_tokens),
                 "--simple_max_blocks_per_step",
                 str(simple_max_blocks_per_step),
+                "--simple_max_sentence_tokens",
+                str(int(max_sentence_tokens)),
+                "--simple_max_total_injected_tokens",
+                str(int(max_total_injected_tokens)),
             ]
             if show_baseline:
                 cmd.append("--show_baseline")
@@ -1038,7 +1212,6 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "topic": topic,
                     "cmd": " ".join(cmd),
                     "kv_dir": str(kv_dir),
-                    "blocks_jsonl": str(blocks_enriched),
                     "pattern_index_dir": str(pattern_index_dir),
                     "sidecar_dir": str(out_dir),
                     "result": out,

@@ -61,13 +61,19 @@
         <div class="btns">
           <button class="primary" id="btn_create_set">新建 evidence set</button>
           <button id="btn_reload_sets">刷新列表</button>
-          <button class="ok" id="btn_compile">编译：生成 KVBank（kvbank_blocks）</button>
+          <button class="ok" id="btn_compile">编译：生成 sentence-KVBank（kvbank_sentences）</button>
         </div>
         <div class="note" id="set_stats">未选择</div>
       </div>
 
       <div class="field">
         <label>新增 / 编辑 sentence（按 sentence 为主）</label>
+        <div class="row">
+          <div class="field">
+            <label>max_sentence_tokens *（target token budget，默认 128；过长会自动拆分为 2–4 条）</label>
+            <input id="sent_token_budget" value="128" />
+          </div>
+        </div>
         <div class="row">
           <div class="field">
             <label>source_id（doc_id/DOI；可空）</label>
@@ -154,7 +160,7 @@
         <div class="field">
           <label>Topic（主题库）</label>
           <select id="topic_select_debug"></select>
-          <div class="note">运行 `scripts/run_kvi2_runtime_test.py --pipeline simple`，输出 baseline 与 injected answer。</div>
+          <div class="note">运行 `scripts/run_kvi2_runtime_test.py --pipeline simple`（sentence-KVBank），输出 baseline 与 injected answer。</div>
         </div>
         <div class="field">
           <label>参数</label>
@@ -183,12 +189,12 @@
           </div>
           <div class="row">
             <div class="field">
-              <label>simple_max_blocks_per_step</label>
-              <input id="debug_max_blocks" value="4" />
+              <label>max_injected_sentences_per_step（硬上限 4）</label>
+              <input id="debug_max_blocks" value="2" />
             </div>
             <div class="field">
-              <label>注入强度 / 注入块数量（top 1–2 推荐）: <span class="mono" id="debug_blocks_n">2</span></label>
-              <input id="debug_blocks_slider" type="range" min="1" max="8" step="1" value="2" />
+              <label>注入强度 / 注入 sentence 条数（top 1–2 推荐）: <span class="mono" id="debug_blocks_n">2</span></label>
+              <input id="debug_blocks_slider" type="range" min="1" max="4" step="1" value="2" />
             </div>
           </div>
           <div class="btns">
@@ -217,7 +223,7 @@
       </div>
 
       <div class="field">
-        <label>Debug（steps / evidence units / selected blocks）</label>
+        <label>Debug（steps / selected sentences）</label>
         <div class="pre" id="out_debug">等待运行...</div>
       </div>
     </div>

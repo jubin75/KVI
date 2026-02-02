@@ -106,8 +106,11 @@ function toJsonl(records) {
 }
 
 async function compileSimple() {
-  $("compile_log").textContent = "编译中...（该过程会跑 tokenizer 分块、pattern 侧车、KVBank 构建，可能需要数分钟）\n";
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {});
+  const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
+  $("compile_log").textContent = "编译中...（sentence-KVBank：逐条 sentence forward 抽取 KV cache 并建 FAISS；可能需要数分钟）\n";
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {
+    max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
+  });
   const ok = !!resp.ok;
   $("compile_log").textContent = (ok ? "✅ OK\n\n" : "❌ FAILED\n\n") + pretty(resp);
 }
@@ -150,9 +153,14 @@ async function saveCurrentSet() {
   if (!currentSet) throw new Error("未选择 evidence set。");
   const name = currentSet.name;
   const enabled = ($("set_enabled").value || "true") === "true";
+  const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
   const records = parseJsonl($("set_raw").value || "");
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_set/save`, { name, enabled, records });
-  $("set_stats").textContent = `已保存：${resp.name}  count=${resp.count}  enabled=${resp.enabled}`;
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_set/save`, {
+    name, enabled, records,
+    max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
+  });
+  const ss = resp.split_stats || null;
+  $("set_stats").textContent = `已保存：${resp.name}  count=${resp.count}  enabled=${resp.enabled}` + (ss ? `  split=${ss.split_records||0}→${ss.generated_records||0}  truncated=${ss.truncated_records||0}` : "");
   await loadEvidenceSets();
   await loadEvidenceSet(name);
 }
@@ -283,6 +291,7 @@ async function runDebug() {
   const maxSteps = Number(($("debug_max_steps").value || "1").trim());
   const stepNewTokens = Number(($("debug_step_new_tokens").value || "192").trim());
   const maxBlocks = Number(($("debug_blocks_slider").value || $("debug_max_blocks").value || "2").trim());
+  const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
   $("out_cli").textContent = "运行中...";
   $("out_base").textContent = "运行中...";
   $("out_injected").textContent = "运行中...";
@@ -294,6 +303,7 @@ async function runDebug() {
     simple_max_steps: Number.isFinite(maxSteps) ? maxSteps : 1,
     simple_step_new_tokens: Number.isFinite(stepNewTokens) ? stepNewTokens : 192,
     simple_max_blocks_per_step: Number.isFinite(maxBlocks) ? maxBlocks : 4,
+    max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
   });
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
@@ -337,7 +347,7 @@ function wire() {
     $("doc_detail_view").style.display = "none";
   };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
-  // slider reflect (injected blocks)
+  // slider reflect (injected sentences)
   const slider = $("debug_blocks_slider");
   const show = $("debug_blocks_n");
   const maxBlocksInput = $("debug_max_blocks");
