@@ -51,6 +51,63 @@ def _load_semantic_type_specs(*, pattern_index_dir: str) -> Dict[str, Dict[str, 
     }
 
 
+def _load_semantic_type_specs_any(*, pattern_index_dir: str, semantic_type_specs_path: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Load semantic type specs from an explicit path first (work_dir/semantic_type_specs.json),
+    then fall back to pattern_index_dir/semantic_type_specs.json, then built-in defaults.
+    """
+    sp = str(semantic_type_specs_path or "").strip()
+    if sp:
+        p = Path(sp)
+        if p.exists():
+            try:
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    return {str(k): (v if isinstance(v, dict) else {"description": str(v)}) for k, v in obj.items()}
+            except Exception:
+                pass
+    return _load_semantic_type_specs(pattern_index_dir=str(pattern_index_dir or ""))
+
+
+def _infer_intent_from_specs(*, enc: Any, query: str, specs: Dict[str, Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Config-driven intent inference (no hard-coded intent types).
+    Use embedding similarity between query and each type anchor (description + query).
+    """
+    q = str(query or "").strip()
+    if not q:
+        return "unknown", {"method": "specs_embedding", "reason": "empty_query"}
+    if not isinstance(specs, dict) or not specs:
+        return "unknown", {"method": "specs_embedding", "reason": "empty_specs"}
+
+    keys = [str(k).strip().lower() for k in specs.keys() if str(k).strip()]
+    keys = [k for k in keys if k]
+    if not keys:
+        return "unknown", {"method": "specs_embedding", "reason": "no_keys"}
+
+    anchors: List[str] = []
+    for k in keys:
+        spec = specs.get(k) if isinstance(specs.get(k), dict) else {}
+        desc = str((spec or {}).get("description") or (spec or {}).get("desc") or "").strip() or k
+        anchors.append(f"[semantic_type]\n{k}\n\n[description]\n{desc}\n\n[query]\n{q}\n")
+
+    try:
+        import numpy as np  # type: ignore
+
+        a = enc.encode(anchors, batch_size=min(16, max(1, len(anchors))))
+        qv = enc.encode([q], batch_size=1)[0]
+        sims = (a @ qv).astype(float)
+        order = list(np.argsort(-sims))
+        best = keys[order[0]] if order else "unknown"
+        dbg = {
+            "method": "specs_embedding",
+            "best": best,
+            "top": [{"type": keys[i], "sim": float(sims[i])} for i in order[: min(5, len(order))]],
+        }
+        return best, dbg
+    except Exception as e:
+        return "unknown", {"method": "specs_embedding", "error": f"{type(e).__name__}"}
+
 def _semantic_filter_units_by_embedding(
     *,
     enc: Any,
@@ -768,6 +825,11 @@ def main() -> None:
         default="",
         help="sentences.jsonl path (optional for pipeline=simple; used for stricter postprocess rules)",
     )
+    p.add_argument(
+        "--semantic_type_specs",
+        default="",
+        help="semantic_type_specs.json path (work_dir-level config for intent taxonomy; optional)",
+    )
     p.add_argument("--pattern_index_dir", required=True, help="pattern sidecar directory")
     p.add_argument("--sidecar_dir", required=True, help="sidecar directory")
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
@@ -835,9 +897,11 @@ def main() -> None:
         block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
 
     sentence_text_lookup: Dict[str, str] = {}
+    sentences_jsonl_path = ""
     if str(args.pipeline) == "simple":
         sj = str(args.sentences_jsonl or "").strip()
         if sj:
+            sentences_jsonl_path = sj
             sentence_text_lookup = _load_sentence_text_lookup(sj)
 
     # ----------------------------------------
@@ -877,6 +941,8 @@ def main() -> None:
             "【缩写规则】除非检索/注入的知识内容原文出现该括号形式，否则禁止输出类似 “SFTSV（……）” 的括号扩展。"
         )
 
+        specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
+
         max_steps = int(args.simple_max_steps)
         step_new_tokens = int(args.simple_step_new_tokens)
         # Hard budgets (sentence-KVBank)
@@ -892,6 +958,7 @@ def main() -> None:
             step_debug: List[Dict[str, Any]] = []
             for step in range(max_steps):
                 qtxt = prompt_for_user + ("\n" + generated if generated.strip() else "")
+                target_st, st_dbg = _infer_intent_from_specs(enc=enc, query=qtxt, specs=specs)
                 qv = enc.encode(qtxt)[0]
                 rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
                 candidates: List[Tuple[float, Any, str]] = []
@@ -904,6 +971,54 @@ def main() -> None:
                     score = float(getattr(it, "score", 0.0) or 0.0)
                     candidates.append((float(score), it, bid))
                 candidates.sort(key=lambda x: x[0], reverse=True)
+
+                semantic_rerank_dbg: Dict[str, Any] = {"enabled": False, "semantic_type": str(target_st), "method": "none"}
+                # Semantic rerank driven by build-time tags if present; fallback to embedding rerank.
+                if str(target_st) != "unknown":
+                    try:
+                        import numpy as np  # type: ignore
+
+                        enriched2: List[Tuple[float, float, Any, str]] = []
+                        used_tags = 0
+                        for ann_score, it, bid in candidates:
+                            meta = getattr(it, "meta", None) or {}
+                            payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+                            scores = payload.get("semantic_scores") if isinstance(payload.get("semantic_scores"), dict) else {}
+                            sem = scores.get(str(target_st).lower())
+                            if isinstance(sem, (int, float)):
+                                used_tags += 1
+                                sem_score = float(sem)
+                            else:
+                                # fallback: compute sim against the sentence text
+                                if sentence_text_lookup:
+                                    spec = specs.get(str(target_st).lower()) if isinstance(specs, dict) else None
+                                    desc = str((spec or {}).get("description") or "").strip() if isinstance(spec, dict) else str(target_st)
+                                    anchor_text = f"[semantic_type]\n{str(target_st).lower()}\n\n[description]\n{desc}\n\n[query]\n{qtxt}\n"
+                                    a1 = enc.encode([anchor_text], batch_size=1)[0]
+                                    txt = str(sentence_text_lookup.get(str(bid), "") or "")
+                                    v1 = enc.encode([txt], batch_size=1)[0] if txt else a1 * 0
+                                    sem_score = float((v1 @ a1).astype(float))
+                                else:
+                                    sem_score = 0.0
+                            enriched2.append((float(sem_score), float(ann_score), it, bid))
+                        enriched2.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                        candidates = [(ann, it, bid) for sem, ann, it, bid in enriched2]
+                        cand_ids = [bid for _ann, _it, bid in candidates]
+                        semantic_rerank_dbg = {
+                            "enabled": True,
+                            "semantic_type": str(target_st),
+                            "method": "tag_score_then_fallback_embedding",
+                            "used_tag_scores": int(used_tags),
+                            "top_semantic_sims": [float(x[0]) for x in enriched2[: min(5, len(enriched2))]],
+                            "top_ids": [str(x[3]) for x in enriched2[: min(5, len(enriched2))]],
+                        }
+                    except Exception as e:
+                        semantic_rerank_dbg = {
+                            "enabled": False,
+                            "semantic_type": str(target_st),
+                            "method": "failed",
+                            "error": f"{type(e).__name__}",
+                        }
 
                 selected: List[Any] = []
                 selected_ids: List[str] = []
@@ -960,7 +1075,13 @@ def main() -> None:
                         continue
                 pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
 
-                step_prompt = (prompt_for_user + prose_guard + (extra_guard or "") + ("\n\n" + generated if generated.strip() else "")).strip()
+                # Intent guard from config-driven type (keep wording generic; do not hard-code type list).
+                intent_guard = ""
+                if str(target_st) != "unknown":
+                    intent_guard = f"\n【意图约束】本轮目标语义维度：{str(target_st)}。只回答该维度相关内容；不要扩展到其他维度。"
+                step_prompt = (
+                    prompt_for_user + prose_guard + intent_guard + (extra_guard or "") + ("\n\n" + generated if generated.strip() else "")
+                ).strip()
                 step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
                 chunk = MultiStepInjector._greedy_generate_with_past_prefix(
                     model=model,
@@ -985,6 +1106,8 @@ def main() -> None:
                         "max_injected_sentences_per_step": int(max_blocks),
                         "max_sentence_tokens": int(max_sentence_tokens),
                         "max_total_injected_tokens": int(max_total_injected_tokens),
+                        "semantic_intent": st_dbg,
+                        "semantic_rerank": semantic_rerank_dbg,
                     }
                 )
                 if not chunk:

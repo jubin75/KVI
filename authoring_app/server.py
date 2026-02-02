@@ -38,6 +38,16 @@ DEFAULT_MAX_SENTENCE_TOKENS = 128
 HARD_MAX_INJECTED_SENTENCES_PER_STEP = 4
 HARD_MAX_TOTAL_INJECTED_TOKENS = 512
 
+_DEFAULT_SEMANTIC_TYPE_SPECS = {
+    "symptom": {"description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。", "threshold": 0.28},
+    "drug": {"description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。", "threshold": 0.28},
+    "location": {"description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。", "threshold": 0.28},
+    "mechanism": {
+        "description": "作用机制/发病机制：感染哪些细胞、免疫应答/免疫抑制、炎症反应、病理过程、通透性改变、多器官损伤等。",
+        "threshold": 0.26,
+    },
+}
+
 _INDEX_FALLBACK_HTML = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1075,11 +1085,43 @@ class KVIHandler(BaseHTTPRequestHandler):
             kv_dir = out_dir / "kvbank_sentences"
             kv_dir.mkdir(parents=True, exist_ok=True)
 
+            # Ensure semantic_type_specs.json exists in work_dir (config-driven intent taxonomy).
+            specs_path = out_dir / "semantic_type_specs.json"
+            if not specs_path.exists():
+                specs_path.write_text(json.dumps(_DEFAULT_SEMANTIC_TYPE_SPECS, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            # Offline tag sentences with semantic intent (no base LLM).
+            sentences_tagged = out_dir / "sentences.tagged.jsonl"
+            cmd_tag = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "annotate_sentences_semantic_tags.py"),
+                "--in_jsonl",
+                str(sentences_jsonl),
+                "--out_jsonl",
+                str(sentences_tagged),
+                "--domain_encoder_model",
+                encoder,
+                "--semantic_type_specs",
+                str(specs_path),
+            ]
+            r0 = subprocess.run(cmd_tag, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            logs: List[Dict[str, Any]] = [
+                {
+                    "cmd": " ".join(cmd_tag),
+                    "returncode": int(r0.returncode),
+                    "stdout": (r0.stdout or "")[-8000:],
+                    "stderr": (r0.stderr or "")[-8000:],
+                }
+            ]
+            if r0.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(cmd_tag), "logs": logs})
+                return
+
             cmd_kv = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "build_kvbank_from_blocks_jsonl.py"),
                 "--blocks_jsonl",
-                str(sentences_jsonl),
+                str(sentences_tagged),
                 "--disable_enriched",
                 "--out_dir",
                 str(kv_dir),
@@ -1099,16 +1141,16 @@ class KVIHandler(BaseHTTPRequestHandler):
             if dtype:
                 cmd_kv.extend(["--dtype", dtype])
 
-            r = subprocess.run(cmd_kv, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
-            logs: List[Dict[str, Any]] = [
+            r1 = subprocess.run(cmd_kv, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            logs.append(
                 {
                     "cmd": " ".join(cmd_kv),
-                    "returncode": int(r.returncode),
-                    "stdout": (r.stdout or "")[-8000:],
-                    "stderr": (r.stderr or "")[-8000:],
+                    "returncode": int(r1.returncode),
+                    "stdout": (r1.stdout or "")[-8000:],
+                    "stderr": (r1.stderr or "")[-8000:],
                 }
-            ]
-            if r.returncode != 0:
+            )
+            if r1.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(cmd_kv), "logs": logs})
                 return
 
@@ -1122,6 +1164,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "max_sentence_tokens": int(max_sentence_tokens),
                     "compiled_evidence_txt": str(compiled_txt),
                     "sentences_jsonl": str(sentences_jsonl),
+                    "sentences_tagged_jsonl": str(sentences_tagged),
+                    "semantic_type_specs": str(specs_path),
                     "compiled_stats": rec_stats,
                     "written_sentences": int(written),
                     "kv_dir": str(kv_dir),
@@ -1181,7 +1225,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--kv_dir",
                 str(kv_dir),
                 "--sentences_jsonl",
-                str(out_dir / "sentences.jsonl"),
+                str(out_dir / "sentences.tagged.jsonl"),
+                "--semantic_type_specs",
+                str(out_dir / "semantic_type_specs.json"),
                 "--pattern_index_dir",
                 str(pattern_index_dir),
                 "--sidecar_dir",
