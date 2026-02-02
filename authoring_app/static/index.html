@@ -197,6 +197,15 @@
               <input id="debug_blocks_slider" type="range" min="1" max="4" step="1" value="2" />
             </div>
           </div>
+          <div class="row">
+            <div class="field">
+              <label>检测违规→自动再注入/再生成一轮（最多 1 次）</label>
+              <select id="debug_regen_on_violation">
+                <option value="false" selected>false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+          </div>
           <div class="btns">
             <button class="primary" id="btn_run_debug">运行：注入调试</button>
           </div>

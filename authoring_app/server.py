@@ -1165,6 +1165,9 @@ class KVIHandler(BaseHTTPRequestHandler):
             max_sentence_tokens = max(16, min(256, int(max_sentence_tokens)))
             max_total_injected_tokens = int(obj.get("max_total_injected_tokens") or HARD_MAX_TOTAL_INJECTED_TOKENS)
             max_total_injected_tokens = max(64, min(2048, int(max_total_injected_tokens)))
+            regen_on_violation = bool(obj.get("regen_on_violation", False))
+            max_regen_rounds = int(obj.get("max_regen_rounds") or 1)
+            max_regen_rounds = max(0, min(2, int(max_regen_rounds)))
 
             cmd = [
                 sys.executable,
@@ -1199,6 +1202,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--simple_max_total_injected_tokens",
                 str(int(max_total_injected_tokens)),
             ]
+            if regen_on_violation:
+                cmd.append("--simple_regen_on_violation")
+                cmd.extend(["--simple_max_regen_rounds", str(int(max_regen_rounds))])
             if show_baseline:
                 cmd.append("--show_baseline")
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)

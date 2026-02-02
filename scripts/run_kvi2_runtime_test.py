@@ -198,6 +198,49 @@ def _load_sentence_text_lookup(path: str) -> Dict[str, str]:
 _ABBR_PARENS_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_-]{1,})[（(]([^）)]{1,64})[）)]")
 
 
+def _detect_violations(
+    *,
+    answer: str,
+    user_prompt: str,
+    evidence_texts: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """
+    Lightweight validator for "regen-on-violation".
+    Keep it conservative: only flag clear violations.
+    """
+    a = str(answer or "").strip()
+    q = str(user_prompt or "").strip()
+    ev = "\n".join([str(x or "") for x in (evidence_texts or [])])
+    if not a:
+        return [{"type": "empty_answer"}]
+
+    violations: List[Dict[str, Any]] = []
+
+    # 1) Abbreviation expansion must appear verbatim in evidence.
+    for m in _ABBR_PARENS_RE.finditer(a):
+        abbr = m.group(1)
+        inner = m.group(2)
+        full_zh = f"{abbr}（{inner}）"
+        full_en = f"{abbr}({inner})"
+        if full_zh not in ev and full_en not in ev:
+            violations.append({"type": "abbr_expansion_not_in_evidence", "span": m.group(0), "abbr": abbr})
+
+    # 2) Scope drift (very conservative): if query is mechanism-ish but answer introduces obvious symptom-only terms
+    # that are not present in evidence texts, flag.
+    ql = q.lower()
+    mech_cues = ["机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism"]
+    symptom_cues = ["皮疹", "淋巴结", "水疱", "红斑", "脑膜炎", "脑炎", "格林-巴利", "gbs"]
+    if any(c in q for c in mech_cues) or any(c in ql for c in mech_cues):
+        leaked = []
+        for t in symptom_cues:
+            if (t in a) and (t not in ev):
+                leaked.append(t)
+        if leaked:
+            violations.append({"type": "scope_drift_symptom_terms", "terms": leaked, "query_intent": "mechanism"})
+
+    return violations
+
+
 def _strip_unapproved_abbr_expansions(*, text: str, evidence_texts: Sequence[str]) -> str:
     """
     Enforce "缩写规则" post-hoc: only allow acronym expansions if the exact form appears in
@@ -723,6 +766,8 @@ def main() -> None:
     p.add_argument("--simple_max_blocks_per_step", type=int, default=8)
     p.add_argument("--simple_max_sentence_tokens", type=int, default=128)
     p.add_argument("--simple_max_total_injected_tokens", type=int, default=512)
+    p.add_argument("--simple_regen_on_violation", action="store_true", help="If validator flags violations, re-inject & re-generate once (max rounds controlled by --simple_max_regen_rounds).")
+    p.add_argument("--simple_max_regen_rounds", type=int, default=1, help="Max extra regen rounds after the first answer (0 disables retries).")
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -813,110 +858,158 @@ def main() -> None:
         # UI hard-cap: at most 4 sentences per step.
         max_blocks = max(1, min(4, int(max_blocks)))
         top_k = int(args.top_k)
-        used: set[str] = set()
-        generated = ""
-        step_debug: List[Dict[str, Any]] = []
+        def _run_once(*, prompt_for_user: str, extra_guard: str) -> Tuple[str, List[Dict[str, Any]]]:
+            used: set[str] = set()
+            generated = ""
+            step_debug: List[Dict[str, Any]] = []
+            for step in range(max_steps):
+                qtxt = prompt_for_user + ("\n" + generated if generated.strip() else "")
+                qv = enc.encode(qtxt)[0]
+                rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
+                candidates: List[Tuple[float, Any, str]] = []
+                cand_ids: List[str] = []
+                for it in (rr.items or []):
+                    bid = _kv_id(it)
+                    if not bid:
+                        continue
+                    cand_ids.append(bid)
+                    score = float(getattr(it, "score", 0.0) or 0.0)
+                    candidates.append((float(score), it, bid))
+                candidates.sort(key=lambda x: x[0], reverse=True)
 
-        for step in range(max_steps):
-            qtxt = user_prompt + ("\n" + generated if generated.strip() else "")
-            qv = enc.encode(qtxt)[0]
-            rr = retriever.search(qv, top_k=int(top_k * 3), filters=None, query_text=qtxt)
-            # Rank candidates by ANN score only (KV injection).
-            candidates: List[Tuple[float, Any, str]] = []
-            cand_ids: List[str] = []
-            for it in (rr.items or []):
-                bid = _kv_id(it)
-                if not bid:
-                    continue
-                cand_ids.append(bid)
-                score = float(getattr(it, "score", 0.0) or 0.0)
-                candidates.append((float(score), it, bid))
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            selected: List[Any] = []
-            selected_ids: List[str] = []
-            selected_kv_lens: List[int] = []
-            total_kv_tokens = 0
-            for _score, it, bid in candidates:
-                if bid in used:
-                    continue
-                kv_len = None
-                try:
-                    if hasattr(it, "meta") and isinstance(getattr(it, "meta"), dict):
-                        kv_len = it.meta.get("kv_len")
-                except Exception:
+                selected: List[Any] = []
+                selected_ids: List[str] = []
+                selected_kv_lens: List[int] = []
+                total_kv_tokens = 0
+                for _score, it, bid in candidates:
+                    if bid in used:
+                        continue
                     kv_len = None
-                kv_len_i = int(kv_len) if isinstance(kv_len, int) else int(max_sentence_tokens)
-                kv_len_i = max(0, min(int(max_sentence_tokens), int(kv_len_i)))
-                if (total_kv_tokens + kv_len_i) > int(max_total_injected_tokens):
-                    continue
-                selected.append(it)
-                selected_ids.append(bid)
-                selected_kv_lens.append(int(kv_len_i))
-                total_kv_tokens += int(kv_len_i)
-                used.add(bid)
-                if len(selected) >= max_blocks:
+                    try:
+                        if hasattr(it, "meta") and isinstance(getattr(it, "meta"), dict):
+                            kv_len = it.meta.get("kv_len")
+                    except Exception:
+                        kv_len = None
+                    kv_len_i = int(kv_len) if isinstance(kv_len, int) else int(max_sentence_tokens)
+                    kv_len_i = max(0, min(int(max_sentence_tokens), int(kv_len_i)))
+                    if (total_kv_tokens + kv_len_i) > int(max_total_injected_tokens):
+                        continue
+                    selected.append(it)
+                    selected_ids.append(bid)
+                    selected_kv_lens.append(int(kv_len_i))
+                    total_kv_tokens += int(kv_len_i)
+                    used.add(bid)
+                    if len(selected) >= max_blocks:
+                        break
+
+                dtype2 = next(model.parameters()).dtype
+                ext_by_layer: Dict[int, Any] = {}
+                for li in (0, 1, 2, 3):
+                    try:
+                        ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
+                            items=selected,
+                            layer_id=int(li),
+                            batch_size=1,
+                            device=device,
+                            dtype=dtype2,
+                        )
+                    except Exception:
+                        continue
+                pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
+
+                step_prompt = (prompt_for_user + prose_guard + (extra_guard or "") + ("\n\n" + generated if generated.strip() else "")).strip()
+                step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
+                chunk = MultiStepInjector._greedy_generate_with_past_prefix(
+                    model=model,
+                    tokenizer=tok,
+                    prompt=step_prompt,
+                    device=device,
+                    past_key_values=pkv,
+                    max_new_tokens=int(step_new_tokens),
+                    no_repeat_ngram_size=12,
+                    repetition_penalty=1.08,
+                )
+                chunk = str(chunk or "").strip()
+                generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
+                step_debug.append(
+                    {
+                        "step": int(step),
+                        "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
+                        "selected_ids": selected_ids,
+                        "selected_kv_lens": selected_kv_lens,
+                        "selected_total_kv_tokens": int(total_kv_tokens),
+                        "max_injected_sentences_per_step": int(max_blocks),
+                        "max_sentence_tokens": int(max_sentence_tokens),
+                        "max_total_injected_tokens": int(max_total_injected_tokens),
+                    }
+                )
+                if not chunk:
                     break
-            # Build injected prefix from selected blocks (layers 0..3).
-            dtype2 = next(model.parameters()).dtype
-            ext_by_layer: Dict[int, Any] = {}
-            for li in (0, 1, 2, 3):
-                try:
-                    ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
-                        items=selected,
-                        layer_id=int(li),
-                        batch_size=1,
-                        device=device,
-                        dtype=dtype2,
-                    )
-                except Exception:
-                    continue
-            pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer) if ext_by_layer else None
+            return generated.strip(), step_debug
 
-            step_prompt = (user_prompt + prose_guard + ("\n\n" + generated if generated.strip() else "")).strip()
-            step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
-            chunk = MultiStepInjector._greedy_generate_with_past_prefix(
-                model=model,
-                tokenizer=tok,
-                prompt=step_prompt,
-                device=device,
-                past_key_values=pkv,
-                max_new_tokens=int(step_new_tokens),
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
-            )
-            chunk = str(chunk or "").strip()
-            generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
-            step_debug.append(
-                {
-                    "step": int(step),
-                    "retrieved_ids_top": cand_ids[: min(12, len(cand_ids))],
-                    "selected_ids": selected_ids,
-                    "selected_kv_lens": selected_kv_lens,
-                    "selected_total_kv_tokens": int(total_kv_tokens),
-                    "max_injected_sentences_per_step": int(max_blocks),
-                    "max_sentence_tokens": int(max_sentence_tokens),
-                    "max_total_injected_tokens": int(max_total_injected_tokens),
-                }
-            )
-            if not chunk:
-                break
+        def _gather_ev_texts(all_steps: List[Dict[str, Any]]) -> List[str]:
+            if not sentence_text_lookup:
+                return []
+            evs: List[str] = []
+            for st in all_steps or []:
+                for sid in (st.get("selected_ids") or []) if isinstance(st.get("selected_ids"), list) else []:
+                    evs.append(sentence_text_lookup.get(str(sid), ""))
+            return [x for x in evs if str(x or "").strip()]
 
-        # Postprocess: enforce "no acronym expansion unless evidence shows it"
-        ev_texts = []
-        if sentence_text_lookup:
-            for st in (step_debug[-1].get("selected_ids") if step_debug else []) or []:
-                try:
-                    ev_texts.append(sentence_text_lookup.get(str(st), ""))
-                except Exception:
-                    pass
-        generated = _strip_unapproved_abbr_expansions(text=generated.strip(), evidence_texts=ev_texts).strip()
+        regen_enabled = bool(args.simple_regen_on_violation)
+        max_regen_rounds = max(0, int(args.simple_max_regen_rounds))
+
+        injected_round0, steps0 = _run_once(prompt_for_user=user_prompt, extra_guard="")
+        ev_texts0 = _gather_ev_texts(steps0)
+        violations0 = _detect_violations(answer=injected_round0, user_prompt=user_prompt, evidence_texts=ev_texts0)
+
+        injected_final = injected_round0
+        steps_final = steps0
+        violations_final = violations0
+        regen_used = 0
+
+        if regen_enabled and violations0 and max_regen_rounds > 0:
+            # Build a minimal "regen guard" using violation info (no evidence text appended).
+            # Keep it short and deterministic.
+            deny_terms: List[str] = []
+            for v in violations0:
+                if v.get("type") == "scope_drift_symptom_terms":
+                    deny_terms.extend([str(x) for x in (v.get("terms") or []) if str(x).strip()])
+            deny_terms = list(dict.fromkeys([t for t in deny_terms if t]))
+            deny_line = f"\n【禁止扩展】禁止提及：{', '.join(deny_terms)}。" if deny_terms else ""
+            regen_guard = (
+                "\n\n【检测到上轮回答存在违规】请重写答案：\n"
+                "1) 严格禁止输出未经注入 sentence 原文出现的括号扩写（例如 SFTSV（...））。\n"
+                "2) 只回答用户问题涉及维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
+                "3) 如果无法从注入知识确定，就明确说“无法从注入知识确定”。"
+                + deny_line
+            )
+            injected_round1, steps1 = _run_once(prompt_for_user=user_prompt, extra_guard=regen_guard)
+            ev_texts1 = _gather_ev_texts(steps1)
+            violations1 = _detect_violations(answer=injected_round1, user_prompt=user_prompt, evidence_texts=ev_texts1)
+            injected_final = injected_round1
+            steps_final = steps1
+            violations_final = violations1
+            regen_used = 1
+
+        # Final safety: enforce acronym expansion rule post-hoc (should be rare after regen).
+        ev_texts_final = _gather_ev_texts(steps_final)
+        stripped = _strip_unapproved_abbr_expansions(text=injected_final.strip(), evidence_texts=ev_texts_final).strip()
+        postprocess_changed = stripped != injected_final.strip()
+        injected_final = stripped
 
         out_simple = {
             "pipeline": "simple",
             "prompt": user_prompt,
             "base_answer": base_answer,
-            "injected_answer": generated.strip(),
-            "steps": step_debug,
+            "injected_answer": injected_final.strip(),
+            "injected_answer_round0": injected_round0.strip(),
+            "violations_round0": violations0,
+            "violations_final": violations_final,
+            "regen_on_violation": bool(regen_enabled),
+            "regen_rounds_used": int(regen_used),
+            "postprocess_stripped_abbr": bool(postprocess_changed),
+            "steps": steps_final,
         }
         if bool(args.final_only):
             # Per your requirement: include base LLM output as well.

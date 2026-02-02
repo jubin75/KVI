@@ -292,6 +292,7 @@ async function runDebug() {
   const stepNewTokens = Number(($("debug_step_new_tokens").value || "192").trim());
   const maxBlocks = Number(($("debug_blocks_slider").value || $("debug_max_blocks").value || "2").trim());
   const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
+  const regenOnViolation = ($("debug_regen_on_violation").value || "false") === "true";
   $("out_cli").textContent = "运行中...";
   $("out_base").textContent = "运行中...";
   $("out_injected").textContent = "运行中...";
@@ -304,12 +305,21 @@ async function runDebug() {
     simple_step_new_tokens: Number.isFinite(stepNewTokens) ? stepNewTokens : 192,
     simple_max_blocks_per_step: Number.isFinite(maxBlocks) ? maxBlocks : 4,
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
+    regen_on_violation: regenOnViolation,
+    max_regen_rounds: 1,
   });
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
   $("out_base").textContent = r.base_answer || "(baseline disabled or empty)";
   $("out_injected").textContent = r.injected_answer || "";
-  $("out_debug").textContent = pretty({ steps: r.steps, semantic_type_router: r.semantic_type_router });
+  $("out_debug").textContent = pretty({
+    steps: r.steps,
+    violations_round0: r.violations_round0,
+    violations_final: r.violations_final,
+    regen_on_violation: r.regen_on_violation,
+    regen_rounds_used: r.regen_rounds_used,
+    postprocess_stripped_abbr: r.postprocess_stripped_abbr,
+  });
 }
 
 function wire() {
