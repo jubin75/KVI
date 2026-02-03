@@ -287,39 +287,49 @@ async function runDebug() {
   const prompt = ($("debug_prompt").value || "").trim();
   if (!prompt) throw new Error("请先输入 prompt。");
   const topK = Number(($("debug_top_k").value || "8").trim());
-  const showBaseline = ($("debug_show_baseline").value || "true") === "true";
-  const maxSteps = Number(($("debug_max_steps").value || "1").trim());
-  const stepNewTokens = Number(($("debug_step_new_tokens").value || "192").trim());
-  const maxBlocks = Number(($("debug_blocks_slider").value || $("debug_max_blocks").value || "2").trim());
-  const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
-  const regenOnViolation = ($("debug_regen_on_violation").value || "false") === "true";
+  const mode = ($("debug_mode").value || "modeA").trim();
   $("out_cli").textContent = "运行中...";
-  $("out_base").textContent = "运行中...";
-  $("out_injected").textContent = "运行中...";
-  $("out_debug").textContent = "运行中...";
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/run_simple`, {
-    prompt,
-    top_k: Number.isFinite(topK) ? topK : 8,
-    show_baseline: showBaseline,
-    simple_max_steps: Number.isFinite(maxSteps) ? maxSteps : 1,
-    simple_step_new_tokens: Number.isFinite(stepNewTokens) ? stepNewTokens : 192,
-    simple_max_blocks_per_step: Number.isFinite(maxBlocks) ? maxBlocks : 4,
-    max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
-    regen_on_violation: regenOnViolation,
-    max_regen_rounds: 1,
-  });
+  $("out_modeA").textContent = "运行中...";
+  $("out_modeB").textContent = "运行中...";
+  $("out_route").textContent = "运行中...";
+  $("out_modeA_status").textContent = "";
+  $("out_modeB_status").textContent = "";
+  $("out_route_status").textContent = "";
+  let resp = null;
+  if (mode === "modeB") {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+    });
+  } else if (mode === "route") {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+    });
+  } else {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+    });
+  }
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
-  $("out_base").textContent = r.base_answer || "(baseline disabled or empty)";
-  $("out_injected").textContent = r.injected_answer || "";
-  $("out_debug").textContent = pretty({
-    steps: r.steps,
-    violations_round0: r.violations_round0,
-    violations_final: r.violations_final,
-    regen_on_violation: r.regen_on_violation,
-    regen_rounds_used: r.regen_rounds_used,
-    postprocess_stripped_abbr: r.postprocess_stripped_abbr,
-  });
+  if (mode === "modeB") {
+    $("out_modeB").textContent = pretty(r);
+    $("out_modeB_status").textContent = r.status ? `status: ${r.status}` : "";
+    $("out_modeA").textContent = "";
+    $("out_route").textContent = "";
+  } else if (mode === "route") {
+    $("out_route").textContent = pretty(r);
+    $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
+    $("out_modeA").textContent = "";
+    $("out_modeB").textContent = "";
+  } else {
+    $("out_modeA").textContent = r.diagnosis_result || "";
+    $("out_modeA_status").textContent = "status: OK";
+    $("out_modeB").textContent = "";
+    $("out_route").textContent = "";
+  }
 }
 
 function wire() {
@@ -357,18 +367,7 @@ function wire() {
     $("doc_detail_view").style.display = "none";
   };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
-  // slider reflect (injected sentences)
-  const slider = $("debug_blocks_slider");
-  const show = $("debug_blocks_n");
-  const maxBlocksInput = $("debug_max_blocks");
-  if (slider && show) {
-    const sync = () => {
-      show.textContent = String(slider.value || "2");
-      if (maxBlocksInput) maxBlocksInput.value = String(slider.value || "2");
-    };
-    slider.addEventListener("input", sync);
-    sync();
-  }
+  // no slider in Mode A/B UI
 }
 
 async function init() {

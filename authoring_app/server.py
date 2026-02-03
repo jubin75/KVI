@@ -44,7 +44,7 @@ _DEFAULT_SEMANTIC_TYPE_SPECS = {
         "threshold": 0.28,
         # Optional runtime guidance (config-driven; no evidence text in prompt).
         "focus_terms": ["症状", "体征", "临床表现", "实验室异常", "出血", "呕吐", "腹泻", "白细胞", "血小板"],
-        "deny_terms": ["机制", "发病机制", "致病机制", "感染", "免疫", "内皮", "通透性", "复制", "通路"],
+        "deny_terms": ["机制", "发病机制", "致病机制", "感染", "免疫", "内皮", "通透性", "复制", "通路", "汉滩病毒", "汉坦病毒"],
     },
     "drug": {
         "description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。",
@@ -1288,6 +1288,205 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "sidecar_dir": str(out_dir),
                     "result": out,
                     "stderr_tail": (r.stderr or "")[-2000:],
+                },
+            )
+            return
+
+        # -----------------------------
+        # Evidence Routing Modes (A/B)
+        # -----------------------------
+        if path.startswith("/api/kvi/topic/") and path.endswith("/route"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/route")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            kv_dir = out_dir / "kvbank_sentences"
+            if not kv_dir.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
+                return
+            top_k = int(obj.get("top_k") or 8)
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
+                "--pipeline",
+                "route",
+                "--model",
+                base_llm,
+                "--prompt",
+                prompt,
+                "--kv_dir",
+                str(kv_dir),
+                "--sentences_jsonl",
+                str(out_dir / "sentences.tagged.jsonl"),
+                "--semantic_type_specs",
+                str(out_dir / "semantic_type_specs.json"),
+                "--pattern_index_dir",
+                str(out_dir / "pattern_sidecar"),
+                "--sidecar_dir",
+                str(out_dir),
+                "--domain_encoder_model",
+                encoder,
+                "--top_k",
+                str(top_k),
+            ]
+            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "result": out,
+                },
+            )
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/modeA"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/modeA")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            kv_dir = out_dir / "kvbank_sentences"
+            if not kv_dir.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
+                return
+            top_k = int(obj.get("top_k") or 8)
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
+                "--pipeline",
+                "modeA",
+                "--model",
+                base_llm,
+                "--prompt",
+                prompt,
+                "--kv_dir",
+                str(kv_dir),
+                "--sentences_jsonl",
+                str(out_dir / "sentences.tagged.jsonl"),
+                "--semantic_type_specs",
+                str(out_dir / "semantic_type_specs.json"),
+                "--pattern_index_dir",
+                str(out_dir / "pattern_sidecar"),
+                "--sidecar_dir",
+                str(out_dir),
+                "--domain_encoder_model",
+                encoder,
+                "--use_chat_template",
+                "--top_k",
+                str(top_k),
+            ]
+            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "result": out,
+                },
+            )
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/modeB"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/modeB")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            kv_dir = out_dir / "kvbank_sentences"
+            if not kv_dir.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
+                return
+            top_k = int(obj.get("top_k") or 8)
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
+                "--pipeline",
+                "modeB",
+                "--model",
+                base_llm,
+                "--prompt",
+                prompt,
+                "--kv_dir",
+                str(kv_dir),
+                "--sentences_jsonl",
+                str(out_dir / "sentences.tagged.jsonl"),
+                "--semantic_type_specs",
+                str(out_dir / "semantic_type_specs.json"),
+                "--pattern_index_dir",
+                str(out_dir / "pattern_sidecar"),
+                "--sidecar_dir",
+                str(out_dir),
+                "--domain_encoder_model",
+                encoder,
+                "--top_k",
+                str(top_k),
+            ]
+            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "result": out,
                 },
             )
             return

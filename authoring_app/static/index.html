@@ -160,7 +160,8 @@
         <div class="field">
           <label>Topic（主题库）</label>
           <select id="topic_select_debug"></select>
-          <div class="note">运行 `scripts/run_kvi2_runtime_test.py --pipeline simple`（sentence-KVBank），输出 baseline 与 injected answer。</div>
+          <div class="note">模式 A：Evidence Routing + Free Reasoning（LLM 生成）；模式 B：Evidence Routing + Evidence Projection（零生成）。</div>
+          <div class="note">Mode B 失败需显式返回：NO_EVIDENCE_FOUND / INSUFFICIENT_GUIDELINE_SUPPORT。</div>
         </div>
         <div class="field">
           <label>参数</label>
@@ -170,44 +171,16 @@
               <input id="debug_top_k" value="8" />
             </div>
             <div class="field">
-              <label>show_baseline</label>
-              <select id="debug_show_baseline">
-                <option value="true" selected>true</option>
-                <option value="false">false</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>simple_max_steps</label>
-              <input id="debug_max_steps" value="1" />
-            </div>
-            <div class="field">
-              <label>simple_step_new_tokens（避免截断）</label>
-              <input id="debug_step_new_tokens" value="192" />
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>max_injected_sentences_per_step（硬上限 4）</label>
-              <input id="debug_max_blocks" value="2" />
-            </div>
-            <div class="field">
-              <label>注入强度 / 注入 sentence 条数（top 1–2 推荐）: <span class="mono" id="debug_blocks_n">2</span></label>
-              <input id="debug_blocks_slider" type="range" min="1" max="4" step="1" value="2" />
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>检测违规→自动再注入/再生成一轮（最多 1 次）</label>
-              <select id="debug_regen_on_violation">
-                <option value="false" selected>false</option>
-                <option value="true">true</option>
+              <label>模式</label>
+              <select id="debug_mode">
+                <option value="modeA" selected>Mode A（诊断 / 推理）</option>
+                <option value="modeB">Mode B（证据指向）</option>
+                <option value="route">仅 Evidence Routing（调试）</option>
               </select>
             </div>
           </div>
           <div class="btns">
-            <button class="primary" id="btn_run_debug">运行：注入调试</button>
+            <button class="primary" id="btn_run_debug">运行</button>
           </div>
         </div>
       </div>
@@ -223,17 +196,19 @@
       </div>
 
       <div class="field">
-        <label>Base LLM（无注入）</label>
-        <div class="pre" id="out_base">等待运行...</div>
+        <label>Mode A 输出（diagnosis_result）</label>
+        <div class="note" id="out_modeA_status"></div>
+        <div class="pre" id="out_modeA">等待运行...</div>
       </div>
       <div class="field">
-        <label>Injected（KVI 注入输出）</label>
-        <div class="pre" id="out_injected">等待运行...</div>
+        <label>Mode B 输出（evidence_projection）</label>
+        <div class="note" id="out_modeB_status"></div>
+        <div class="pre" id="out_modeB">等待运行...</div>
       </div>
-
       <div class="field">
-        <label>Debug（steps / selected sentences）</label>
-        <div class="pre" id="out_debug">等待运行...</div>
+        <label>Routing 调试输出</label>
+        <div class="note" id="out_route_status"></div>
+        <div class="pre" id="out_route">等待运行...</div>
       </div>
     </div>
   </div>

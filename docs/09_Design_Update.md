@@ -1,241 +1,158 @@
-Title：From Research RAG to Contract-Driven Controllable QA
+# KVI System Invariants（不可违反的系统不变式）
 
-0. 你是谁（给代码生成器的角色设定）
+## 0. 目的（Purpose）
 
-你是一个 资深系统架构级 AI 工程师，负责将一个已有的 External KV Injection (KVI v2) 系统，从「研究型 RAG」升级为一个 可控、可审计、证据约束的问答系统（Controllable QA System）。
+本不变式用于约束 KVI 在医学语义系统中的核心行为，确保：
+- 推理（Judgement）与证据（Evidence）严格解耦
+- 任何生成能力都不会污染证据系统
+- 系统在临床、合规、审计层面长期可演进
 
-你 不允许：
+任何实现、优化、实验均不得违反以下不变式。
 
-即兴生成知识结构
+---
 
-从 prompt 动态发明 Pattern
+## 1. 模式划分不变式（Mode Separation）
 
-用模型自由推理替代结构化证据
+KVI 系统 **必须且仅支持两种显式运行模式**：
 
-你 必须：
+### Mode A：Evidence Routing + Free Reasoning
+- 用途：临床诊断 / 判断辅助
+- 特性：允许 LLM 自由推理、综合、归纳
+- 输出：诊断结论或判断性结果
 
-以 Pattern Contract 作为唯一结构入口
+### Mode B：Evidence Routing + Evidence Projection
+- 用途：诊断依据 / 临床指南支撑 / 精准动作执行
+- 特性：**禁止任何形式的生成**
+- 输出：被路由与命中的原始证据条目
 
-保证 slot → evidence → semantic instance → answer 的严格链路
+**系统不得存在隐式、自动或 fallback 的模式切换。**
 
-让系统在“证据不足 / slot 未满足”时 显式失败或降级
+---
 
-1. 总体目标（必须实现）
+## 2. 输出通道不变式（Output Channel Isolation）
 
-系统必须满足以下 5 个硬性目标：
+两种模式 **必须使用不同且不可复用的输出结构**：
 
-Pattern Contract 是唯一的问答结构来源
+- Mode A 输出：
+  - `diagnosis_result`
+  - `reasoning_trace`（可选）
+- Mode B 输出：
+  - `evidence_projection`
+  - `evidence_ids`
+  - `evidence_texts`
 
-所有可回答问题，必须可被某个 pattern_contract.json 覆盖
+**任何模式不得向对方的输出通道写入数据。**
 
-prompt 只参与 PatternMatcher，不能生成新 Pattern
+---
 
-Slot ≠ 文本填空，而是证据约束接口
+## 3. 证据纯净性不变式（Evidence Purity）
 
-slot 必须绑定：
+以下内容 **严禁进入 Evidence / KVBank / FAISS**：
 
-允许的 evidence 类型
+- LLM 生成文本（任何模式）
+- 推理中间结论
+- 模式 A 的诊断结果
+- 用户主观输入的判断性语言
 
-最小证据数
+Evidence 系统 **仅允许写入**：
+- 外部权威文本（指南、文献、原始记录）
+- 经人工或规则确认的原始证据片段
 
-允许的 inference 强度（hard / soft / schema）
+---
 
-Semantic Instance 不生成内容
+## 4. 模式 B 的零生成不变式（Zero-Generation Guarantee）
 
-只做 evidence-grounded 的引用封装
+在 Mode B 中：
 
-是“可审计中间态”，不是语言输出
+- LLM 不得：
+  - 改写证据
+  - 总结证据
+  - 合并多个证据为新句子
+  - 引入未明确存在于证据中的事实
 
-Introspection 是系统级模块
+Mode B 的输出必须满足：
+> **任一输出文本，均可在 Evidence 中逐字定位到原始来源。**
 
-所有回答路径必须能回溯：
+---
 
-用了哪个 Pattern
+## 5. 失败可见性不变式（Failure Visibility）
 
-哪些 slot 满足 / 未满足
+Mode B 中若出现以下情况：
 
-哪些 evidence 被引用
+- 无证据命中
+- 证据不足
+- 指南不支持当前语义动作
 
-系统从“尽量回答”转为“按契约回答”
+系统 **必须显式返回失败状态**，例如：
+- `NO_EVIDENCE_FOUND`
+- `INSUFFICIENT_GUIDELINE_SUPPORT`
 
-无契约 → 不答
+**禁止使用 Mode A 的合理性推理结果掩盖 Mode B 的失败。**
 
-slot 未满足 → 降级 / 失败
+---
 
-evidence 冲突 → 明示冲突
+## 6. 单向依赖不变式（Dependency Direction）
 
-2. 核心架构（你必须实现 / 对齐）
-2.1 模块总览（必须存在）
-PatternContractLoader
-PatternMatcher
-SlotSchema
-PatternMatcher
-SemanticInstanceBuilder
-IntrospectionGate
-KVI2Runtime (modified)
+系统依赖方向 **只能是单向的**：
 
-模块职责不可合并、不可省略。
+系统依赖方向 **只能是单向的**：
 
-3. Pattern Contract（系统的“宪法”）
-3.1 Pattern Contract 定义
+Evidence System
+↓
+Evidence Routing
+↓
+Mode A / Mode B
 
-pattern_contract.json 是 Topic 级别的、静态生成的结构文件。
+严禁：
+- Mode A 结果反向写回 Evidence
+- Mode A 结果被 Mode B 直接或间接引用
 
-它必须包含：
-{
-  "topic": "SFTSV",
-  "patterns": [
-    {
-      "pattern_id": "virus_basic_info",
-      "question_skeleton": [
-        "X 是什么",
-        "X 的全称是什么"
-      ],
-      "slots": {
-        "virus_name": {
-          "type": "entity",
-          "required": true,
-          "evidence_type": ["definition", "taxonomy"],
-          "min_evidence": 1
-        },
-        "full_name": {
-          "type": "string",
-          "required": false,
-          "evidence_type": ["definition"],
-          "min_evidence": 1
-        }
-      },
-      "answer_style": "factual"
-    }
-  ]
-}
-3.2 重要原则（不可违反）
+---
 
-❌ 不允许在 runtime 从 prompt 生成 Pattern
+## 7. 审计与合规不变式（Auditability）
 
-❌ 不允许 slot 无 evidence 定义
+系统必须支持以下审计能力：
 
-✅ Pattern 是 问题类型的契约
+- 任一 Mode B 输出可被追溯至具体 Evidence ID
+- Mode A 与 Mode B 的调用日志可区分、可回放
+- 模式、证据、输出三者关系可重建
 
-✅ Slot 是 证据约束接口
+---
 
-4. Slot Schema（这是关键，不要弱化）
-4.1 Slot 的真实作用（你必须理解）
+## 8. UI 表达不变式（User Interface Semantics）
 
-Slot 不是：
+UI 必须明确区分两种模式：
 
-LLM 的填空位
+- Mode A：显示为“诊断结果 / 推理建议”
+- Mode B：显示为“依据 / 指南原文 / 证据引用”
 
-prompt 的格式占位符
+UI 不得：
+- 将 Mode A 输出标注为“指南”
+- 将 Mode B 输出包装为“结论”
 
-Slot 是：
+---
 
-“某一语义角色，对证据世界提出的最小可满足约束”
+## 9. 不变式优先级（Priority）
 
-4.2 Slot Schema 必须包含
-class SlotSchema:
-    name: str
-    required: bool
-    evidence_type: List[str]
-    min_evidence: int
-    inference_level: Literal["hard", "soft", "schema"]
+当以下目标发生冲突时，优先级如下：
 
-inference_level 含义（必须区分）
+1. 证据纯净性
+2. 模式隔离
+3. 失败可见性
+4. 用户体验
+5. 推理完整性
 
-hard：必须有直接证据（原文、事实）
+---
 
-soft：允许轻推理（共现、统计）
+## 10. 变更规则（Change Policy）
 
-schema：仅结构满足（用于 explain / list / catalog）
+任何违反上述不变式的改动，必须：
+- 明确标注为 **Breaking Change**
+- 经过架构评审与合规评估
+- 不得以“实验 / 临时方案 / 性能优化”为由绕过
 
-5. Semantic Instance（不要再让模型“编造”）
-5.1 定义
+---
 
-Semantic Instance 是：
-
-由 slot × evidence 构成的、不可语言化的结构对象
-
-5.2 最小实现要求
-{
-  "pattern_id": "virus_basic_info",
-  "slots": {
-    "virus_name": [
-      {
-        "evidence_id": "chunk_183",
-        "source": "paper_x",
-        "span": "Severe Fever with Thrombocytopenia Syndrome Virus"
-      }
-    ]
-  }
-}
-
-5.3 禁止事项
-
-❌ 不生成自然语言
-
-❌ 不做跨 slot 推理
-
-❌ 不做总结
-
-6. IntrospectionGate（这是系统的“良心”）
-6.1 必须统一处理三类 rationale
-
-hard_rationale：直接引用
-
-soft_rationale：弱推理路径
-
-schema_rationale：结构满足说明
-
-6.2 输出要求（必须写入 debug）
-{
-  "pattern_id": "...",
-  "matched_skeleton": "...",
-  "slot_status": {
-    "virus_name": "satisfied",
-    "full_name": "missing"
-  },
-  "decision": "partial_answer"
-}
-
-7. Pattern Contract 自动生成（你必须实现）
-7.1 最小可用策略（不是最终版）
-
-允许你从 Topic ChunkStore 中：
-
-统计高频 question intent（What / Where / How）
-
-抽取 entity × relation 模板
-
-生成 保守、可覆盖的 Question Skeleton
-
-7.2 原则
-
-宁可少，也不要“聪明”
-
-Skeleton 是 稳定接口，不是 prompt hack
-
-8. 系统行为准则（必须遵守）
-情况	行为
-无匹配 Pattern	拒答
-Pattern 命中但 slot 不足	降级回答 + 明示
-Evidence 冲突	明示冲突
-只有 schema 满足	只允许 explain / list
-9. 你交付的代码必须保证
-
-所有回答都能 trace 到：
-
-Pattern
-
-Slot
-
-Evidence
-
-系统 可以被审计、被回放
-
-不依赖模型“诚实”
-结语（给代码生成器）
-
-**这不是一个 RAG 系统。
-这是一个：
-
-由 Pattern Contract 约束的、证据驱动的、失败可解释的问答系统。**
+> **本不变式是系统级约束，而非实现建议。**
+>  
+> **违反不变式的系统，将不再被视为 KVI。**

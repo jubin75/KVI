@@ -315,6 +315,60 @@ def _detect_violations(
         if leaked:
             violations.append({"type": "intent_drift_deny_terms", "intent": it, "terms": leaked})
 
+    # 3) Symptom strictness (validator-only): if answer enumerates symptom items not present in injected evidence,
+    # flag so regen can rewrite. This does NOT feed evidence text into the prompt; it only checks coverage.
+    def _extract_enum_items(s: str) -> List[str]:
+        out: List[str] = []
+        if not s:
+            return out
+        # capture common enumeration contexts
+        patterns = [
+            r"(?:包括|常见(?:症状)?包括|表现为|可出现|可能出现|可见|伴有|起病(?:为)?)[：:]*\s*([^。！？\n]{2,160})",
+        ]
+        for pat in patterns:
+            for m in re.finditer(pat, s):
+                seg = m.group(1)
+                # cut off trailing clauses after "此外/另外/并" to keep list-like part
+                seg = re.split(r"(?:此外|另外|并且|且|其中|同时|在严重情况下|严重情况下)", seg)[0]
+                # normalize separators
+                seg = seg.replace("以及", "、").replace("及", "、").replace("和", "、")
+                parts = [p.strip() for p in re.split(r"[、,，;；]", seg) if p.strip()]
+                for p0 in parts:
+                    # remove common modifiers
+                    p1 = re.sub(r"^(?:多为|常为|主要为|通常为|多见|常见)", "", p0).strip()
+                    p1 = re.sub(r"(?:等|等症状|等表现)$", "", p1).strip()
+                    # keep short-to-medium noun phrases
+                    if 1 < len(p1) <= 24:
+                        out.append(p1)
+        # de-dup
+        seen: set[str] = set()
+        dedup: List[str] = []
+        for x in out:
+            if x in seen:
+                continue
+            seen.add(x)
+            dedup.append(x)
+        return dedup
+
+    if it == "symptom":
+        ev_join = "\n".join([str(x or "") for x in (evidence_texts or [])])
+        items = _extract_enum_items(a)
+        if items and ev_join:
+            missing = []
+            for x in items:
+                if x not in ev_join:
+                    missing.append(x)
+            # Only flag when we are clearly enumerating and at least one item is missing.
+            if missing:
+                violations.append(
+                    {
+                        "type": "answer_items_not_in_injected_evidence",
+                        "intent": "symptom",
+                        "items_missing": missing[:20],
+                        "items_total": len(items),
+                    }
+                )
+
     return violations
 
 
@@ -359,6 +413,67 @@ def _strip_unapproved_abbr_expansions(*, text: str, evidence_texts: Sequence[str
     t2 = _ALIAS_PARENS_ABBR_RE.sub(repl_alias, t)
     return _ABBR_PARENS_RE.sub(repl, t2)
 
+
+def _run_evidence_routing(
+    *,
+    prompt: str,
+    kv_dir: str,
+    sentences_lookup: Dict[str, str],
+    top_k: int,
+    domain_encoder_model: str,
+) -> Dict[str, Any]:
+    """
+    Evidence routing (no generation). Returns evidence_projection + ids/texts.
+    """
+    try:
+        from external_kv_injection.src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
+        from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+        from external_kv_injection.src.retriever import Retriever  # type: ignore
+    except ModuleNotFoundError:
+        from src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
+        from src.kv_bank import FaissKVBank  # type: ignore
+        from src.retriever import Retriever  # type: ignore
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    enc = DomainEncoder(
+        DomainEncoderConfig(
+            model_name_or_path=str(domain_encoder_model),
+            max_length=256,
+            normalize=True,
+            device=str(device),
+        )
+    )
+    bank = FaissKVBank.load(Path(str(kv_dir)))
+    retriever = Retriever(bank)
+
+    q = str(prompt or "").strip()
+    qv = enc.encode(q)[0]
+    rr = retriever.search(qv, top_k=int(top_k), filters=None, query_text=q)
+    items = []
+    for it in (rr.items or []):
+        bid = _kv_id(it)
+        if not bid:
+            continue
+        meta = getattr(it, "meta", None) or {}
+        payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        items.append(
+            {
+                "id": str(bid),
+                "score": float(getattr(it, "score", 0.0) or 0.0),
+                "text": str(sentences_lookup.get(str(bid), "") or ""),
+                "semantic_tags": payload.get("semantic_tags") if isinstance(payload.get("semantic_tags"), list) else [],
+                "semantic_primary": payload.get("semantic_primary"),
+            }
+        )
+    evidence_ids = [x.get("id") for x in items]
+    evidence_texts = [x.get("text") for x in items]
+    status = "OK" if items else "NO_EVIDENCE_FOUND"
+    return {
+        "status": status,
+        "evidence_projection": items,
+        "evidence_ids": evidence_ids,
+        "evidence_texts": evidence_texts,
+    }
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
@@ -842,9 +957,15 @@ def main() -> None:
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
     p.add_argument(
         "--pipeline",
-        choices=["kvi2", "simple"],
+        choices=["kvi2", "simple", "route", "modeA", "modeB"],
         default="kvi2",
-        help="kvi2: Pattern+Gate+RIM pipeline; simple: prompt->similarity retrieval (KVBank)->multi-step KV injection->text answer (also prints base LLM).",
+        help=(
+            "kvi2: Pattern+Gate+RIM pipeline; "
+            "simple: prompt->similarity retrieval (KVBank)->multi-step KV injection->text answer; "
+            "route: evidence routing only; "
+            "modeA: evidence routing + free reasoning (LLM); "
+            "modeB: evidence routing + evidence projection (no generation)."
+        ),
     )
     p.add_argument("--top_k", type=int, default=8)
     p.add_argument("--kv_refresh_rounds", type=int, default=2)
@@ -910,6 +1031,62 @@ def main() -> None:
         if sj:
             sentences_jsonl_path = sj
             sentence_text_lookup = _load_sentence_text_lookup(sj)
+
+    # ----------------------------------------
+    # MODE A/B and ROUTING
+    # ----------------------------------------
+    if str(args.pipeline) in {"route", "modeA", "modeB"}:
+        if not sentences_jsonl_path:
+            raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeB")
+        routing = _run_evidence_routing(
+            prompt=str(args.prompt),
+            kv_dir=str(args.kv_dir),
+            sentences_lookup=sentence_text_lookup,
+            top_k=int(args.top_k),
+            domain_encoder_model=str(args.domain_encoder_model),
+        )
+        if str(args.pipeline) == "route":
+            print(json.dumps(routing, ensure_ascii=False, indent=2))
+            return
+        if str(args.pipeline) == "modeB":
+            # Evidence Projection only (no generation)
+            out = {
+                "mode": "B",
+                "status": routing.get("status"),
+                "evidence_projection": routing.get("evidence_projection"),
+                "evidence_ids": routing.get("evidence_ids"),
+                "evidence_texts": routing.get("evidence_texts"),
+            }
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return
+        if str(args.pipeline) == "modeA":
+            # Evidence Routing + Free Reasoning (LLM)
+            ev_texts = routing.get("evidence_texts") or []
+            # Build a lightweight RAG prompt (allowed in Mode A).
+            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
+            modeA_prompt = (
+                str(args.prompt).strip()
+                + "\n\n请基于以下证据进行自由推理并给出诊断性结论：\n"
+                + ev_block
+                + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
+            )
+            modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
+            answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=modeA_prompt,
+                device=device,
+                past_key_values=None,
+                max_new_tokens=192,
+                no_repeat_ngram_size=12,
+                repetition_penalty=1.08,
+            ).strip()
+            out = {
+                "mode": "A",
+                "diagnosis_result": str(answer or ""),
+            }
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return
 
     # ----------------------------------------
     # SIMPLE PIPELINE (architecture debugging)
@@ -1162,17 +1339,25 @@ def main() -> None:
             intent=str(intent0),
             specs=specs,
         )
+        # Some violations are "format-only" and can be safely handled by postprocess (e.g. acronym expansions).
+        # Do NOT trigger regen for those, otherwise the model may overreact and refuse to answer.
+        regen_trigger_types = {
+            "empty_answer",
+            "intent_drift_deny_terms",
+            "answer_items_not_in_injected_evidence",
+        }
+        violations0_for_regen = [v for v in (violations0 or []) if str(v.get("type") or "") in regen_trigger_types]
 
         injected_final = injected_round0
         steps_final = steps0
         violations_final = violations0
         regen_used = 0
 
-        if regen_enabled and violations0 and max_regen_rounds > 0:
+        if regen_enabled and violations0_for_regen and max_regen_rounds > 0:
             # Build a minimal "regen guard" using violation info (no evidence text appended).
             # Keep it short and deterministic.
             deny_terms: List[str] = []
-            for v in violations0:
+            for v in violations0_for_regen:
                 if v.get("type") in {"intent_drift_deny_terms"}:
                     deny_terms.extend([str(x) for x in (v.get("terms") or []) if str(x).strip()])
             deny_terms = list(dict.fromkeys([t for t in deny_terms if t]))
@@ -1181,7 +1366,9 @@ def main() -> None:
                 "\n\n【检测到上轮回答存在违规】请重写答案：\n"
                 "1) 严格禁止输出未经注入 sentence 原文出现的括号扩写（例如 SFTSV（...））。\n"
                 "2) 只回答用户问题涉及维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
-                "3) 如果无法从注入知识确定，就明确说“无法从注入知识确定”。"
+                "【症状严格规则】若问题是“症状/临床表现”，只允许列出注入知识原文中出现过的症状/体征/实验室异常词组，不得新增其他症状名。\n"
+                "3) 先列出“注入知识明确支持的要点”（用短句/逗号分隔）。\n"
+                "4) 若注入知识未覆盖某些细节，请仅说明“注入知识未覆盖该细节/证据不足”，不要直接放弃回答。"
                 + deny_line
             )
             injected_round1, steps1 = _run_once(prompt_for_user=user_prompt, extra_guard=regen_guard)
@@ -1218,6 +1405,7 @@ def main() -> None:
             "injected_answer": injected_final.strip(),
             "injected_answer_round0": injected_round0.strip(),
             "violations_round0": violations0,
+            "violations_round0_for_regen": violations0_for_regen,
             "violations_final": violations_after_postprocess,
             "violations_before_postprocess": violations_final,
             "intent": str(intent0),
