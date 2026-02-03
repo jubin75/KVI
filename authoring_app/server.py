@@ -8,6 +8,7 @@ import sys
 import time
 import hashlib
 import re
+import shutil
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -191,6 +192,17 @@ def _create_topic(topic: str) -> Path:
         },
     }
     (td / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return td
+
+
+def _delete_topic(topic: str) -> Path:
+    t = _validate_topic_name(topic)
+    td = (TOPICS_DIR / t).resolve()
+    if not str(td).startswith(str(TOPICS_DIR.resolve())):
+        raise ValueError("invalid topic path")
+    if not td.exists() or not td.is_dir():
+        raise FileNotFoundError(f"topic not found: {t}")
+    shutil.rmtree(td)
     return td
 
 
@@ -859,6 +871,23 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
                 return
             _json_response(self, HTTPStatus.OK, {"ok": True, "topic": name, "topic_dir": str(td), "config_json": str(td / "config.json")})
+            return
+
+        if path == "/api/kvi/topics/delete":
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            name = str(obj.get("topic") or obj.get("name") or "").strip()
+            if not name:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "topic required"})
+                return
+            try:
+                td = _delete_topic(name)
+            except Exception as e:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"{type(e).__name__}: {e}"})
+                return
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": name, "topic_dir": str(td)})
             return
 
         if path.startswith("/api/kvi/topic/") and path.endswith("/evidence_txt"):

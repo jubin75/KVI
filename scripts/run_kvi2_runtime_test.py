@@ -1075,6 +1075,18 @@ def main() -> None:
             )
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
+            # Base LLM output (no evidence prompt) for comparison
+            base_prompt = KVI2Runtime._format_prompt(tok, str(args.prompt).strip(), use_chat_template=bool(args.use_chat_template))
+            base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=base_prompt,
+                device=device,
+                past_key_values=None,
+                max_new_tokens=192,
+                no_repeat_ngram_size=12,
+                repetition_penalty=1.08,
+            ).strip()
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
             answer = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
@@ -1089,6 +1101,7 @@ def main() -> None:
             out = {
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
+                "base_llm_result": str(base_answer or ""),
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return

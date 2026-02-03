@@ -32,6 +32,9 @@
             <div class="field">
               <button class="primary" id="btn_create_topic">新建主题库</button>
             </div>
+            <div class="field">
+              <button class="danger" id="btn_delete_topic">删除当前主题库</button>
+            </div>
           </div>
           <select id="topic_select"></select>
           <div class="note" id="topic_goal"></div>
@@ -185,8 +188,9 @@
           <label>参数</label>
           <div class="row">
             <div class="field">
-              <label>top_k</label>
-              <input id="debug_top_k" value="8" />
+              <label>注入条目数（默认 2，最大 8）: <span class="mono" id="debug_topk_n">2</span></label>
+              <input id="debug_topk_slider" type="range" min="1" max="8" step="1" value="2" />
+              <input id="debug_top_k" value="2" style="display:none" />
             </div>
             <div class="field">
               <label>模式</label>
@@ -219,6 +223,10 @@
         <div class="pre" id="out_modeA">等待运行...</div>
       </div>
       <div class="field">
+        <label>Base LLM 输出（无证据，对比用）</label>
+        <div class="pre" id="out_base_llm">等待运行...</div>
+      </div>
+      <div class="field">
         <label>Mode B 输出（evidence_projection）</label>
         <div class="note" id="out_modeB_status"></div>
         <div class="pre" id="out_modeB">等待运行...</div>
@@ -227,6 +235,10 @@
         <label>Routing 调试输出</label>
         <div class="note" id="out_route_status"></div>
         <div class="pre" id="out_route">等待运行...</div>
+      </div>
+      <div class="field">
+        <label>调试日志输出</label>
+        <div class="pre" id="out_debug_log">等待运行...</div>
       </div>
     </div>
   </div>

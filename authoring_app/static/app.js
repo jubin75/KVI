@@ -56,6 +56,14 @@ async function createTopicFromUi() {
   $("topic_new_name").value = "";
 }
 
+async function deleteTopicFromUi() {
+  if (!selectedTopic) throw new Error("未选择主题库。");
+  const ok = window.confirm(`确定删除主题库 "${selectedTopic}" 吗？此操作不可恢复。`);
+  if (!ok) return;
+  await apiPost("/api/kvi/topics/delete", { topic: selectedTopic });
+  await loadTopics();
+}
+
 async function loadTopics() {
   const resp = await apiGet("/api/kvi/topics");
   topics = resp.items || [];
@@ -286,12 +294,14 @@ async function importDocBlocks() {
 async function runDebug() {
   const prompt = ($("debug_prompt").value || "").trim();
   if (!prompt) throw new Error("请先输入 prompt。");
-  const topK = Number(($("debug_top_k").value || "8").trim());
+  const topK = Number(($("debug_top_k").value || "2").trim());
   const mode = ($("debug_mode").value || "modeA").trim();
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
   $("out_route").textContent = "运行中...";
+  $("out_debug_log").textContent = "运行中...";
+  $("out_base_llm").textContent = "运行中...";
   $("out_modeA_status").textContent = "";
   $("out_modeB_status").textContent = "";
   $("out_route_status").textContent = "";
@@ -314,21 +324,35 @@ async function runDebug() {
   }
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
+  // Always fetch route debug for logging
+  try {
+    const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+    });
+    $("out_debug_log").textContent = pretty(routeResp.result || {});
+  } catch (e) {
+    $("out_debug_log").textContent = String(e && e.message ? e.message : e);
+  }
   if (mode === "modeB") {
-    $("out_modeB").textContent = pretty(r);
+    const texts = (r.evidence_texts || []).map(t => String(t || "")).filter(x => x);
+    $("out_modeB").textContent = texts.length ? texts.join("\n") : "(no evidence_texts)";
     $("out_modeB_status").textContent = r.status ? `status: ${r.status}` : "";
     $("out_modeA").textContent = "";
     $("out_route").textContent = "";
+    $("out_base_llm").textContent = "";
   } else if (mode === "route") {
     $("out_route").textContent = pretty(r);
     $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
     $("out_modeA").textContent = "";
     $("out_modeB").textContent = "";
+    $("out_base_llm").textContent = "";
   } else {
     $("out_modeA").textContent = r.diagnosis_result || "";
     $("out_modeA_status").textContent = "status: OK";
     $("out_modeB").textContent = "";
     $("out_route").textContent = "";
+    $("out_base_llm").textContent = r.base_llm_result || "";
   }
 }
 
@@ -354,6 +378,7 @@ function wire() {
 
   $("btn_compile").onclick = () => compileSimple().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
+  $("btn_delete_topic").onclick = () => deleteTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_reload_sets").onclick = () => loadEvidenceSets().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("set_select").onchange = async (e) => { await loadEvidenceSet(e.target.value).catch(err => { $("compile_log").textContent = String(err.message || err); }); };
   $("btn_save_set").onclick = () => saveCurrentSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
@@ -367,7 +392,18 @@ function wire() {
     $("doc_detail_view").style.display = "none";
   };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
-  // no slider in Mode A/B UI
+  // top_k slider
+  const slider = $("debug_topk_slider");
+  const show = $("debug_topk_n");
+  const topKInput = $("debug_top_k");
+  if (slider && show) {
+    const sync = () => {
+      show.textContent = String(slider.value || "2");
+      if (topKInput) topKInput.value = String(slider.value || "2");
+    };
+    slider.addEventListener("input", sync);
+    sync();
+  }
 }
 
 async function init() {
