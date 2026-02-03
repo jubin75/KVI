@@ -1023,7 +1023,7 @@ def main() -> None:
 
     # blocks_jsonl is only needed for pipeline=kvi2 (LIST_ONLY, debug/citation helpers).
     block_text_lookup = {}
-    if str(args.pipeline) != "simple":
+    if str(args.pipeline) == "kvi2":
         if not str(args.blocks_jsonl or "").strip():
             raise SystemExit("--blocks_jsonl is required for pipeline=kvi2")
         block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
