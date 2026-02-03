@@ -44,6 +44,24 @@
       </div>
 
       <div class="field">
+        <label>Evidence 编译不变式（Mode A 专用）</label>
+        <div class="note">
+          每一条进入 KV space 的 Evidence，必须满足：
+          <br />1️⃣ 表达一个 单一医学事实或现象
+          <br />2️⃣ 以 临床语言自然句 表达
+          <br />3️⃣ 不包含推理、结论或解释
+          <br />4️⃣ 不跨越多个医学维度（症状 / 机制 / 检查 / 预后）
+          <br /><br />【举例说明】
+          <br />❌ 不合格（信息密度过高）
+          <br />“SFTSV感染后患者常出现发热、乏力、血小板减少，并可伴有消化道症状，严重者可进展为多器官功能障碍。”
+          <br /><br />✅ 合格（语义最小化）
+          <br />“SFTSV感染的早期症状常包括发热。”
+          <br />“部分SFTSV感染者会出现乏力。”
+          <br />“SFTSV感染可导致血小板计数下降。”
+        </div>
+      </div>
+
+      <div class="field">
         <label>知识文件（可多文件）</label>
         <div class="row">
           <div class="field">

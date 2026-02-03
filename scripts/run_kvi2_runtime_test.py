@@ -1030,11 +1030,10 @@ def main() -> None:
 
     sentence_text_lookup: Dict[str, str] = {}
     sentences_jsonl_path = ""
-    if str(args.pipeline) == "simple":
-        sj = str(args.sentences_jsonl or "").strip()
-        if sj:
-            sentences_jsonl_path = sj
-            sentence_text_lookup = _load_sentence_text_lookup(sj)
+    sj = str(args.sentences_jsonl or "").strip()
+    if sj:
+        sentences_jsonl_path = sj
+        sentence_text_lookup = _load_sentence_text_lookup(sj)
 
     # ----------------------------------------
     # MODE A/B and ROUTING
