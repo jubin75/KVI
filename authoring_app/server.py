@@ -1376,6 +1376,15 @@ class KVIHandler(BaseHTTPRequestHandler):
             if not base_llm or not encoder:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
                 return
+            # Fail fast if base_llm is a local path that doesn't exist (avoid hanging on load).
+            try:
+                b = str(base_llm or "")
+                b_exp = Path(b).expanduser()
+                if (b.startswith("/") or b.startswith("./") or b.startswith("../") or b.startswith("~")) and not b_exp.exists():
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"base_llm path not found: {b_exp}"})
+                    return
+            except Exception:
+                pass
             topic_dir = _topic_dir(topic)
             work_dir_raw = str(build.get("work_dir") or "").strip()
             out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
@@ -1384,6 +1393,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
+            timeout_s = int(obj.get("timeout_s") or 180)
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1409,7 +1419,20 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--top_k",
                 str(top_k),
             ]
-            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+            try:
+                r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "error": "timeout",
+                        "message": f"Mode A timed out after {timeout_s}s. Model loading or generation is too slow. Use a local model path or increase timeout_s.",
+                        "cmd": " ".join(cmd),
+                    },
+                )
+                return
             if r.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
                 return

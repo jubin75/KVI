@@ -1012,10 +1012,14 @@ def main() -> None:
         from src.runtime.multistep_injector import MultiStepInjector  # type: ignore
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
-    torch_dtype = torch.bfloat16 if device.type == "cuda" else None
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
-    model.to(device).eval()
+    pipeline = str(args.pipeline)
+    tok = None
+    model = None
+    if pipeline in {"simple", "kvi2", "modeA"}:
+        tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
+        torch_dtype = torch.bfloat16 if device.type == "cuda" else None
+        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
+        model.to(device).eval()
 
     # blocks_jsonl is only needed for pipeline=kvi2 (LIST_ONLY, debug/citation helpers).
     block_text_lookup = {}
@@ -1035,7 +1039,7 @@ def main() -> None:
     # ----------------------------------------
     # MODE A/B and ROUTING
     # ----------------------------------------
-    if str(args.pipeline) in {"route", "modeA", "modeB"}:
+    if pipeline in {"route", "modeA", "modeB"}:
         if not sentences_jsonl_path:
             raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeB")
         routing = _run_evidence_routing(
@@ -1045,10 +1049,10 @@ def main() -> None:
             top_k=int(args.top_k),
             domain_encoder_model=str(args.domain_encoder_model),
         )
-        if str(args.pipeline) == "route":
+        if pipeline == "route":
             print(json.dumps(routing, ensure_ascii=False, indent=2))
             return
-        if str(args.pipeline) == "modeB":
+        if pipeline == "modeB":
             # Evidence Projection only (no generation)
             out = {
                 "mode": "B",
@@ -1059,7 +1063,7 @@ def main() -> None:
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
-        if str(args.pipeline) == "modeA":
+        if pipeline == "modeA":
             # Evidence Routing + Free Reasoning (LLM)
             ev_texts = routing.get("evidence_texts") or []
             # Build a lightweight RAG prompt (allowed in Mode A).
@@ -1070,6 +1074,8 @@ def main() -> None:
                 + ev_block
                 + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
             )
+            if tok is None or model is None:
+                raise SystemExit("Mode A requires model/tokenizer")
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
             answer = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
@@ -1091,7 +1097,9 @@ def main() -> None:
     # ----------------------------------------
     # SIMPLE PIPELINE (architecture debugging)
     # ----------------------------------------
-    if str(args.pipeline) == "simple":
+    if pipeline == "simple":
+        if tok is None or model is None:
+            raise SystemExit("Simple pipeline requires model/tokenizer")
         user_prompt = str(args.prompt)
         base_prompt = KVI2Runtime._format_prompt(tok, user_prompt, use_chat_template=bool(args.use_chat_template))
         base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
