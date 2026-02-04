@@ -1348,6 +1348,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
+            w_ann = float(obj.get("route_w_ann") or 1.0)
+            w_intent = float(obj.get("route_w_intent") or 0.6)
+            w_quality = float(obj.get("route_w_quality") or 0.2)
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1371,6 +1374,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                 encoder,
                 "--top_k",
                 str(top_k),
+                "--route_w_ann",
+                str(w_ann),
+                "--route_w_intent",
+                str(w_intent),
+                "--route_w_quality",
+                str(w_quality),
             ]
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
             if r.returncode != 0:
@@ -1422,6 +1431,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
+            w_ann = float(obj.get("route_w_ann") or 1.0)
+            w_intent = float(obj.get("route_w_intent") or 0.6)
+            w_quality = float(obj.get("route_w_quality") or 0.2)
             timeout_s = int(obj.get("timeout_s") or 180)
             cmd = [
                 sys.executable,
@@ -1447,6 +1459,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--use_chat_template",
                 "--top_k",
                 str(top_k),
+                "--route_w_ann",
+                str(w_ann),
+                "--route_w_intent",
+                str(w_intent),
+                "--route_w_quality",
+                str(w_quality),
             ]
             try:
                 r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
@@ -1502,6 +1520,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
+            w_ann = float(obj.get("route_w_ann") or 1.0)
+            w_intent = float(obj.get("route_w_intent") or 0.6)
+            w_quality = float(obj.get("route_w_quality") or 0.2)
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1525,6 +1546,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                 encoder,
                 "--top_k",
                 str(top_k),
+                "--route_w_ann",
+                str(w_ann),
+                "--route_w_intent",
+                str(w_intent),
+                "--route_w_quality",
+                str(w_quality),
             ]
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
             if r.returncode != 0:

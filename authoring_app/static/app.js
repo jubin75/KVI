@@ -296,6 +296,9 @@ async function runDebug() {
   if (!prompt) throw new Error("请先输入 prompt。");
   const topK = Number(($("debug_top_k").value || "2").trim());
   const mode = ($("debug_mode").value || "modeA").trim();
+  const wAnn = Number(($("route_w_ann").value || "1.0").trim());
+  const wIntent = Number(($("route_w_intent").value || "0.6").trim());
+  const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
@@ -310,16 +313,25 @@ async function runDebug() {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
     });
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
     });
   } else {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
     });
   }
   const r = resp.result || {};
@@ -329,6 +341,9 @@ async function runDebug() {
     const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
     });
     $("out_debug_log").textContent = pretty(routeResp.result || {});
   } catch (e) {

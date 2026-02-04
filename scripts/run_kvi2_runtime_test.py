@@ -421,6 +421,11 @@ def _run_evidence_routing(
     sentences_lookup: Dict[str, str],
     top_k: int,
     domain_encoder_model: str,
+    semantic_type_specs_path: str,
+    pattern_index_dir: str,
+    w_ann: float,
+    w_intent: float,
+    w_quality: float,
 ) -> Dict[str, Any]:
     """
     Evidence routing (no generation). Returns evidence_projection + ids/texts.
@@ -448,28 +453,94 @@ def _run_evidence_routing(
 
     q = str(prompt or "").strip()
     qv = enc.encode(q)[0]
-    rr = retriever.search(qv, top_k=int(top_k), filters=None, query_text=q)
+    # Stage 1: broader ANN pool
+    top_pool = max(int(top_k) * 10, int(top_k))
+    rr = retriever.search(qv, top_k=int(top_pool), filters=None, query_text=q)
     items = []
-    for it in (rr.items or []):
+    # Intent inference from specs (config-driven)
+    specs = _load_semantic_type_specs_any(
+        pattern_index_dir=str(pattern_index_dir or ""),
+        semantic_type_specs_path=str(semantic_type_specs_path or ""),
+    )
+    intent, intent_dbg = _infer_intent_from_specs(enc=enc, query=q, specs=specs)
+    intent_key = str(intent or "").strip().lower()
+    intent_spec = specs.get(intent_key) if isinstance(specs, dict) else None
+    intent_desc = str((intent_spec or {}).get("description") or "").strip() if isinstance(intent_spec, dict) else intent_key
+    anchor_text = f"[semantic_type]\n{intent_key}\n\n[description]\n{intent_desc}\n\n[query]\n{q}\n"
+    anchor_vec = enc.encode([anchor_text], batch_size=1)[0]
+    # Batch encode candidate texts for fallback intent sim
+    cand_texts = [str(sentences_lookup.get(str(_kv_id(it)), "") or "") for it in (rr.items or [])]
+    if cand_texts:
+        cand_vecs = enc.encode(cand_texts, batch_size=min(16, max(1, len(cand_texts))))
+    else:
+        cand_vecs = []
+
+    def _quality_score(text: str) -> float:
+        t = str(text or "")
+        if not t:
+            return 0.0
+        if "http://" in t or "https://" in t or "www." in t:
+            return -0.6
+        # penalize extremely short or very long sentences
+        if len(t) < 8:
+            return -0.4
+        if len(t) > 240:
+            return -0.2
+        return 0.2
+
+    # weights are provided by caller (UI-configurable)
+    w_ann = float(w_ann)
+    w_intent = float(w_intent)
+    w_quality = float(w_quality)
+    for i, it in enumerate(rr.items or []):
         bid = _kv_id(it)
         if not bid:
             continue
         meta = getattr(it, "meta", None) or {}
         payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        text = str(sentences_lookup.get(str(bid), "") or "")
+        ann_score = float(getattr(it, "score", 0.0) or 0.0)
+        # intent sim: prefer precomputed semantic_scores if present
+        sem_scores = payload.get("semantic_scores") if isinstance(payload.get("semantic_scores"), dict) else {}
+        intent_sim = None
+        if intent_key and isinstance(sem_scores.get(intent_key), (int, float)):
+            intent_sim = float(sem_scores.get(intent_key))
+        else:
+            try:
+                if i < len(cand_vecs):
+                    intent_sim = float((cand_vecs[i] @ anchor_vec).astype(float))
+            except Exception:
+                intent_sim = 0.0
+        if intent_sim is None:
+            intent_sim = 0.0
+        quality = _quality_score(text)
+        final_score = (w_ann * ann_score) + (w_intent * intent_sim) + (w_quality * quality)
         items.append(
             {
                 "id": str(bid),
-                "score": float(getattr(it, "score", 0.0) or 0.0),
-                "text": str(sentences_lookup.get(str(bid), "") or ""),
+                "score": float(ann_score),
+                "intent_sim": float(intent_sim),
+                "quality": float(quality),
+                "final_score": float(final_score),
+                "text": text,
                 "semantic_tags": payload.get("semantic_tags") if isinstance(payload.get("semantic_tags"), list) else [],
                 "semantic_primary": payload.get("semantic_primary"),
             }
         )
+    # Stage 3: rerank and truncate
+    items.sort(key=lambda x: (x.get("final_score", 0.0), x.get("score", 0.0)), reverse=True)
+    items = items[: int(top_k)]
     evidence_ids = [x.get("id") for x in items]
     evidence_texts = [x.get("text") for x in items]
     status = "OK" if items else "NO_EVIDENCE_FOUND"
     return {
         "status": status,
+        "routing_debug": {
+            "intent": intent_key or "unknown",
+            "intent_debug": intent_dbg,
+            "weights": {"ann": w_ann, "intent": w_intent, "quality": w_quality},
+            "pool_size": int(top_pool),
+        },
         "evidence_projection": items,
         "evidence_ids": evidence_ids,
         "evidence_texts": evidence_texts,
@@ -986,6 +1057,10 @@ def main() -> None:
     p.add_argument("--simple_max_total_injected_tokens", type=int, default=512)
     p.add_argument("--simple_regen_on_violation", action="store_true", help="If validator flags violations, re-inject & re-generate once (max rounds controlled by --simple_max_regen_rounds).")
     p.add_argument("--simple_max_regen_rounds", type=int, default=1, help="Max extra regen rounds after the first answer (0 disables retries).")
+    # Routing weights (UI adjustable)
+    p.add_argument("--route_w_ann", type=float, default=1.0)
+    p.add_argument("--route_w_intent", type=float, default=0.6)
+    p.add_argument("--route_w_quality", type=float, default=0.2)
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -1047,6 +1122,11 @@ def main() -> None:
             sentences_lookup=sentence_text_lookup,
             top_k=int(args.top_k),
             domain_encoder_model=str(args.domain_encoder_model),
+            semantic_type_specs_path=str(args.semantic_type_specs),
+            pattern_index_dir=str(args.pattern_index_dir),
+            w_ann=float(args.route_w_ann),
+            w_intent=float(args.route_w_intent),
+            w_quality=float(args.route_w_quality),
         )
         if pipeline == "route":
             print(json.dumps(routing, ensure_ascii=False, indent=2))
