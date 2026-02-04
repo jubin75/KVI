@@ -528,14 +528,31 @@ def _run_evidence_routing(
             }
         )
     # Stage 3: rerank and truncate
-    # Soft filter: keep evidence whose semantic_tags contains intent if possible; fallback to full list if empty.
-    filtered = []
+    # Strategy A (semi-hard):
+    # 1) prefer items with semantic_primary == intent
+    # 2) fallback to items whose semantic_tags contains intent
+    # 3) fallback to all items
+    primary_filtered = []
     if intent_key:
+        for it in items:
+            sp = str(it.get("semantic_primary") or "").strip().lower()
+            if sp and sp == intent_key:
+                primary_filtered.append(it)
+    tag_filtered = []
+    if not primary_filtered and intent_key:
         for it in items:
             tags = it.get("semantic_tags") if isinstance(it.get("semantic_tags"), list) else []
             if any(str(t).strip().lower() == intent_key for t in tags):
-                filtered.append(it)
-    use_items = filtered if filtered else items
+                tag_filtered.append(it)
+    if primary_filtered:
+        use_items = primary_filtered
+        soft_filter_used = "primary"
+    elif tag_filtered:
+        use_items = tag_filtered
+        soft_filter_used = "tags"
+    else:
+        use_items = items
+        soft_filter_used = "none"
     use_items.sort(key=lambda x: (x.get("final_score", 0.0), x.get("score", 0.0)), reverse=True)
     use_items = use_items[: int(top_k)]
     evidence_ids = [x.get("id") for x in use_items]
@@ -549,7 +566,7 @@ def _run_evidence_routing(
             "weights": {"ann": w_ann, "intent": w_intent, "quality": w_quality},
             "pool_size": int(top_pool),
             "soft_filter_intent": intent_key or "",
-            "soft_filter_used": bool(filtered),
+            "soft_filter_used": soft_filter_used,
         },
         "evidence_projection": use_items,
         "evidence_ids": evidence_ids,
