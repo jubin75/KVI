@@ -299,6 +299,7 @@ async function runDebug() {
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
+  const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
@@ -316,6 +317,7 @@ async function runDebug() {
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
       route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
     });
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
@@ -324,6 +326,7 @@ async function runDebug() {
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
       route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
     });
   } else {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
@@ -332,6 +335,7 @@ async function runDebug() {
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
       route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
     });
   }
   const r = resp.result || {};
@@ -344,6 +348,7 @@ async function runDebug() {
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
       route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
     });
     $("out_debug_log").textContent = pretty(routeResp.result || {});
   } catch (e) {

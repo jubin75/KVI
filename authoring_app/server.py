@@ -1351,6 +1351,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
             w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
             w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
+            rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1381,6 +1382,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--route_w_quality",
                 str(w_quality),
             ]
+            if rerank_wo_ann:
+                cmd.append("--route_rerank_without_ann")
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
             if r.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
@@ -1434,6 +1437,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
             w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
             w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
+            rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
             timeout_s = int(obj.get("timeout_s") or 180)
             cmd = [
                 sys.executable,
@@ -1466,6 +1470,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--route_w_quality",
                 str(w_quality),
             ]
+            if rerank_wo_ann:
+                cmd.append("--route_rerank_without_ann")
             try:
                 r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
             except subprocess.TimeoutExpired:
@@ -1523,6 +1529,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
             w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
             w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
+            rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1553,6 +1560,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--route_w_quality",
                 str(w_quality),
             ]
+            if rerank_wo_ann:
+                cmd.append("--route_rerank_without_ann")
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
             if r.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})

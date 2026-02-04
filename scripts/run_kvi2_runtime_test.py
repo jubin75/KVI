@@ -426,6 +426,7 @@ def _run_evidence_routing(
     w_ann: float,
     w_intent: float,
     w_quality: float,
+    rerank_without_ann: bool,
 ) -> Dict[str, Any]:
     """
     Evidence routing (no generation). Returns evidence_projection + ids/texts.
@@ -489,7 +490,7 @@ def _run_evidence_routing(
         return 0.2
 
     # weights are provided by caller (UI-configurable)
-    w_ann = float(w_ann)
+    w_ann = 0.0 if rerank_without_ann else float(w_ann)
     w_intent = float(w_intent)
     w_quality = float(w_quality)
     for i, it in enumerate(rr.items or []):
@@ -567,6 +568,7 @@ def _run_evidence_routing(
             "pool_size": int(top_pool),
             "soft_filter_intent": intent_key or "",
             "soft_filter_used": soft_filter_used,
+            "rerank_without_ann": bool(rerank_without_ann),
         },
         "evidence_projection": use_items,
         "evidence_ids": evidence_ids,
@@ -1088,6 +1090,7 @@ def main() -> None:
     p.add_argument("--route_w_ann", type=float, default=1.0)
     p.add_argument("--route_w_intent", type=float, default=0.6)
     p.add_argument("--route_w_quality", type=float, default=0.2)
+    p.add_argument("--route_rerank_without_ann", action="store_true", help="Rerank without ANN contribution (ANN only used for candidate pool).")
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -1154,6 +1157,7 @@ def main() -> None:
             w_ann=float(args.route_w_ann),
             w_intent=float(args.route_w_intent),
             w_quality=float(args.route_w_quality),
+            rerank_without_ann=bool(args.route_rerank_without_ann),
         )
         if pipeline == "route":
             print(json.dumps(routing, ensure_ascii=False, indent=2))
