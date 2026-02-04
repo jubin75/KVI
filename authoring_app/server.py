@@ -1348,9 +1348,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
-            w_ann = float(obj.get("route_w_ann") or 1.0)
-            w_intent = float(obj.get("route_w_intent") or 0.6)
-            w_quality = float(obj.get("route_w_quality") or 0.2)
+            w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
+            w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
+            w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1431,9 +1431,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
-            w_ann = float(obj.get("route_w_ann") or 1.0)
-            w_intent = float(obj.get("route_w_intent") or 0.6)
-            w_quality = float(obj.get("route_w_quality") or 0.2)
+            w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
+            w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
+            w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
             timeout_s = int(obj.get("timeout_s") or 180)
             cmd = [
                 sys.executable,
@@ -1520,9 +1520,9 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
             top_k = int(obj.get("top_k") or 8)
-            w_ann = float(obj.get("route_w_ann") or 1.0)
-            w_intent = float(obj.get("route_w_intent") or 0.6)
-            w_quality = float(obj.get("route_w_quality") or 0.2)
+            w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
+            w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
+            w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
