@@ -65,12 +65,12 @@ def _load_specs(path: Path) -> Dict[str, Dict[str, Any]]:
 def _default_specs() -> Dict[str, Dict[str, Any]]:
     # Keep this aligned with runtime fallback.
     return {
-        "symptom": {"description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。", "threshold": 0.28},
-        "drug": {"description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。", "threshold": 0.28},
-        "location": {"description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。", "threshold": 0.28},
+        "symptom": {"description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。", "threshold": 0.45},
+        "drug": {"description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。", "threshold": 0.55},
+        "location": {"description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。", "threshold": 0.50},
         "mechanism": {
             "description": "作用机制/发病机制：感染哪些细胞、免疫应答/免疫抑制、炎症反应、病理过程、通透性改变、多器官损伤等。",
-            "threshold": 0.26,
+            "threshold": 0.50,
         },
     }
 
@@ -167,7 +167,16 @@ def main() -> None:
         kept = [k for k in order if scores.get(k, 0.0) >= float(thresholds.get(k, 0.28))]
         if not kept and order:
             kept = [order[0]]
+        # Primary selection: prefer symptom if it's close to max (reduce drug dominance on symptom sentences).
         primary = kept[0] if kept else (order[0] if order else "unknown")
+        if order:
+            max_score = scores.get(order[0], 0.0)
+            margin = 0.05
+            prefer = ["symptom", "mechanism", "drug", "location"]
+            for p in prefer:
+                if p in scores and (max_score - scores.get(p, 0.0)) <= margin:
+                    primary = p
+                    break
         meta["semantic_scores"] = scores
         meta["semantic_tags"] = kept
         meta["semantic_primary"] = primary
