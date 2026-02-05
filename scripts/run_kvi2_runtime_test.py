@@ -1234,7 +1234,7 @@ def main() -> None:
     pipeline = str(args.pipeline)
     tok = None
     model = None
-    if pipeline in {"simple", "kvi2", "modeA"}:
+    if pipeline in {"simple", "kvi2", "modeA"} or (pipeline == "route" and bool(args.route_llm_intent_enable)):
         tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
         torch_dtype = torch.bfloat16 if device.type == "cuda" else None
         model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
@@ -1264,9 +1264,9 @@ def main() -> None:
         llm_intent_dbg: Dict[str, Any] = {}
         # Specs are needed for both LLM intent and routing
         specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
-        if pipeline == "modeA" and bool(args.route_llm_intent_enable):
+        if pipeline in {"route", "modeA"} and bool(args.route_llm_intent_enable):
             if tok is None or model is None:
-                raise SystemExit("Mode A LLM intent requires model/tokenizer")
+                raise SystemExit("LLM intent requires model/tokenizer")
             label_keys = [str(k).strip().lower() for k in (specs.keys() if isinstance(specs, dict) else []) if str(k).strip()]
             llm_intent, llm_intent_dbg = _llm_intent_classify_query(
                 query=str(args.prompt),

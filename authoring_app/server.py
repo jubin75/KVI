@@ -1386,6 +1386,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 str(out_dir),
                 "--domain_encoder_model",
                 encoder,
+                "--use_chat_template",
                 "--top_k",
                 str(top_k),
                 "--route_w_ann",
