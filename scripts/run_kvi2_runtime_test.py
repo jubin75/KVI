@@ -117,6 +117,7 @@ def _llm_intent_classify_query(
     model: Any,
     device: torch.device,
     max_new_tokens: int = 8,
+    use_chat_template: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
     labs = [str(x).strip().lower() for x in labels if str(x).strip()]
     if not labs:
@@ -128,6 +129,15 @@ def _llm_intent_classify_query(
         f"{str(query or '').strip()}\n"
         "标签："
     )
+    # Apply chat template when available to avoid prompt-echo on instruct models.
+    if bool(use_chat_template):
+        try:
+            fn = getattr(tok, "apply_chat_template", None)
+            if callable(fn):
+                messages = [{"role": "user", "content": prompt}]
+                prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        except Exception:
+            pass
     try:
         inp = tok(prompt, return_tensors="pt")
         input_ids = inp["input_ids"].to(device)
@@ -144,6 +154,12 @@ def _llm_intent_classify_query(
         )
         gen = out[0, input_ids.shape[1]:]
         txt = tok.decode(gen, skip_special_tokens=True).strip().lower()
+        # If the model echoes parts of the prompt, trim obvious prompt tails.
+        for marker in ["用户问题", "标签", "question", "label"]:
+            if marker in txt:
+                txt = txt.split(marker)[0].strip()
+        if "\n" in txt:
+            txt = txt.split("\n")[0].strip()
         cand = re.split(r"[\s,，。\n:：]+", txt)[0].strip()
         if cand in labs:
             return cand, {"method": "llm_intent", "raw": txt}
@@ -1217,6 +1233,7 @@ def main() -> None:
                 model=model,
                 device=device,
                 max_new_tokens=int(args.route_llm_intent_max_new_tokens),
+                use_chat_template=bool(args.use_chat_template),
             )
         routing = _run_evidence_routing(
             prompt=str(args.prompt),

@@ -347,24 +347,25 @@ async function runDebug() {
   }
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
-  // Debug log: Mode A uses routing_debug from modeA result; others call /route.
-  if (mode === "modeA") {
-    $("out_debug_log").textContent = pretty(r.routing_debug || {});
-  } else {
-    try {
-      const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
-        prompt,
-        top_k: Number.isFinite(topK) ? topK : 8,
-        route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-        route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-        route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-        route_rerank_without_ann: rerankNoAnn,
-        route_llm_intent_enable: routeLlmIntent,
-      });
-      $("out_debug_log").textContent = pretty(routeResp.result || {});
-    } catch (e) {
-      $("out_debug_log").textContent = String(e && e.message ? e.message : e);
+  // Debug log: always fetch full /route for routing/evidence inspection.
+  try {
+    const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
+      route_llm_intent_enable: routeLlmIntent,
+    });
+    const fullRoute = routeResp.result || {};
+    // For Mode A, also show the LLM intent debug coming from modeA if present.
+    if (mode === "modeA" && r.routing_debug) {
+      fullRoute.routing_debug = Object.assign({}, fullRoute.routing_debug || {}, r.routing_debug || {});
     }
+    $("out_debug_log").textContent = pretty(fullRoute);
+  } catch (e) {
+    $("out_debug_log").textContent = String(e && e.message ? e.message : e);
   }
   if (mode === "modeB") {
     const texts = (r.evidence_texts || []).map(t => String(t || "")).filter(x => x);
