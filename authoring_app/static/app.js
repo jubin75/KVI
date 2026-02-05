@@ -347,20 +347,24 @@ async function runDebug() {
   }
   const r = resp.result || {};
   $("out_cli").textContent = resp.cmd || "(no cmd)";
-  // Always fetch route debug for logging
-  try {
-    const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: routeLlmIntent,
-    });
-    $("out_debug_log").textContent = pretty(routeResp.result || {});
-  } catch (e) {
-    $("out_debug_log").textContent = String(e && e.message ? e.message : e);
+  // Debug log: Mode A uses routing_debug from modeA result; others call /route.
+  if (mode === "modeA") {
+    $("out_debug_log").textContent = pretty(r.routing_debug || {});
+  } else {
+    try {
+      const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
+        prompt,
+        top_k: Number.isFinite(topK) ? topK : 8,
+        route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+        route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+        route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+        route_rerank_without_ann: rerankNoAnn,
+        route_llm_intent_enable: routeLlmIntent,
+      });
+      $("out_debug_log").textContent = pretty(routeResp.result || {});
+    } catch (e) {
+      $("out_debug_log").textContent = String(e && e.message ? e.message : e);
+    }
   }
   if (mode === "modeB") {
     const texts = (r.evidence_texts || []).map(t => String(t || "")).filter(x => x);

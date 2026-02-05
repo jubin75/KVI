@@ -1289,6 +1289,7 @@ def main() -> None:
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
+                "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
