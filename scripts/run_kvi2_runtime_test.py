@@ -490,6 +490,7 @@ def _run_evidence_routing(
     w_quality: float,
     rerank_without_ann: bool,
     intent_override: str,
+    trace_text: str,
 ) -> Dict[str, Any]:
     """
     Evidence routing (no generation). Returns evidence_projection + ids/texts.
@@ -520,6 +521,12 @@ def _run_evidence_routing(
     # Stage 1: broader ANN pool
     top_pool = max(int(top_k) * 10, int(top_k))
     rr = retriever.search(qv, top_k=int(top_pool), filters=None, query_text=q)
+    pool_pairs: List[Tuple[str, str]] = []
+    for it in (rr.items or []):
+        bid = _kv_id(it)
+        if not bid:
+            continue
+        pool_pairs.append((str(bid), str(sentences_lookup.get(str(bid), "") or "")))
     items = []
     # Intent inference from specs (config-driven)
     specs = _load_semantic_type_specs_any(
@@ -629,6 +636,39 @@ def _run_evidence_routing(
     evidence_ids = [x.get("id") for x in use_items]
     evidence_texts = [x.get("text") for x in use_items]
     status = "OK" if use_items else "NO_EVIDENCE_FOUND"
+    trace_dbg: Dict[str, Any] = {}
+    trace_raw = str(trace_text or "").strip()
+    if trace_raw:
+        def _norm_trace(s: str) -> str:
+            return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(s or "")).lower()
+        tgt_norm = _norm_trace(trace_raw)
+        pool_matches: List[Dict[str, Any]] = []
+        if tgt_norm:
+            for i, (bid, txt) in enumerate(pool_pairs, start=1):
+                tnorm = _norm_trace(txt)
+                if not tnorm:
+                    continue
+                if tgt_norm in tnorm or tnorm in tgt_norm:
+                    pool_matches.append({"id": str(bid), "rank": int(i), "text": str(txt)})
+        final_matches: List[Dict[str, Any]] = []
+        if tgt_norm:
+            for i, it in enumerate(use_items, start=1):
+                txt = str(it.get("text") or "")
+                tnorm = _norm_trace(txt)
+                if not tnorm:
+                    continue
+                if tgt_norm in tnorm or tnorm in tgt_norm:
+                    final_matches.append({"id": str(it.get("id") or ""), "rank": int(i), "text": txt})
+        trace_dbg = {
+            "target_text": trace_raw,
+            "target_norm": tgt_norm,
+            "in_candidate_pool": bool(pool_matches),
+            "pool_match_count": int(len(pool_matches)),
+            "pool_first_match": pool_matches[0] if pool_matches else None,
+            "in_final": bool(final_matches),
+            "final_match_count": int(len(final_matches)),
+            "final_first_match": final_matches[0] if final_matches else None,
+        }
     return {
         "status": status,
         "routing_debug": {
@@ -639,6 +679,7 @@ def _run_evidence_routing(
             "soft_filter_intent": intent_key or "",
             "soft_filter_used": soft_filter_used,
             "rerank_without_ann": bool(rerank_without_ann),
+            "trace_target": trace_dbg,
         },
         "evidence_projection": use_items,
         "evidence_ids": evidence_ids,
@@ -1163,6 +1204,7 @@ def main() -> None:
     p.add_argument("--route_rerank_without_ann", action="store_true", help="Rerank without ANN contribution (ANN only used for candidate pool).")
     p.add_argument("--route_llm_intent_enable", action="store_true", help="Use base LLM to classify query intent (Mode A only)")
     p.add_argument("--route_llm_intent_max_new_tokens", type=int, default=8)
+    p.add_argument("--route_trace_text", default="", help="Optional: trace a target sentence in routing candidate pool/output.")
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -1248,6 +1290,7 @@ def main() -> None:
             w_quality=float(args.route_w_quality),
             rerank_without_ann=bool(args.route_rerank_without_ann),
             intent_override=str(llm_intent or ""),
+            trace_text=str(args.route_trace_text or ""),
         )
         if llm_intent_dbg:
             routing.setdefault("routing_debug", {})

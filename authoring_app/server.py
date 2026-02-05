@@ -1364,6 +1364,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
             rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
             llm_intent = bool(obj.get("route_llm_intent_enable", False))
+            trace_text = str(obj.get("route_trace_text") or "").strip()
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
@@ -1398,6 +1399,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 cmd.append("--route_rerank_without_ann")
             if llm_intent:
                 cmd.append("--route_llm_intent_enable")
+            if trace_text:
+                cmd.extend(["--route_trace_text", trace_text])
             r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
             if r.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})

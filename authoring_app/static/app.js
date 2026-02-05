@@ -304,6 +304,7 @@ async function runDebug() {
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
   const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
+  const routeTraceText = ($("route_trace_text").value || "").trim();
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
@@ -323,6 +324,7 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
+      route_trace_text: routeTraceText,
     });
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
@@ -333,6 +335,7 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
+      route_trace_text: routeTraceText,
     });
   } else {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
@@ -343,6 +346,7 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: modeAUseLlmIntent,
+      route_trace_text: routeTraceText,
     });
   }
   const r = resp.result || {};
@@ -357,13 +361,15 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
+      route_trace_text: routeTraceText,
     });
     const fullRoute = routeResp.result || {};
-    // For Mode A, also show the LLM intent debug coming from modeA if present.
+    const debugObj = { route: fullRoute };
+    // For Mode A, show LLM intent debug separately to avoid mixing with /route evidence.
     if (mode === "modeA" && r.routing_debug) {
-      fullRoute.routing_debug = Object.assign({}, fullRoute.routing_debug || {}, r.routing_debug || {});
+      debugObj.modeA_routing_debug = r.routing_debug || {};
     }
-    $("out_debug_log").textContent = pretty(fullRoute);
+    $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) {
     $("out_debug_log").textContent = String(e && e.message ? e.message : e);
   }
