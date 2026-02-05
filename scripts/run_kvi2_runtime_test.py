@@ -497,11 +497,11 @@ def _run_evidence_routing(
     """
     try:
         from external_kv_injection.src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
-        from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+        from external_kv_injection.src.kv_bank import FaissKVBank, KVItem  # type: ignore
         from external_kv_injection.src.retriever import Retriever  # type: ignore
     except ModuleNotFoundError:
         from src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
-        from src.kv_bank import FaissKVBank  # type: ignore
+        from src.kv_bank import FaissKVBank, KVItem  # type: ignore
         from src.retriever import Retriever  # type: ignore
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -689,6 +689,42 @@ def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
 
+
+def _select_kv_items_by_ids(*, bank: Any, ids: Sequence[str]) -> List[Any]:
+    target = [str(x) for x in (ids or []) if str(x)]
+    if not target:
+        return []
+    target_set = set(target)
+    by_id: Dict[str, Any] = {}
+
+    def _scan_bank(b: Any) -> None:
+        metas = getattr(b, "metas", None)
+        k_ext = getattr(b, "k_ext", None)
+        v_ext = getattr(b, "v_ext", None)
+        if not isinstance(metas, list) or k_ext is None or v_ext is None:
+            return
+        for i, meta in enumerate(metas):
+            if not isinstance(meta, dict):
+                continue
+            bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+            if not bid or bid not in target_set:
+                continue
+            if bid in by_id:
+                continue
+            try:
+                by_id[bid] = KVItem(score=0.0, meta=meta, K_ext=k_ext[int(i)], V_ext=v_ext[int(i)])
+            except Exception:
+                continue
+
+    # Handle both single and sharded banks.
+    if hasattr(bank, "shards"):
+        for s in getattr(bank, "shards") or []:
+            _scan_bank(s)
+    else:
+        _scan_bank(bank)
+
+    # Preserve input order.
+    return [by_id[x] for x in target if x in by_id]
 
 def _load_block_metadata_lookup(path: str) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
@@ -1329,6 +1365,42 @@ def main() -> None:
             )
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
+            # KV injection from evidence ids (no evidence text in prompt).
+            pkv = None
+            injected_dbg: Dict[str, Any] = {"enabled": False, "selected_ids": [], "selected_kv_lens": [], "layers": []}
+            try:
+                bank = FaissKVBank.load(Path(str(args.kv_dir)))
+                ev_ids = routing.get("evidence_ids") if isinstance(routing, dict) else []
+                items = _select_kv_items_by_ids(bank=bank, ids=ev_ids if isinstance(ev_ids, list) else [])
+                if items:
+                    dtype2 = next(model.parameters()).dtype
+                    ext_by_layer: Dict[int, Any] = {}
+                    for li in (0, 1, 2, 3):
+                        try:
+                            ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
+                                items=items,
+                                layer_id=int(li),
+                                batch_size=1,
+                                device=device,
+                                dtype=dtype2,
+                            )
+                        except Exception:
+                            continue
+                    if ext_by_layer:
+                        pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
+                        injected_dbg["enabled"] = True
+                        injected_dbg["layers"] = sorted([int(x) for x in ext_by_layer.keys()])
+                        injected_dbg["selected_ids"] = [str(_kv_id(it)) for it in items]
+                        kv_lens = []
+                        for it in items:
+                            try:
+                                meta = getattr(it, "meta", None) or {}
+                                kv_lens.append(int(meta.get("kv_len")) if isinstance(meta.get("kv_len"), int) else None)
+                            except Exception:
+                                kv_lens.append(None)
+                        injected_dbg["selected_kv_lens"] = kv_lens
+            except Exception:
+                pkv = None
             # Base LLM output (no evidence prompt) for comparison
             base_prompt = KVI2Runtime._format_prompt(tok, str(args.prompt).strip(), use_chat_template=bool(args.use_chat_template))
             base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
@@ -1347,7 +1419,7 @@ def main() -> None:
                 tokenizer=tok,
                 prompt=modeA_prompt,
                 device=device,
-                past_key_values=None,
+                past_key_values=pkv,
                 max_new_tokens=192,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
@@ -1357,6 +1429,7 @@ def main() -> None:
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
+                "injection_debug": injected_dbg,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
