@@ -1377,94 +1377,43 @@ def main() -> None:
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
         if pipeline == "modeA":
-            # Evidence Routing + Free Reasoning (LLM) without evidence text injection.
-            modeA_prompt = (
-                str(args.prompt).strip()
-                + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
-            )
+            # Mode A now routes into KVI2 runtime (KV injection, no evidence text in prompt).
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
-            # KV injection from evidence ids (no evidence text in prompt).
-            pkv = None
-            injected_dbg: Dict[str, Any] = {
-                "enabled": False,
-                "source": "",
-                "evidence_ids": routing.get("evidence_ids") if isinstance(routing, dict) else [],
-                "items_found": 0,
-                "selected_ids": [],
-                "selected_kv_lens": [],
-                "layers": [],
-                "error": "",
+            cfg_a = KVI2Config(
+                top_k=int(args.top_k),
+                kv_refresh_rounds=int(args.kv_refresh_rounds),
+                kv_irrelevant_logit_delta_threshold=float(args.kv_irrelevant_logit_delta_threshold),
+                pattern_index_dir=str(args.pattern_index_dir),
+                debug_retrieved_ids=True,
+                answer_mode=str(args.answer_mode),
+            )
+            runtime_a = KVI2Runtime(cfg=cfg_a, domain_encoder_model=str(args.domain_encoder_model))
+            out_kvi2 = runtime_a.run_ab(
+                model=model,
+                tokenizer=tok,
+                prompt=str(args.prompt),
+                kv_dir=str(args.kv_dir),
+                device=device,
+                use_chat_template=bool(args.use_chat_template),
+                block_text_lookup=sentence_text_lookup,
+                sidecar_dir=str(args.sidecar_dir),
+            )
+            answer = str(out_kvi2.get("rim_answer", "") or "").strip()
+            base_answer = str(out_kvi2.get("baseline_answer", "") or "").strip()
+            retr = out_kvi2.get("retrieval") if isinstance(out_kvi2.get("retrieval"), dict) else {}
+            injected_dbg = {
+                "enabled": bool(retr),
+                "source": "kvi2_runtime",
+                "selected_ids": retr.get("retrieved_ids") if isinstance(retr.get("retrieved_ids"), list) else retr.get("final_rank"),
             }
-            try:
-                items = [it for it in (routing_kv_items or []) if it is not None]
-                if items:
-                    injected_dbg["source"] = "routing_items"
-                else:
-                    bank = FaissKVBank.load(Path(str(args.kv_dir)))
-                    ev_ids = routing.get("evidence_ids") if isinstance(routing, dict) else []
-                    items = _select_kv_items_by_ids(bank=bank, ids=ev_ids if isinstance(ev_ids, list) else [])
-                    injected_dbg["source"] = "lookup_by_id"
-                injected_dbg["items_found"] = int(len(items))
-                if items:
-                    dtype2 = next(model.parameters()).dtype
-                    ext_by_layer: Dict[int, Any] = {}
-                    for li in (0, 1, 2, 3):
-                        try:
-                            ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
-                                items=items,
-                                layer_id=int(li),
-                                batch_size=1,
-                                device=device,
-                                dtype=dtype2,
-                            )
-                        except Exception:
-                            continue
-                    if ext_by_layer:
-                        pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
-                        injected_dbg["enabled"] = True
-                        injected_dbg["layers"] = sorted([int(x) for x in ext_by_layer.keys()])
-                        injected_dbg["selected_ids"] = [str(_kv_id(it)) for it in items]
-                        kv_lens = []
-                        for it in items:
-                            try:
-                                meta = getattr(it, "meta", None) or {}
-                                kv_lens.append(int(meta.get("kv_len")) if isinstance(meta.get("kv_len"), int) else None)
-                            except Exception:
-                                kv_lens.append(None)
-                        injected_dbg["selected_kv_lens"] = kv_lens
-            except Exception as e:
-                pkv = None
-                injected_dbg["error"] = f"{type(e).__name__}"
-            # Base LLM output (no evidence prompt) for comparison
-            base_prompt = KVI2Runtime._format_prompt(tok, str(args.prompt).strip(), use_chat_template=bool(args.use_chat_template))
-            base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
-                model=model,
-                tokenizer=tok,
-                prompt=base_prompt,
-                device=device,
-                past_key_values=None,
-                max_new_tokens=192,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
-            ).strip()
-            modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
-            answer = MultiStepInjector._greedy_generate_with_past_prefix(
-                model=model,
-                tokenizer=tok,
-                prompt=modeA_prompt,
-                device=device,
-                past_key_values=pkv,
-                max_new_tokens=192,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
-            ).strip()
             out = {
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
                 "injection_debug": injected_dbg,
+                "kvi2_result": out_kvi2,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
