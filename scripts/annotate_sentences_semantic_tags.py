@@ -65,12 +65,29 @@ def _load_specs(path: Path) -> Dict[str, Dict[str, Any]]:
 def _default_specs() -> Dict[str, Dict[str, Any]]:
     # Keep this aligned with runtime fallback.
     return {
-        "symptom": {"description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。", "threshold": 0.45},
-        "drug": {"description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。", "threshold": 0.55},
-        "location": {"description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。", "threshold": 0.50},
+        "symptom": {
+            "description": "临床表现、症状体征、实验室异常、常见表现的枚举或陈述句。",
+            "threshold": 0.45,
+            "keywords": ["症状", "体征", "发热", "乏力", "恶心", "呕吐", "腹泻", "出血", "意识障碍", "皮疹", "白细胞", "血小板"],
+            "keyword_boost": 0.06,
+        },
+        "drug": {
+            "description": "治疗、用药、药物、获批/批准、疗效、不良反应等相关陈述句。",
+            "threshold": 0.55,
+            "keywords": ["药物", "治疗", "用药", "法维拉韦", "获批", "批准", "不良反应", "抗病毒", "支持治疗"],
+            "keyword_boost": 0.06,
+        },
+        "location": {
+            "description": "地区分布、流行区域、病例报告地点、地理范围等相关陈述句。",
+            "threshold": 0.50,
+            "keywords": ["地区", "分布", "流行", "报告", "病例", "省", "市", "国家", "区域"],
+            "keyword_boost": 0.05,
+        },
         "mechanism": {
             "description": "作用机制/发病机制：感染哪些细胞、免疫应答/免疫抑制、炎症反应、病理过程、通透性改变、多器官损伤等。",
             "threshold": 0.50,
+            "keywords": ["机制", "发病机制", "致病机制", "感染", "免疫", "炎症", "内皮", "通透性", "病理", "多器官"],
+            "keyword_boost": 0.06,
         },
     }
 
@@ -85,6 +102,13 @@ def _spec_threshold(spec: Dict[str, Any], default_thr: float) -> float:
 def _anchor_text(st: str, desc: str) -> str:
     # Offline tagging should be query-agnostic.
     return f"[semantic_type]\n{st}\n\n[description]\n{desc}\n"
+
+
+def _keyword_hits(text: str, keywords: List[str]) -> int:
+    if not text or not keywords:
+        return 0
+    t = str(text)
+    return sum(1 for k in keywords if str(k) and str(k) in t)
 
 
 def main() -> None:
@@ -142,10 +166,21 @@ def main() -> None:
     keys = list(specs.keys())
     anchors: List[str] = []
     thresholds: Dict[str, float] = {}
+    keywords_map: Dict[str, List[str]] = {}
+    boost_map: Dict[str, float] = {}
     for k in keys:
         desc = str((specs.get(k) or {}).get("description") or "").strip() or k
         anchors.append(_anchor_text(k, desc))
         thresholds[k] = _spec_threshold(specs.get(k) or {}, 0.28)
+        kw = (specs.get(k) or {}).get("keywords") if isinstance(specs.get(k), dict) else None
+        if isinstance(kw, list):
+            keywords_map[k] = [str(x) for x in kw if str(x).strip()]
+        else:
+            keywords_map[k] = []
+        try:
+            boost_map[k] = float((specs.get(k) or {}).get("keyword_boost") or 0.0)
+        except Exception:
+            boost_map[k] = 0.0
 
     # Pre-embed anchors once.
     a = enc.encode(anchors, batch_size=min(16, max(1, len(anchors))))
@@ -162,6 +197,14 @@ def main() -> None:
         # v shape [d], a shape [K,d]
         sims = (a @ v).astype(float)
         scores: Dict[str, float] = {k: float(sims[i]) for i, k in enumerate(keys)}
+        # Keyword boost (helps separate mixed domains)
+        for k in keys:
+            kw = keywords_map.get(k) or []
+            if not kw:
+                continue
+            hits = _keyword_hits(text, kw)
+            if hits > 0:
+                scores[k] = float(scores.get(k, 0.0)) + float(boost_map.get(k, 0.0))
         # Tags: keep >= threshold; if empty, keep top1.
         order = sorted(keys, key=lambda k: scores.get(k, 0.0), reverse=True)
         kept = [k for k in order if scores.get(k, 0.0) >= float(thresholds.get(k, 0.28))]
