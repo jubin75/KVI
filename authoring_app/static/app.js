@@ -380,13 +380,19 @@ async function runDebug() {
     });
     const fullRoute = routeResp.result || {};
     const debugObj = { route: fullRoute };
-    // For Mode A, show LLM intent debug separately to avoid mixing with /route evidence.
-    if (mode === "modeA" && r.routing_debug) {
-      debugObj.modeA_routing_debug = r.routing_debug || {};
-    }
-    // Include Mode A KV injection debug if present.
-    if (mode === "modeA" && r.injection_debug) {
-      debugObj.modeA_injection_debug = r.injection_debug || {};
+    // For Mode A, show true Mode A debug (no-evidence prompt) separately.
+    if (mode === "modeA") {
+      const rTrue = (respTrue && respTrue.result) ? respTrue.result : {};
+      if (rTrue.routing_debug) {
+        debugObj.modeA_routing_debug = rTrue.routing_debug || {};
+      }
+      if (rTrue.injection_debug) {
+        debugObj.modeA_injection_debug = rTrue.injection_debug || {};
+      }
+      // Also keep the RAG Mode A debug if needed.
+      if (r.routing_debug) {
+        debugObj.modeA_rag_routing_debug = r.routing_debug || {};
+      }
     }
     $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) {
