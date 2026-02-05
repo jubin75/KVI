@@ -1387,6 +1387,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--domain_encoder_model",
                 encoder,
                 "--use_chat_template",
+                "--local_files_only",
                 "--top_k",
                 str(top_k),
                 "--route_w_ann",
@@ -1457,6 +1458,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
             rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
             llm_intent = bool(obj.get("route_llm_intent_enable", False))
+            trace_text = str(obj.get("route_trace_text") or "").strip()
             timeout_s = int(obj.get("timeout_s") or 180)
             cmd = [
                 sys.executable,
@@ -1480,6 +1482,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--domain_encoder_model",
                 encoder,
                 "--use_chat_template",
+                "--local_files_only",
                 "--top_k",
                 str(top_k),
                 "--route_w_ann",
@@ -1493,6 +1496,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 cmd.append("--route_rerank_without_ann")
             if llm_intent:
                 cmd.append("--route_llm_intent_enable")
+            if trace_text:
+                cmd.extend(["--route_trace_text", trace_text])
             try:
                 r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
             except subprocess.TimeoutExpired:
@@ -1503,6 +1508,114 @@ class KVIHandler(BaseHTTPRequestHandler):
                         "ok": False,
                         "error": "timeout",
                         "message": f"Mode A timed out after {timeout_s}s. Model loading or generation is too slow. Use a local model path or increase timeout_s.",
+                        "cmd": " ".join(cmd),
+                    },
+                )
+                return
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "result": out,
+                },
+            )
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/modeA_rag"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/modeA_rag")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            if not base_llm or not encoder:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm or build.retrieval_encoder_model in topic config.json"})
+                return
+            # Fail fast if base_llm is a local path that doesn't exist (avoid hanging on load).
+            try:
+                b = str(base_llm or "")
+                b_exp = Path(b).expanduser()
+                if (b.startswith("/") or b.startswith("./") or b.startswith("../") or b.startswith("~")) and not b_exp.exists():
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"base_llm path not found: {b_exp}"})
+                    return
+            except Exception:
+                pass
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            kv_dir = out_dir / "kvbank_sentences"
+            if not kv_dir.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
+                return
+            top_k = int(obj.get("top_k") or 8)
+            w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
+            w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
+            w_quality = float(obj.get("route_w_quality")) if obj.get("route_w_quality") is not None else 0.2
+            rerank_wo_ann = bool(obj.get("route_rerank_without_ann", False))
+            llm_intent = bool(obj.get("route_llm_intent_enable", False))
+            trace_text = str(obj.get("route_trace_text") or "").strip()
+            timeout_s = int(obj.get("timeout_s") or 180)
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_kvi2_runtime_test.py"),
+                "--pipeline",
+                "modeA_rag",
+                "--model",
+                base_llm,
+                "--prompt",
+                prompt,
+                "--kv_dir",
+                str(kv_dir),
+                "--sentences_jsonl",
+                str(out_dir / "sentences.tagged.jsonl"),
+                "--semantic_type_specs",
+                str(out_dir / "semantic_type_specs.json"),
+                "--pattern_index_dir",
+                str(out_dir / "pattern_sidecar"),
+                "--sidecar_dir",
+                str(out_dir),
+                "--domain_encoder_model",
+                encoder,
+                "--use_chat_template",
+                "--local_files_only",
+                "--top_k",
+                str(top_k),
+                "--route_w_ann",
+                str(w_ann),
+                "--route_w_intent",
+                str(w_intent),
+                "--route_w_quality",
+                str(w_quality),
+            ]
+            if rerank_wo_ann:
+                cmd.append("--route_rerank_without_ann")
+            if llm_intent:
+                cmd.append("--route_llm_intent_enable")
+            if trace_text:
+                cmd.extend(["--route_trace_text", trace_text])
+            try:
+                r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "error": "timeout",
+                        "message": f"Mode A RAG timed out after {timeout_s}s. Model loading or generation is too slow. Use a local model path or increase timeout_s.",
                         "cmd": " ".join(cmd),
                     },
                 )

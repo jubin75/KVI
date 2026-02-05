@@ -205,7 +205,7 @@
             <div class="field">
               <label>模式</label>
               <select id="debug_mode">
-                <option value="modeA" selected>Mode A（诊断 / 推理）</option>
+                <option value="modeA" selected>Mode A（RAG 诊断 / 推理）</option>
                 <option value="modeB">Mode B（证据指向）</option>
                 <option value="route">仅 Evidence Routing（调试）</option>
               </select>
@@ -264,9 +264,14 @@
       </div>
 
       <div class="field">
-        <label>Mode A 输出（diagnosis_result）</label>
+        <label>Mode A（RAG）输出（diagnosis_result）</label>
         <div class="note" id="out_modeA_status"></div>
         <div class="pre" id="out_modeA">等待运行...</div>
+      </div>
+      <div class="field">
+        <label>Mode A（无证据拼接）输出</label>
+        <div class="note" id="out_modeA_true_status"></div>
+        <div class="pre" id="out_modeA_true">等待运行...</div>
       </div>
       <div class="field">
         <label>Base LLM 输出（无证据，对比用）</label>

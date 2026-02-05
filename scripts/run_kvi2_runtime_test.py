@@ -1168,13 +1168,14 @@ def main() -> None:
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model")
     p.add_argument(
         "--pipeline",
-        choices=["kvi2", "simple", "route", "modeA", "modeB"],
+        choices=["kvi2", "simple", "route", "modeA", "modeA_rag", "modeB"],
         default="kvi2",
         help=(
             "kvi2: Pattern+Gate+RIM pipeline; "
             "simple: prompt->similarity retrieval (KVBank)->multi-step KV injection->text answer; "
             "route: evidence routing only; "
-            "modeA: evidence routing + free reasoning (LLM); "
+            "modeA: evidence routing + free reasoning (LLM, no evidence text in prompt); "
+            "modeA_rag: evidence routing + free reasoning (LLM, evidence text appended); "
             "modeB: evidence routing + evidence projection (no generation)."
         ),
     )
@@ -1183,6 +1184,7 @@ def main() -> None:
     p.add_argument("--kv_irrelevant_logit_delta_threshold", type=float, default=0.05)
     p.add_argument("--debug_retrieved_ids", action="store_true")
     p.add_argument("--use_chat_template", action="store_true")
+    p.add_argument("--local_files_only", action="store_true", help="Load HF models/tokenizers from local cache only.")
     p.add_argument(
         "--answer_mode",
         choices=["list_only", "narrative", "llm", "llm_prose"],
@@ -1234,10 +1236,20 @@ def main() -> None:
     pipeline = str(args.pipeline)
     tok = None
     model = None
-    if pipeline in {"simple", "kvi2", "modeA"} or (pipeline == "route" and bool(args.route_llm_intent_enable)):
-        tok = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
+    if pipeline in {"simple", "kvi2", "modeA", "modeA_rag"} or (pipeline == "route" and bool(args.route_llm_intent_enable)):
+        tok = AutoTokenizer.from_pretrained(
+            args.model,
+            use_fast=True,
+            trust_remote_code=True,
+            local_files_only=bool(args.local_files_only),
+        )
         torch_dtype = torch.bfloat16 if device.type == "cuda" else None
-        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+            local_files_only=bool(args.local_files_only),
+        )
         model.to(device).eval()
 
     # blocks_jsonl is only needed for pipeline=kvi2 (LIST_ONLY, debug/citation helpers).
@@ -1257,14 +1269,14 @@ def main() -> None:
     # ----------------------------------------
     # MODE A/B and ROUTING
     # ----------------------------------------
-    if pipeline in {"route", "modeA", "modeB"}:
+    if pipeline in {"route", "modeA", "modeA_rag", "modeB"}:
         if not sentences_jsonl_path:
-            raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeB")
+            raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeA_rag/modeB")
         llm_intent = ""
         llm_intent_dbg: Dict[str, Any] = {}
         # Specs are needed for both LLM intent and routing
         specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
-        if pipeline in {"route", "modeA"} and bool(args.route_llm_intent_enable):
+        if pipeline in {"route", "modeA", "modeA_rag"} and bool(args.route_llm_intent_enable):
             if tok is None or model is None:
                 raise SystemExit("LLM intent requires model/tokenizer")
             label_keys = [str(k).strip().lower() for k in (specs.keys() if isinstance(specs, dict) else []) if str(k).strip()]
@@ -1310,14 +1322,9 @@ def main() -> None:
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
         if pipeline == "modeA":
-            # Evidence Routing + Free Reasoning (LLM)
-            ev_texts = routing.get("evidence_texts") or []
-            # Build a lightweight RAG prompt (allowed in Mode A).
-            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
+            # Evidence Routing + Free Reasoning (LLM) without evidence text injection.
             modeA_prompt = (
                 str(args.prompt).strip()
-                + "\n\n请基于以下证据进行自由推理并给出诊断性结论：\n"
-                + ev_block
                 + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
             )
             if tok is None or model is None:
@@ -1347,6 +1354,49 @@ def main() -> None:
             ).strip()
             out = {
                 "mode": "A",
+                "diagnosis_result": str(answer or ""),
+                "base_llm_result": str(base_answer or ""),
+                "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
+            }
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return
+        if pipeline == "modeA_rag":
+            # Evidence Routing + Free Reasoning (LLM) with evidence text appended.
+            ev_texts = routing.get("evidence_texts") or []
+            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
+            modeA_prompt = (
+                str(args.prompt).strip()
+                + "\n\n请基于以下证据进行自由推理并给出诊断性结论：\n"
+                + ev_block
+                + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
+            )
+            if tok is None or model is None:
+                raise SystemExit("Mode A RAG requires model/tokenizer")
+            # Base LLM output (no evidence prompt) for comparison
+            base_prompt = KVI2Runtime._format_prompt(tok, str(args.prompt).strip(), use_chat_template=bool(args.use_chat_template))
+            base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=base_prompt,
+                device=device,
+                past_key_values=None,
+                max_new_tokens=192,
+                no_repeat_ngram_size=12,
+                repetition_penalty=1.08,
+            ).strip()
+            modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
+            answer = MultiStepInjector._greedy_generate_with_past_prefix(
+                model=model,
+                tokenizer=tok,
+                prompt=modeA_prompt,
+                device=device,
+                past_key_values=None,
+                max_new_tokens=192,
+                no_repeat_ngram_size=12,
+                repetition_penalty=1.08,
+            ).strip()
+            out = {
+                "mode": "A_RAG",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},

@@ -307,14 +307,17 @@ async function runDebug() {
   const routeTraceText = ($("route_trace_text").value || "").trim();
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
+  $("out_modeA_true").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
   $("out_route").textContent = "运行中...";
   $("out_debug_log").textContent = "运行中...";
   $("out_base_llm").textContent = "运行中...";
   $("out_modeA_status").textContent = "";
+  $("out_modeA_true_status").textContent = "";
   $("out_modeB_status").textContent = "";
   $("out_route_status").textContent = "";
   let resp = null;
+  let respTrue = null;
   if (mode === "modeB") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, {
       prompt,
@@ -338,7 +341,19 @@ async function runDebug() {
       route_trace_text: routeTraceText,
     });
   } else {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
+    // Mode A (RAG) as primary output
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
+      prompt,
+      top_k: Number.isFinite(topK) ? topK : 8,
+      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+      route_rerank_without_ann: rerankNoAnn,
+      route_llm_intent_enable: modeAUseLlmIntent,
+      route_trace_text: routeTraceText,
+    });
+    // True Mode A (no evidence text) as additional output
+    respTrue = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
@@ -378,12 +393,14 @@ async function runDebug() {
     $("out_modeB").textContent = texts.length ? texts.join("\n") : "(no evidence_texts)";
     $("out_modeB_status").textContent = r.status ? `status: ${r.status}` : "";
     $("out_modeA").textContent = "";
+    $("out_modeA_true").textContent = "";
     $("out_route").textContent = "";
     $("out_base_llm").textContent = "";
   } else if (mode === "route") {
     $("out_route").textContent = pretty(r);
     $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
     $("out_modeA").textContent = "";
+    $("out_modeA_true").textContent = "";
     $("out_modeB").textContent = "";
     $("out_base_llm").textContent = "";
   } else {
@@ -392,6 +409,9 @@ async function runDebug() {
     $("out_modeB").textContent = "";
     $("out_route").textContent = "";
     $("out_base_llm").textContent = r.base_llm_result || "";
+    const rTrue = (respTrue && respTrue.result) ? respTrue.result : {};
+    $("out_modeA_true").textContent = rTrue.diagnosis_result || "";
+    $("out_modeA_true_status").textContent = "status: OK";
   }
 }
 
