@@ -384,6 +384,10 @@ async function runDebug() {
     if (mode === "modeA" && r.routing_debug) {
       debugObj.modeA_routing_debug = r.routing_debug || {};
     }
+    // Include Mode A KV injection debug if present.
+    if (mode === "modeA" && r.injection_debug) {
+      debugObj.modeA_injection_debug = r.injection_debug || {};
+    }
     $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) {
     $("out_debug_log").textContent = String(e && e.message ? e.message : e);
