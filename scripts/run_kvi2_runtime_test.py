@@ -491,7 +491,8 @@ def _run_evidence_routing(
     rerank_without_ann: bool,
     intent_override: str,
     trace_text: str,
-) -> Dict[str, Any]:
+    return_kv_items: bool = False,
+) -> Any:
     """
     Evidence routing (no generation). Returns evidence_projection + ids/texts.
     """
@@ -522,10 +523,12 @@ def _run_evidence_routing(
     top_pool = max(int(top_k) * 10, int(top_k))
     rr = retriever.search(qv, top_k=int(top_pool), filters=None, query_text=q)
     pool_pairs: List[Tuple[str, str]] = []
+    kv_item_map: Dict[str, Any] = {}
     for it in (rr.items or []):
         bid = _kv_id(it)
         if not bid:
             continue
+        kv_item_map[str(bid)] = it
         pool_pairs.append((str(bid), str(sentences_lookup.get(str(bid), "") or "")))
     items = []
     # Intent inference from specs (config-driven)
@@ -636,6 +639,13 @@ def _run_evidence_routing(
     evidence_ids = [x.get("id") for x in use_items]
     evidence_texts = [x.get("text") for x in use_items]
     status = "OK" if use_items else "NO_EVIDENCE_FOUND"
+    use_items_kv: List[Any] = []
+    for eid in evidence_ids:
+        if not eid:
+            continue
+        it = kv_item_map.get(str(eid))
+        if it is not None:
+            use_items_kv.append(it)
     trace_dbg: Dict[str, Any] = {}
     trace_raw = str(trace_text or "").strip()
     if trace_raw:
@@ -669,7 +679,7 @@ def _run_evidence_routing(
             "final_match_count": int(len(final_matches)),
             "final_first_match": final_matches[0] if final_matches else None,
         }
-    return {
+    routing = {
         "status": status,
         "routing_debug": {
             "intent": intent_key or "unknown",
@@ -685,6 +695,9 @@ def _run_evidence_routing(
         "evidence_ids": evidence_ids,
         "evidence_texts": evidence_texts,
     }
+    if return_kv_items:
+        return routing, use_items_kv
+    return routing
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
@@ -1325,7 +1338,8 @@ def main() -> None:
                 max_new_tokens=int(args.route_llm_intent_max_new_tokens),
                 use_chat_template=bool(args.use_chat_template),
             )
-        routing = _run_evidence_routing(
+        routing_kv_items: List[Any] = []
+        routing_res = _run_evidence_routing(
             prompt=str(args.prompt),
             kv_dir=str(args.kv_dir),
             sentences_lookup=sentence_text_lookup,
@@ -1339,7 +1353,12 @@ def main() -> None:
             rerank_without_ann=bool(args.route_rerank_without_ann),
             intent_override=str(llm_intent or ""),
             trace_text=str(args.route_trace_text or ""),
+            return_kv_items=bool(pipeline in {"modeA", "modeA_rag"}),
         )
+        if isinstance(routing_res, tuple) and len(routing_res) == 2:
+            routing, routing_kv_items = routing_res  # type: ignore[assignment]
+        else:
+            routing = routing_res
         if llm_intent_dbg:
             routing.setdefault("routing_debug", {})
             routing["routing_debug"]["llm_intent_debug"] = llm_intent_dbg
@@ -1367,11 +1386,26 @@ def main() -> None:
                 raise SystemExit("Mode A requires model/tokenizer")
             # KV injection from evidence ids (no evidence text in prompt).
             pkv = None
-            injected_dbg: Dict[str, Any] = {"enabled": False, "selected_ids": [], "selected_kv_lens": [], "layers": []}
+            injected_dbg: Dict[str, Any] = {
+                "enabled": False,
+                "source": "",
+                "evidence_ids": routing.get("evidence_ids") if isinstance(routing, dict) else [],
+                "items_found": 0,
+                "selected_ids": [],
+                "selected_kv_lens": [],
+                "layers": [],
+                "error": "",
+            }
             try:
-                bank = FaissKVBank.load(Path(str(args.kv_dir)))
-                ev_ids = routing.get("evidence_ids") if isinstance(routing, dict) else []
-                items = _select_kv_items_by_ids(bank=bank, ids=ev_ids if isinstance(ev_ids, list) else [])
+                items = [it for it in (routing_kv_items or []) if it is not None]
+                if items:
+                    injected_dbg["source"] = "routing_items"
+                else:
+                    bank = FaissKVBank.load(Path(str(args.kv_dir)))
+                    ev_ids = routing.get("evidence_ids") if isinstance(routing, dict) else []
+                    items = _select_kv_items_by_ids(bank=bank, ids=ev_ids if isinstance(ev_ids, list) else [])
+                    injected_dbg["source"] = "lookup_by_id"
+                injected_dbg["items_found"] = int(len(items))
                 if items:
                     dtype2 = next(model.parameters()).dtype
                     ext_by_layer: Dict[int, Any] = {}
@@ -1399,8 +1433,9 @@ def main() -> None:
                             except Exception:
                                 kv_lens.append(None)
                         injected_dbg["selected_kv_lens"] = kv_lens
-            except Exception:
+            except Exception as e:
                 pkv = None
+                injected_dbg["error"] = f"{type(e).__name__}"
             # Base LLM output (no evidence prompt) for comparison
             base_prompt = KVI2Runtime._format_prompt(tok, str(args.prompt).strip(), use_chat_template=bool(args.use_chat_template))
             base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
