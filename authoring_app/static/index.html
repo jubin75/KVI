@@ -238,8 +238,8 @@
             <div class="field">
               <label>Mode A 使用 LLM 意图分类器</label>
               <select id="modeA_use_llm_intent">
-                <option value="false" selected>false</option>
-                <option value="true">true</option>
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
               </select>
             </div>
           </div>
@@ -264,14 +264,14 @@
       </div>
 
       <div class="field">
-        <label>Mode A（RAG）输出（diagnosis_result）</label>
-        <div class="note" id="out_modeA_status"></div>
-        <div class="pre" id="out_modeA">等待运行...</div>
-      </div>
-      <div class="field">
-        <label>Mode A（无证据拼接）输出</label>
+        <label>Mode A 输出</label>
         <div class="note" id="out_modeA_true_status"></div>
         <div class="pre" id="out_modeA_true">等待运行...</div>
+      </div>
+      <div class="field">
+        <label>RAG 输出</label>
+        <div class="note" id="out_modeA_status"></div>
+        <div class="pre" id="out_modeA">等待运行...</div>
       </div>
       <div class="field">
         <label>Base LLM 输出（无证据，对比用）</label>
