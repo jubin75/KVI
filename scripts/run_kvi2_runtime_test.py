@@ -1204,6 +1204,8 @@ def main() -> None:
             raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeB")
         llm_intent = ""
         llm_intent_dbg: Dict[str, Any] = {}
+        # Specs are needed for both LLM intent and routing
+        specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
         if pipeline == "modeA" and bool(args.route_llm_intent_enable):
             if tok is None or model is None:
                 raise SystemExit("Mode A LLM intent requires model/tokenizer")
