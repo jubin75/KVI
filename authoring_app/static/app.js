@@ -399,9 +399,8 @@ async function runDebug() {
     $("out_debug_log").textContent = String(e && e.message ? e.message : e);
   }
   if (mode === "modeB") {
-    const texts = (r.evidence_texts || []).map(t => String(t || "")).filter(x => x);
-    $("out_modeB").textContent = texts.length ? texts.join("\n") : "(no evidence_texts)";
-    $("out_modeB_status").textContent = r.status ? `status: ${r.status}` : "";
+    $("out_modeB").textContent = pretty(r);
+    $("out_modeB_status").textContent = r.mode ? `mode: ${r.mode}` : "";
     $("out_modeA").textContent = "";
     $("out_modeA_true").textContent = "";
     $("out_route").textContent = "";

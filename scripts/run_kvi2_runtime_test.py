@@ -314,6 +314,154 @@ def _load_sentence_text_lookup(path: str) -> Dict[str, str]:
     return out
 
 
+def _load_sentence_meta_lookup(path: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Load sentence metadata (block_id -> metadata dict) from sentences.jsonl.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    sp = str(path or "").strip()
+    if not sp:
+        return out
+    p = Path(sp)
+    if not p.exists():
+        return out
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                bid = rec.get("block_id") or (rec.get("metadata") or {}).get("block_id")
+                if bid:
+                    meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+                    out[str(bid)] = meta if isinstance(meta, dict) else {}
+    except Exception:
+        return out
+    return out
+
+
+_MIN_QUALITY_THRESHOLD = 0.0
+
+
+def _map_semantic_to_projection(axis: str) -> str:
+    it = str(axis or "").strip().lower()
+    if it == "symptom":
+        return "clinical_manifestation"
+    if it == "drug":
+        return "treatment_recommendation"
+    if it == "mechanism":
+        return "pathophysiology_statement"
+    if it == "location":
+        return "epidemiologic_distribution"
+    raise SystemExit(f"Unsupported projection axis: {it}")
+
+
+def _fixed_statement(ptype: str) -> str:
+    t = str(ptype or "").strip()
+    if t == "clinical_manifestation":
+        return "指南或权威资料中明确记载的临床表现包括："
+    if t == "treatment_recommendation":
+        return "指南中列出的治疗或用药建议包括："
+    if t == "pathophysiology_statement":
+        return "权威资料中描述的发病机制包括："
+    if t == "epidemiologic_distribution":
+        return "文献中报道的流行病学分布包括："
+    raise SystemExit(f"Unsupported projection type: {t}")
+
+
+def _extract_source_ref(meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    m = meta if isinstance(meta, dict) else {}
+    src_ref = m.get("source_ref") if isinstance(m.get("source_ref"), dict) else None
+    if not src_ref:
+        return None
+    src_type = src_ref.get("type") or m.get("source_type") or m.get("evidence_type")
+    name = src_ref.get("name") or src_ref.get("title") or m.get("source_id") or m.get("doc_id")
+    section = src_ref.get("section") or m.get("section") or m.get("source_section") or None
+    if not src_type or not name:
+        return None
+    return {"type": str(src_type), "name": str(name), "section": (str(section) if section else None)}
+
+
+def _compile_mode_b(
+    *,
+    query_text: str,
+    semantic_primary: str,
+    role_axis: str,
+    evidence_candidates: List[Dict[str, Any]],
+    meta_lookup: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    if str(role_axis) != "grounding_only":
+        raise SystemExit("Mode B requires role_axis=grounding_only")
+
+    # Step 1: filter (no reorder / no merge)
+    filtered: List[Dict[str, Any]] = []
+    for ev in evidence_candidates or []:
+        if not isinstance(ev, dict):
+            continue
+        if str(ev.get("semantic_primary") or "").strip().lower() != str(semantic_primary or "").strip().lower():
+            continue
+        try:
+            q = float(ev.get("quality", 0.0))
+        except Exception:
+            q = 0.0
+        if q < float(_MIN_QUALITY_THRESHOLD):
+            continue
+        eid = str(ev.get("id") or "")
+        meta = meta_lookup.get(eid, {})
+        src_ref = _extract_source_ref(meta)
+        if not src_ref:
+            continue
+        filtered.append({"id": eid, "text": str(ev.get("text") or ""), "source_ref": src_ref})
+
+    # Step 2: group by projection type (pure mapping)
+    ptype = _map_semantic_to_projection(str(semantic_primary))
+    grouped = {ptype: filtered}
+
+    # Step 3: compile projection blocks
+    blocks: List[Dict[str, Any]] = []
+    for pt, group in grouped.items():
+        block = {
+            "projection_type": pt,
+            "statement": _fixed_statement(pt),
+            "evidence_items": [
+                {
+                    "evidence_id": ev["id"],
+                    "text": ev["text"],
+                    "source": {
+                        "type": ev["source_ref"]["type"],
+                        "name": ev["source_ref"]["name"],
+                        "section": ev["source_ref"].get("section"),
+                    },
+                }
+                for ev in group
+            ],
+        }
+        blocks.append(block)
+
+    # Step 4: scope note
+    if not blocks or not blocks[0]["evidence_items"]:
+        scope = {"completeness": "empty", "reason": "未命中符合条件的权威证据条目"}
+    else:
+        scope = {"completeness": "partial", "reason": "仅投影当前命中的证据条目，未进行知识补全或推断"}
+
+    # Step 5: assemble document
+    return {
+        "mode": "B",
+        "query": {
+            "text": str(query_text),
+            "semantic_primary": str(semantic_primary),
+            "role_axis": "grounding_only",
+        },
+        "evidence_projection": blocks,
+        "scope_note": scope,
+        "generation_policy": {"llm_generation": "disabled", "reason": "Mode B evidence projection only"},
+    }
 _ABBR_PARENS_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_-]{1,})[（(]([^）)]{1,64})[）)]")
 _ALIAS_PARENS_ABBR_RE = re.compile(r"([^\s]{2,64})[（(]([A-Za-z][A-Za-z0-9_-]{1,})[）)]")
 
@@ -1309,11 +1457,13 @@ def main() -> None:
         block_text_lookup = _load_block_text_lookup(args.blocks_jsonl)
 
     sentence_text_lookup: Dict[str, str] = {}
+    sentence_meta_lookup: Dict[str, Dict[str, Any]] = {}
     sentences_jsonl_path = ""
     sj = str(args.sentences_jsonl or "").strip()
     if sj:
         sentences_jsonl_path = sj
         sentence_text_lookup = _load_sentence_text_lookup(sj)
+        sentence_meta_lookup = _load_sentence_meta_lookup(sj)
 
     # ----------------------------------------
     # MODE A/B and ROUTING
@@ -1366,14 +1516,15 @@ def main() -> None:
             print(json.dumps(routing, ensure_ascii=False, indent=2))
             return
         if pipeline == "modeB":
-            # Evidence Projection only (no generation)
-            out = {
-                "mode": "B",
-                "status": routing.get("status"),
-                "evidence_projection": routing.get("evidence_projection"),
-                "evidence_ids": routing.get("evidence_ids"),
-                "evidence_texts": routing.get("evidence_texts"),
-            }
+            # Evidence Projection only (no generation), strict compiler.
+            intent = (routing.get("routing_debug") or {}).get("intent") if isinstance(routing, dict) else ""
+            out = _compile_mode_b(
+                query_text=str(args.prompt),
+                semantic_primary=str(intent or ""),
+                role_axis="grounding_only",
+                evidence_candidates=list(routing.get("evidence_projection") or []) if isinstance(routing, dict) else [],
+                meta_lookup=sentence_meta_lookup,
+            )
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
         if pipeline == "modeA":
