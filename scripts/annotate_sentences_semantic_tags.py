@@ -15,6 +15,7 @@ from __future__ import annotations
 import sys
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -111,6 +112,58 @@ def _keyword_hits(text: str, keywords: List[str]) -> int:
     return sum(1 for k in keywords if str(k) and str(k) in t)
 
 
+def _llm_intent_classify(
+    *,
+    text: str,
+    labels: List[str],
+    tok: Any,
+    model: Any,
+    device: Any,
+    max_new_tokens: int = 8,
+) -> str:
+    """
+    LLM intent classifier: returns one of labels or "" if unknown.
+    Deterministic, closed-set output.
+    """
+    labs = [str(x).strip().lower() for x in labels if str(x).strip()]
+    if not labs:
+        return ""
+    prompt = (
+        "你是医学语义分类器。请从以下标签中选择唯一一个，且只输出标签本身：\n"
+        f"{', '.join(labs)}\n"
+        "文本：\n"
+        f"{str(text or '').strip()}\n"
+        "标签："
+    )
+    try:
+        inp = tok(prompt, return_tensors="pt")
+        input_ids = inp["input_ids"].to(device)
+        attn = inp.get("attention_mask")
+        if attn is not None:
+            attn = attn.to(device)
+        out = model.generate(
+            input_ids=input_ids,
+            attention_mask=attn,
+            max_new_tokens=int(max_new_tokens),
+            do_sample=False,
+            temperature=0.0,
+            num_beams=1,
+        )
+        gen = out[0, input_ids.shape[1]:]
+        txt = tok.decode(gen, skip_special_tokens=True).strip().lower()
+        # pick first token-like word
+        cand = re.split(r"[\s,，。\n:：]+", txt)[0].strip()
+        if cand in labs:
+            return cand
+        # fallback: substring match
+        for lb in labs:
+            if lb in txt:
+                return lb
+    except Exception:
+        return ""
+    return ""
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--in_jsonl", required=True, help="sentences.jsonl path")
@@ -118,6 +171,9 @@ def main() -> None:
     p.add_argument("--domain_encoder_model", required=True, help="HF encoder model (same as retrieval encoder)")
     p.add_argument("--semantic_type_specs", required=False, default="", help="semantic_type_specs.json path")
     p.add_argument("--device", default=None, help="cpu/cuda; default auto")
+    p.add_argument("--llm_intent_enable", action="store_true", help="Use base LLM for primary intent classification at compile time")
+    p.add_argument("--llm_intent_model", default="", help="LLM model name or path for intent classification")
+    p.add_argument("--llm_intent_max_new_tokens", type=int, default=8)
     args = p.parse_args()
 
     # Make this script runnable from multiple repo layouts:
@@ -162,6 +218,22 @@ def main() -> None:
             device=str(dev),
         )
     )
+
+    llm_tok = None
+    llm_model = None
+    if bool(args.llm_intent_enable):
+        llm_name = str(args.llm_intent_model or "").strip()
+        if not llm_name:
+            raise SystemExit("--llm_intent_model is required when --llm_intent_enable is set")
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
+
+            llm_tok = AutoTokenizer.from_pretrained(llm_name, use_fast=True, trust_remote_code=True)
+            torch_dtype = torch.bfloat16 if dev.type == "cuda" else None
+            llm_model = AutoModelForCausalLM.from_pretrained(llm_name, torch_dtype=torch_dtype, trust_remote_code=True)
+            llm_model.to(dev).eval()
+        except Exception as e:
+            raise SystemExit(f"Failed to load LLM for intent classification: {type(e).__name__}: {e}")
 
     keys = list(specs.keys())
     anchors: List[str] = []
@@ -220,9 +292,23 @@ def main() -> None:
                 if p in scores and (max_score - scores.get(p, 0.0)) <= margin:
                     primary = p
                     break
+        primary_source = "embedding"
+        if llm_tok is not None and llm_model is not None:
+            llm_label = _llm_intent_classify(
+                text=text,
+                labels=keys,
+                tok=llm_tok,
+                model=llm_model,
+                device=dev,
+                max_new_tokens=int(args.llm_intent_max_new_tokens),
+            )
+            if llm_label:
+                primary = llm_label
+                primary_source = "llm"
         meta["semantic_scores"] = scores
         meta["semantic_tags"] = kept
         meta["semantic_primary"] = primary
+        meta["semantic_primary_source"] = primary_source
         r["metadata"] = meta
         annotated += 1
 

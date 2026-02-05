@@ -84,6 +84,15 @@
           <button id="btn_reload_sets">刷新列表</button>
           <button class="ok" id="btn_compile">编译：生成 sentence-KVBank（kvbank_sentences）</button>
         </div>
+        <div class="row">
+          <div class="field">
+            <label>编译时使用 LLM 意图标注（可选）</label>
+            <select id="compile_use_llm_intent">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+        </div>
         <div class="note" id="set_stats">未选择</div>
       </div>
 
@@ -182,6 +191,7 @@
           <label>Topic（主题库）</label>
           <select id="topic_select_debug"></select>
           <div class="note">模式 A：Evidence Routing + Free Reasoning（LLM 生成）；模式 B：Evidence Routing + Evidence Projection（零生成）。</div>
+          <div class="note">Mode B 强制禁用 LLM intent。</div>
           <div class="note">Mode B 失败需显式返回：NO_EVIDENCE_FOUND / INSUFFICIENT_GUIDELINE_SUPPORT。</div>
         </div>
         <div class="field">
@@ -204,11 +214,11 @@
           <div class="row">
             <div class="field">
               <label>Routing 权重：ANN</label>
-              <input id="route_w_ann" value="1.0" />
+              <input id="route_w_ann" value="0.1" />
             </div>
             <div class="field">
               <label>Routing 权重：Intent</label>
-              <input id="route_w_intent" value="0.6" />
+              <input id="route_w_intent" value="2.0" />
             </div>
             <div class="field">
               <label>Routing 权重：Quality</label>
@@ -219,6 +229,15 @@
             <div class="field">
               <label>Rerank 不使用 ANN（只用 intent/quality）</label>
               <select id="route_rerank_without_ann">
+                <option value="false" selected>false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Mode A 使用 LLM 意图分类器</label>
+              <select id="modeA_use_llm_intent">
                 <option value="false" selected>false</option>
                 <option value="true">true</option>
               </select>

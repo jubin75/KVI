@@ -116,8 +116,10 @@ function toJsonl(records) {
 async function compileSimple() {
   const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
   $("compile_log").textContent = "编译中...（sentence-KVBank：逐条 sentence forward 抽取 KV cache 并建 FAISS；可能需要数分钟）\n";
+  const useLlmIntent = ($("compile_use_llm_intent").value || "false") === "true";
   const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
+    use_llm_intent: useLlmIntent,
   });
   const ok = !!resp.ok;
   $("compile_log").textContent = (ok ? "✅ OK\n\n" : "❌ FAILED\n\n") + pretty(resp);
@@ -300,6 +302,7 @@ async function runDebug() {
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
+  const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
@@ -336,6 +339,7 @@ async function runDebug() {
       route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
+      route_llm_intent_enable: modeAUseLlmIntent,
     });
   }
   const r = resp.result || {};

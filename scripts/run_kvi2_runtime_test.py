@@ -108,6 +108,52 @@ def _infer_intent_from_specs(*, enc: Any, query: str, specs: Dict[str, Dict[str,
     except Exception as e:
         return "unknown", {"method": "specs_embedding", "error": f"{type(e).__name__}"}
 
+
+def _llm_intent_classify_query(
+    *,
+    query: str,
+    labels: List[str],
+    tok: Any,
+    model: Any,
+    device: torch.device,
+    max_new_tokens: int = 8,
+) -> Tuple[str, Dict[str, Any]]:
+    labs = [str(x).strip().lower() for x in labels if str(x).strip()]
+    if not labs:
+        return "unknown", {"method": "llm_intent", "reason": "no_labels"}
+    prompt = (
+        "你是医学语义分类器。请从以下标签中选择唯一一个，且只输出标签本身：\n"
+        f"{', '.join(labs)}\n"
+        "用户问题：\n"
+        f"{str(query or '').strip()}\n"
+        "标签："
+    )
+    try:
+        inp = tok(prompt, return_tensors="pt")
+        input_ids = inp["input_ids"].to(device)
+        attn = inp.get("attention_mask")
+        if attn is not None:
+            attn = attn.to(device)
+        out = model.generate(
+            input_ids=input_ids,
+            attention_mask=attn,
+            max_new_tokens=int(max_new_tokens),
+            do_sample=False,
+            temperature=0.0,
+            num_beams=1,
+        )
+        gen = out[0, input_ids.shape[1]:]
+        txt = tok.decode(gen, skip_special_tokens=True).strip().lower()
+        cand = re.split(r"[\s,，。\n:：]+", txt)[0].strip()
+        if cand in labs:
+            return cand, {"method": "llm_intent", "raw": txt}
+        for lb in labs:
+            if lb in txt:
+                return lb, {"method": "llm_intent", "raw": txt}
+        return "unknown", {"method": "llm_intent", "raw": txt}
+    except Exception as e:
+        return "unknown", {"method": "llm_intent", "error": f"{type(e).__name__}"}
+
 def _semantic_filter_units_by_embedding(
     *,
     enc: Any,
@@ -427,6 +473,7 @@ def _run_evidence_routing(
     w_intent: float,
     w_quality: float,
     rerank_without_ann: bool,
+    intent_override: str,
 ) -> Dict[str, Any]:
     """
     Evidence routing (no generation). Returns evidence_projection + ids/texts.
@@ -463,7 +510,14 @@ def _run_evidence_routing(
         pattern_index_dir=str(pattern_index_dir or ""),
         semantic_type_specs_path=str(semantic_type_specs_path or ""),
     )
-    intent, intent_dbg = _infer_intent_from_specs(enc=enc, query=q, specs=specs)
+    if intent_override:
+        intent = str(intent_override).strip().lower()
+        if intent not in (str(k).strip().lower() for k in (specs or {}).keys()):
+            intent, intent_dbg = _infer_intent_from_specs(enc=enc, query=q, specs=specs)
+        else:
+            intent_dbg = {"method": "llm_intent", "best": intent}
+    else:
+        intent, intent_dbg = _infer_intent_from_specs(enc=enc, query=q, specs=specs)
     intent_key = str(intent or "").strip().lower()
     intent_spec = specs.get(intent_key) if isinstance(specs, dict) else None
     intent_desc = str((intent_spec or {}).get("description") or "").strip() if isinstance(intent_spec, dict) else intent_key
@@ -1091,6 +1145,8 @@ def main() -> None:
     p.add_argument("--route_w_intent", type=float, default=0.6)
     p.add_argument("--route_w_quality", type=float, default=0.2)
     p.add_argument("--route_rerank_without_ann", action="store_true", help="Rerank without ANN contribution (ANN only used for candidate pool).")
+    p.add_argument("--route_llm_intent_enable", action="store_true", help="Use base LLM to classify query intent (Mode A only)")
+    p.add_argument("--route_llm_intent_max_new_tokens", type=int, default=8)
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -1146,6 +1202,20 @@ def main() -> None:
     if pipeline in {"route", "modeA", "modeB"}:
         if not sentences_jsonl_path:
             raise SystemExit("--sentences_jsonl is required for pipeline=route/modeA/modeB")
+        llm_intent = ""
+        llm_intent_dbg: Dict[str, Any] = {}
+        if pipeline == "modeA" and bool(args.route_llm_intent_enable):
+            if tok is None or model is None:
+                raise SystemExit("Mode A LLM intent requires model/tokenizer")
+            label_keys = [str(k).strip().lower() for k in (specs.keys() if isinstance(specs, dict) else []) if str(k).strip()]
+            llm_intent, llm_intent_dbg = _llm_intent_classify_query(
+                query=str(args.prompt),
+                labels=label_keys,
+                tok=tok,
+                model=model,
+                device=device,
+                max_new_tokens=int(args.route_llm_intent_max_new_tokens),
+            )
         routing = _run_evidence_routing(
             prompt=str(args.prompt),
             kv_dir=str(args.kv_dir),
@@ -1158,7 +1228,11 @@ def main() -> None:
             w_intent=float(args.route_w_intent),
             w_quality=float(args.route_w_quality),
             rerank_without_ann=bool(args.route_rerank_without_ann),
+            intent_override=str(llm_intent or ""),
         )
+        if llm_intent_dbg:
+            routing.setdefault("routing_debug", {})
+            routing["routing_debug"]["llm_intent_debug"] = llm_intent_dbg
         if pipeline == "route":
             print(json.dumps(routing, ensure_ascii=False, indent=2))
             return
