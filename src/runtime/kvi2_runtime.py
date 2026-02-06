@@ -765,7 +765,16 @@ def _select_kv_items_by_ids(*, bank: Any, ids: Sequence[str]) -> List[Any]:
         for i, meta in enumerate(metas):
             if not isinstance(meta, dict):
                 continue
-            bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+            meta_payload = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+            bid = str(
+                meta.get("block_id")
+                or meta.get("chunk_id")
+                or meta.get("id")
+                or meta.get("evidence_id")
+                or meta_payload.get("block_id")
+                or meta_payload.get("evidence_id")
+                or ""
+            )
             if not bid or bid not in target_set:
                 continue
             if bid in by_id:
