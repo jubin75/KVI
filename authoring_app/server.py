@@ -254,6 +254,11 @@ def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]
     This is a safe fallback to avoid reject_no_contract in KVI2 runtime.
     """
     path = topic_root / "pattern_contract.json"
+    specs = semantic_specs if isinstance(semantic_specs, dict) else {}
+    keys = [str(k).strip().lower() for k in specs.keys() if str(k).strip()]
+    if not keys:
+        keys = ["symptom", "drug", "mechanism", "location"]
+
     def _needs_regen() -> bool:
         if not path.exists():
             return True
@@ -276,10 +281,6 @@ def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]
 
     if not _needs_regen():
         return path
-    specs = semantic_specs if isinstance(semantic_specs, dict) else {}
-    keys = [str(k).strip().lower() for k in specs.keys() if str(k).strip()]
-    if not keys:
-        keys = ["symptom", "drug", "mechanism", "location"]
     patterns = []
     for k in keys:
         if k == "symptom":

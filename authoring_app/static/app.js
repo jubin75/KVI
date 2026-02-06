@@ -298,6 +298,10 @@ async function runDebug() {
   if (!prompt) throw new Error("请先输入 prompt。");
   const topK = Number(($("debug_top_k").value || "2").trim());
   const mode = ($("debug_mode").value || "modeA").trim();
+  const ragField = $("field_modeA_rag");
+  if (ragField) {
+    ragField.style.display = (mode === "modeA_rag") ? "block" : "none";
+  }
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
@@ -440,6 +444,16 @@ function wire() {
   $("tab_simple").onclick = () => setTab("simple");
   $("tab_docs").onclick = () => setTab("docs");
   $("tab_debug").onclick = () => setTab("debug");
+
+  const modeSel = $("debug_mode");
+  if (modeSel) {
+    modeSel.onchange = () => {
+      const ragField = $("field_modeA_rag");
+      if (ragField) {
+        ragField.style.display = (String(modeSel.value) === "modeA_rag") ? "block" : "none";
+      }
+    };
+  }
 
   $("topic_select").onchange = async (e) => { await onTopicChange(e.target.value); };
   $("topic_select_docs").onchange = async (e) => {
