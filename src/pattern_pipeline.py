@@ -102,10 +102,15 @@ class PatternContractLoader:
         {topic}/work/kvbank_blocks -> {topic}
         """
         p = Path(str(kv_dir))
-        if p.name in {"kvbank_blocks", "kvbank_blocks_v2", "kvbank_sentences", "kvbank_sentences_v2"}:
-            # {topic}/work/kvbank_blocks
+        if p.name in {"kvbank_blocks", "kvbank_blocks_v2"}:
+            # {topic}/work/kvbank_blocks -> {topic}
             if p.parent.name == "work":
                 return p.parent.parent
+            return p.parent
+        if p.name in {"kvbank_sentences", "kvbank_sentences_v2"}:
+            # {topic}/work/kvbank_sentences -> {topic}/work
+            if p.parent.name == "work":
+                return p.parent
             return p.parent
         return None
 

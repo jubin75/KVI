@@ -248,7 +248,7 @@ def _topic_evidence_sets_dir(topic: str) -> Path:
     return _topic_dir(topic) / "evidence_sets"
 
 
-def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]) -> Path:
+def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any], sentence_mode: bool = False) -> Path:
     """
     Create a minimal pattern_contract.json if missing.
     This is a safe fallback to avoid reject_no_contract in KVI2 runtime.
@@ -272,6 +272,7 @@ def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]
             forms = ["X 的流行地区有哪些", "X 的地理分布是什么"]
         else:
             forms = [f"X 的{k}有哪些"]
+        inference_level = "soft" if sentence_mode else "schema"
         patterns.append(
             {
                 "pattern_id": f"schema:{k}",
@@ -282,7 +283,7 @@ def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]
                         "required": False,
                         "evidence_type": ["schema"],
                         "min_evidence": 1,
-                        "inference_level": "schema",
+                        "inference_level": inference_level,
                         "semantic_type": k,
                     }
                 },
@@ -1404,8 +1405,10 @@ class KVIHandler(BaseHTTPRequestHandler):
             if not kv_dir.exists():
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
-            # Ensure pattern_contract.json exists under topic root (kvi2 requires contracts).
-            topic_root = out_dir.parent if out_dir.name == "work" else out_dir
+            # Ensure pattern_contract.json exists (kvi2 requires contracts).
+            # For sentence KVBank, place contract under work/ to match loader inference.
+            is_sentence_bank = kv_dir.name in {"kvbank_sentences", "kvbank_sentences_v2"}
+            topic_root = out_dir if is_sentence_bank else (out_dir.parent if out_dir.name == "work" else out_dir)
             specs_path = out_dir / "semantic_type_specs.json"
             specs = _DEFAULT_SEMANTIC_TYPE_SPECS
             try:
@@ -1413,7 +1416,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     specs = json.loads(specs_path.read_text(encoding="utf-8"))
             except Exception:
                 specs = _DEFAULT_SEMANTIC_TYPE_SPECS
-            _ensure_pattern_contract(topic_root=topic_root, semantic_specs=specs)
+            _ensure_pattern_contract(topic_root=topic_root, semantic_specs=specs, sentence_mode=is_sentence_bank)
             top_k = int(obj.get("top_k") or 8)
             w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
             w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
