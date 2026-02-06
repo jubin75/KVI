@@ -1538,6 +1538,7 @@ def main() -> None:
                 pattern_index_dir=str(args.pattern_index_dir),
                 debug_retrieved_ids=True,
                 answer_mode=str(args.answer_mode),
+                allowed_block_ids=list(routing.get("evidence_ids") or []) if isinstance(routing, dict) else (),
             )
             runtime_a = KVI2Runtime(cfg=cfg_a, domain_encoder_model=str(args.domain_encoder_model))
             out_kvi2 = runtime_a.run_ab(

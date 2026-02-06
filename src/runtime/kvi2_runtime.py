@@ -66,6 +66,8 @@ class KVI2Config:
     # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
     pattern_hard: Sequence[str] = ()
     pattern_soft: Sequence[str] = ()
+    # Optional: restrict retrieval to these block_ids (routing-aligned)
+    allowed_block_ids: Sequence[str] = ()
 
 
 class KVI2Runtime:
@@ -235,7 +237,8 @@ class KVI2Runtime:
                 # retrieve-only retry (no generation)
                 oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
                 rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
-                rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr.items, slot_schema)
+                rr_items = _filter_items_by_allowed(rr.items, self.cfg.allowed_block_ids)
+                rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr_items, slot_schema)
                 batch: list[Any] = []
                 seen_ids: set[str] = set()
                 for it in rr_items:
@@ -365,7 +368,8 @@ class KVI2Runtime:
         # 4) Semantic-second retrieve + refresh (<=2 rounds)
         oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
         rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
-        rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr.items, slot_schema)
+        rr_items = _filter_items_by_allowed(rr.items, self.cfg.allowed_block_ids)
+        rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr_items, slot_schema)
         layer_ids = [int(x) for x in self.cfg.layers]
         dtype = next(model.parameters()).dtype
 
@@ -735,6 +739,20 @@ def _build_list_only_narrative_prompt(*, user_prompt: str, items: Sequence[str],
 def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+
+
+def _filter_items_by_allowed(items: Sequence[Any], allowed_ids: Sequence[str]) -> List[Any]:
+    if not items:
+        return list(items or [])
+    allowed = {str(x) for x in (allowed_ids or []) if str(x)}
+    if not allowed:
+        return list(items or [])
+    out: List[Any] = []
+    for it in items or []:
+        bid = _kv_id(it)
+        if bid and bid in allowed:
+            out.append(it)
+    return out
 
 
 def _extract_abbr_expansion_from_blocks(
