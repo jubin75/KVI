@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import torch
 
 from ..domain_encoder import DomainEncoder, DomainEncoderConfig
-from ..kv_bank import FaissKVBank
+from ..kv_bank import FaissKVBank, KVItem
 from ..pattern_contract import PatternContractValidator, filter_evidence_by_contracts, run_pattern_first
 from ..pattern_pipeline import (
     IntrospectionGate,
@@ -35,7 +35,7 @@ from ..pattern_pipeline import (
     find_unconsumed_evidence_blocks,
 )
 from ..pattern_retriever import PatternRetriever, PatternRetrieveResult
-from ..retriever import Retriever
+from ..retriever import Retriever, RetrieverResult
 from ..rim import RIM, RIMConfig
 from .hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer
 from .kv_relevance import logit_delta_vs_zero_prefix
@@ -194,6 +194,14 @@ class KVI2Runtime:
         # 3) Introspection gate (non-generative)
         bank = FaissKVBank.load(Path(str(kv_dir)))
         retriever = Retriever(bank)
+        allowed_ids = list(getattr(self.cfg, "allowed_block_ids", []) or [])
+
+        def _retrieve_with_allowlist(query_vec: Any, *, top_k: int, query_text: str) -> RetrieverResult:
+            if allowed_ids:
+                items = _select_kv_items_by_ids(bank=bank, ids=allowed_ids)
+                dbg = {"source": "allowed_block_ids", "requested": len(allowed_ids), "returned": len(items)}
+                return RetrieverResult(items=items, debug=dbg)
+            return retriever.search(query_vec, top_k=int(top_k), filters=None, query_text=query_text)
         enc = DomainEncoder(
             DomainEncoderConfig(
                 model_name_or_path=self.domain_encoder_model,
@@ -236,7 +244,7 @@ class KVI2Runtime:
             if gate.get("allow_rim_retry"):
                 # retrieve-only retry (no generation)
                 oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
-                rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
+                rr = _retrieve_with_allowlist(q0, top_k=int(oversample_top_k), query_text=user_prompt)
                 rr_items = _filter_items_by_allowed(rr.items, self.cfg.allowed_block_ids)
                 rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr_items, slot_schema)
                 batch: list[Any] = []
@@ -367,7 +375,7 @@ class KVI2Runtime:
 
         # 4) Semantic-second retrieve + refresh (<=2 rounds)
         oversample_top_k = max(int(self.cfg.top_k), int(self.cfg.top_k) * (int(self.cfg.kv_refresh_rounds) + 1))
-        rr = retriever.search(q0, top_k=int(oversample_top_k), filters=None, query_text=user_prompt)
+        rr = _retrieve_with_allowlist(q0, top_k=int(oversample_top_k), query_text=user_prompt)
         rr_items = _filter_items_by_allowed(rr.items, self.cfg.allowed_block_ids)
         rr_items, rank_debug, final_rank = _apply_list_feature_ranking(rr_items, slot_schema)
         layer_ids = [int(x) for x in self.cfg.layers]
@@ -740,6 +748,40 @@ def _kv_id(it: Any) -> str:
     meta = getattr(it, "meta", None) or {}
     return str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
 
+
+def _select_kv_items_by_ids(*, bank: Any, ids: Sequence[str]) -> List[Any]:
+    target = [str(x) for x in (ids or []) if str(x)]
+    if not target:
+        return []
+    target_set = set(target)
+    by_id: Dict[str, Any] = {}
+
+    def _scan(b: Any) -> None:
+        metas = getattr(b, "metas", None)
+        k_ext = getattr(b, "k_ext", None)
+        v_ext = getattr(b, "v_ext", None)
+        if not isinstance(metas, list) or k_ext is None or v_ext is None:
+            return
+        for i, meta in enumerate(metas):
+            if not isinstance(meta, dict):
+                continue
+            bid = str(meta.get("block_id") or meta.get("chunk_id") or meta.get("id") or "")
+            if not bid or bid not in target_set:
+                continue
+            if bid in by_id:
+                continue
+            try:
+                by_id[bid] = KVItem(score=0.0, meta=meta, K_ext=k_ext[int(i)], V_ext=v_ext[int(i)])
+            except Exception:
+                continue
+
+    if hasattr(bank, "shards"):
+        for s in getattr(bank, "shards") or []:
+            _scan(s)
+    else:
+        _scan(bank)
+
+    return [by_id[x] for x in target if x in by_id]
 
 def _filter_items_by_allowed(items: Sequence[Any], allowed_ids: Sequence[str]) -> List[Any]:
     if not items:
