@@ -303,20 +303,20 @@ async function runDebug() {
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
-  const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
+  const routeLlmIntent = (mode === "modeA" || mode === "modeA_rag") && modeAUseLlmIntent;
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
-  $("out_modeA_true").textContent = "运行中...";
+  $("out_modeA_rag").textContent = "运行中...";
   $("out_modeB").textContent = "运行中...";
   $("out_route").textContent = "运行中...";
   $("out_debug_log").textContent = "运行中...";
   $("out_base_llm").textContent = "运行中...";
   $("out_modeA_status").textContent = "";
-  $("out_modeA_true_status").textContent = "";
+  $("out_modeA_rag_status").textContent = "";
   $("out_modeB_status").textContent = "";
   $("out_route_status").textContent = "";
   let resp = null;
-  let respTrue = null;
+  let respRag = null;
   if (mode === "modeB") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, {
       prompt,
@@ -337,9 +337,8 @@ async function runDebug() {
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
     });
-  } else {
-    // Mode A (RAG) as primary output
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
+  } else if (mode === "modeA_rag") {
+    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
@@ -348,8 +347,8 @@ async function runDebug() {
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: modeAUseLlmIntent,
     });
-    // True Mode A (no evidence text) as additional output
-    respTrue = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
+  } else {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
@@ -359,8 +358,8 @@ async function runDebug() {
       route_llm_intent_enable: modeAUseLlmIntent,
     });
   }
-  const r = resp.result || {};
-  $("out_cli").textContent = resp.cmd || "(no cmd)";
+  const r = resp && resp.result ? resp.result : {};
+  $("out_cli").textContent = (resp && resp.cmd) ? resp.cmd : "(no cmd)";
   // Debug log: always fetch full /route for routing/evidence inspection.
   try {
     const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
@@ -374,33 +373,31 @@ async function runDebug() {
     });
     const fullRoute = routeResp.result || {};
     const debugObj = { route: fullRoute };
-    // For Mode A, show true Mode A debug (no-evidence prompt) separately.
     if (mode === "modeA") {
-      const rTrue = (respTrue && respTrue.result) ? respTrue.result : {};
-      if (rTrue.routing_debug) {
-        debugObj.modeA_routing_debug = rTrue.routing_debug || {};
-      }
-      if (rTrue.injection_debug) {
-        debugObj.modeA_injection_debug = rTrue.injection_debug || {};
-      }
-    if (rTrue.kvi2_result) {
-      const k = rTrue.kvi2_result || {};
-      const gate = k.gate || {};
-      const retrieval = k.retrieval || {};
-      debugObj.modeA_kvi2_summary = {
-        gate_decision: gate.decision || "",
-        gate_reason: gate.reason || "",
-        pattern_id: gate.pattern_id || "",
-        matched_skeleton: gate.matched_skeleton || "",
-        retrieval_top_k: retrieval.top_k,
-        retrieved_ids: retrieval.retrieved_ids || retrieval.final_rank || [],
-        kv_refresh: retrieval.kv_refresh || {},
-        contract_validation: retrieval.contract_validation || {},
-      };
-    }
-      // Also keep the RAG Mode A debug if needed.
       if (r.routing_debug) {
-        debugObj.modeA_rag_routing_debug = r.routing_debug || {};
+        debugObj.modeA_routing_debug = r.routing_debug || {};
+      }
+      if (r.injection_debug) {
+        debugObj.modeA_injection_debug = r.injection_debug || {};
+      }
+      if (r.kvi2_result) {
+        const k = r.kvi2_result || {};
+        const gate = k.gate || {};
+        const retrieval = k.retrieval || {};
+        debugObj.modeA_kvi2_summary = {
+          gate_decision: gate.decision || "",
+          gate_reason: gate.reason || "",
+          pattern_id: gate.pattern_id || "",
+          matched_skeleton: gate.matched_skeleton || "",
+          retrieval_top_k: retrieval.top_k,
+          retrieved_ids: retrieval.retrieved_ids || retrieval.final_rank || [],
+          kv_refresh: retrieval.kv_refresh || {},
+          contract_validation: retrieval.contract_validation || {},
+        };
+      }
+    } else if (mode === "modeA_rag") {
+      if (respRag && respRag.result && respRag.result.routing_debug) {
+        debugObj.modeA_rag_routing_debug = respRag.result.routing_debug || {};
       }
     }
     $("out_debug_log").textContent = pretty(debugObj);
@@ -418,18 +415,24 @@ async function runDebug() {
     $("out_route").textContent = pretty(r);
     $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
     $("out_modeA").textContent = "";
-    $("out_modeA_true").textContent = "";
+    $("out_modeA_rag").textContent = "";
     $("out_modeB").textContent = "";
     $("out_base_llm").textContent = "";
+  } else if (mode === "modeA_rag") {
+    const rr = respRag && respRag.result ? respRag.result : {};
+    $("out_modeA_rag").textContent = rr.diagnosis_result || "";
+    $("out_modeA_rag_status").textContent = "status: OK";
+    $("out_modeA").textContent = "";
+    $("out_modeB").textContent = "";
+    $("out_route").textContent = "";
+    $("out_base_llm").textContent = rr.base_llm_result || "";
   } else {
     $("out_modeA").textContent = r.diagnosis_result || "";
     $("out_modeA_status").textContent = "status: OK";
     $("out_modeB").textContent = "";
     $("out_route").textContent = "";
     $("out_base_llm").textContent = r.base_llm_result || "";
-    const rTrue = (respTrue && respTrue.result) ? respTrue.result : {};
-    $("out_modeA_true").textContent = rTrue.diagnosis_result || "";
-    $("out_modeA_true_status").textContent = "status: OK";
+    $("out_modeA_rag").textContent = "";
   }
 }
 
