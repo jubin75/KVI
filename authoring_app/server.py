@@ -248,6 +248,52 @@ def _topic_evidence_sets_dir(topic: str) -> Path:
     return _topic_dir(topic) / "evidence_sets"
 
 
+def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]) -> Path:
+    """
+    Create a minimal pattern_contract.json if missing.
+    This is a safe fallback to avoid reject_no_contract in KVI2 runtime.
+    """
+    path = topic_root / "pattern_contract.json"
+    if path.exists():
+        return path
+    specs = semantic_specs if isinstance(semantic_specs, dict) else {}
+    keys = [str(k).strip().lower() for k in specs.keys() if str(k).strip()]
+    if not keys:
+        keys = ["symptom", "drug", "mechanism", "location"]
+    patterns = []
+    for k in keys:
+        if k == "symptom":
+            forms = ["X 的临床症状有哪些", "X 的临床表现有哪些", "X 有哪些症状"]
+        elif k == "drug":
+            forms = ["X 的治疗方法有哪些", "X 的用药建议是什么", "X 的临床用药推荐"]
+        elif k == "mechanism":
+            forms = ["X 的发病机制是什么", "X 的作用机制是什么"]
+        elif k == "location":
+            forms = ["X 的流行地区有哪些", "X 的地理分布是什么"]
+        else:
+            forms = [f"X 的{k}有哪些"]
+        patterns.append(
+            {
+                "pattern_id": f"schema:{k}",
+                "question_skeleton": {"intent": "ask_schema_list", "surface_forms": forms},
+                "slots": {
+                    k: {
+                        "type": "string",
+                        "required": False,
+                        "evidence_type": ["schema"],
+                        "min_evidence": 1,
+                        "inference_level": "schema",
+                        "semantic_type": k,
+                    }
+                },
+                "answer_style": "factual",
+            }
+        )
+    payload = {"topic": str(topic_root.name), "patterns": patterns}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def _evidence_manifest_path(topic: str) -> Path:
     return _topic_evidence_sets_dir(topic) / "manifest.json"
 
@@ -1358,6 +1404,16 @@ class KVIHandler(BaseHTTPRequestHandler):
             if not kv_dir.exists():
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"kvbank_sentences not found: {kv_dir}. Click 编译 first."})
                 return
+            # Ensure pattern_contract.json exists under topic root (kvi2 requires contracts).
+            topic_root = out_dir.parent if out_dir.name == "work" else out_dir
+            specs_path = out_dir / "semantic_type_specs.json"
+            specs = _DEFAULT_SEMANTIC_TYPE_SPECS
+            try:
+                if specs_path.exists():
+                    specs = json.loads(specs_path.read_text(encoding="utf-8"))
+            except Exception:
+                specs = _DEFAULT_SEMANTIC_TYPE_SPECS
+            _ensure_pattern_contract(topic_root=topic_root, semantic_specs=specs)
             top_k = int(obj.get("top_k") or 8)
             w_ann = float(obj.get("route_w_ann")) if obj.get("route_w_ann") is not None else 1.0
             w_intent = float(obj.get("route_w_intent")) if obj.get("route_w_intent") is not None else 0.6
