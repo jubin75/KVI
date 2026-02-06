@@ -304,7 +304,6 @@ async function runDebug() {
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
   const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
-  const routeTraceText = ($("route_trace_text").value || "").trim();
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeA_true").textContent = "运行中...";
@@ -327,7 +326,6 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
-      route_trace_text: routeTraceText,
     });
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
@@ -338,7 +336,6 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
-      route_trace_text: routeTraceText,
     });
   } else {
     // Mode A (RAG) as primary output
@@ -350,7 +347,6 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: modeAUseLlmIntent,
-      route_trace_text: routeTraceText,
     });
     // True Mode A (no evidence text) as additional output
     respTrue = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
@@ -361,7 +357,6 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: modeAUseLlmIntent,
-      route_trace_text: routeTraceText,
     });
   }
   const r = resp.result || {};
@@ -376,7 +371,6 @@ async function runDebug() {
       route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
-      route_trace_text: routeTraceText,
     });
     const fullRoute = routeResp.result || {};
     const debugObj = { route: fullRoute };
@@ -389,6 +383,21 @@ async function runDebug() {
       if (rTrue.injection_debug) {
         debugObj.modeA_injection_debug = rTrue.injection_debug || {};
       }
+    if (rTrue.kvi2_result) {
+      const k = rTrue.kvi2_result || {};
+      const gate = k.gate || {};
+      const retrieval = k.retrieval || {};
+      debugObj.modeA_kvi2_summary = {
+        gate_decision: gate.decision || "",
+        gate_reason: gate.reason || "",
+        pattern_id: gate.pattern_id || "",
+        matched_skeleton: gate.matched_skeleton || "",
+        retrieval_top_k: retrieval.top_k,
+        retrieved_ids: retrieval.retrieved_ids || retrieval.final_rank || [],
+        kv_refresh: retrieval.kv_refresh || {},
+        contract_validation: retrieval.contract_validation || {},
+      };
+    }
       // Also keep the RAG Mode A debug if needed.
       if (r.routing_debug) {
         debugObj.modeA_rag_routing_debug = r.routing_debug || {};
