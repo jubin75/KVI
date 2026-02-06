@@ -300,14 +300,14 @@ async function runDebug() {
   const mode = ($("debug_mode").value || "modeA").trim();
   const ragField = $("field_modeA_rag");
   if (ragField) {
-    ragField.style.display = (mode === "modeA_rag") ? "block" : "none";
+    ragField.style.display = (mode === "modeA") ? "block" : "none";
   }
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
-  const routeLlmIntent = (mode === "modeA" || mode === "modeA_rag") && modeAUseLlmIntent;
+  const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
   $("out_cli").textContent = "运行中...";
   $("out_modeA").textContent = "运行中...";
   $("out_modeA_rag").textContent = "运行中...";
@@ -341,8 +341,8 @@ async function runDebug() {
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: routeLlmIntent,
     });
-  } else if (mode === "modeA_rag") {
-    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
+  } else {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
@@ -351,8 +351,7 @@ async function runDebug() {
       route_rerank_without_ann: rerankNoAnn,
       route_llm_intent_enable: modeAUseLlmIntent,
     });
-  } else {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
+    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
       prompt,
       top_k: Number.isFinite(topK) ? topK : 8,
       route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
@@ -399,7 +398,6 @@ async function runDebug() {
           contract_validation: retrieval.contract_validation || {},
         };
       }
-    } else if (mode === "modeA_rag") {
       if (respRag && respRag.result && respRag.result.routing_debug) {
         debugObj.modeA_rag_routing_debug = respRag.result.routing_debug || {};
       }
@@ -422,21 +420,15 @@ async function runDebug() {
     $("out_modeA_rag").textContent = "";
     $("out_modeB").textContent = "";
     $("out_base_llm").textContent = "";
-  } else if (mode === "modeA_rag") {
-    const rr = respRag && respRag.result ? respRag.result : {};
-    $("out_modeA_rag").textContent = rr.diagnosis_result || "";
-    $("out_modeA_rag_status").textContent = "status: OK";
-    $("out_modeA").textContent = "";
-    $("out_modeB").textContent = "";
-    $("out_route").textContent = "";
-    $("out_base_llm").textContent = rr.base_llm_result || "";
   } else {
     $("out_modeA").textContent = r.diagnosis_result || "";
     $("out_modeA_status").textContent = "status: OK";
     $("out_modeB").textContent = "";
     $("out_route").textContent = "";
     $("out_base_llm").textContent = r.base_llm_result || "";
-    $("out_modeA_rag").textContent = "";
+    const rr = respRag && respRag.result ? respRag.result : {};
+    $("out_modeA_rag").textContent = rr.diagnosis_result || "";
+    $("out_modeA_rag_status").textContent = "status: OK";
   }
 }
 
@@ -450,7 +442,7 @@ function wire() {
     modeSel.onchange = () => {
       const ragField = $("field_modeA_rag");
       if (ragField) {
-        ragField.style.display = (String(modeSel.value) === "modeA_rag") ? "block" : "none";
+        ragField.style.display = (String(modeSel.value) === "modeA") ? "block" : "none";
       }
     };
   }
