@@ -254,7 +254,27 @@ def _ensure_pattern_contract(*, topic_root: Path, semantic_specs: Dict[str, Any]
     This is a safe fallback to avoid reject_no_contract in KVI2 runtime.
     """
     path = topic_root / "pattern_contract.json"
-    if path.exists():
+    def _needs_regen() -> bool:
+        if not path.exists():
+            return True
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return True
+        patterns = payload.get("patterns") if isinstance(payload, dict) else None
+        if not isinstance(patterns, list):
+            return True
+        # Sentence-KVBank: ensure schema slots match semantic specs (avoid stale clinical_features).
+        if sentence_mode:
+            want = {f"schema:{k}" for k in keys}
+            have = {str(p.get("pattern_id") or "") for p in patterns if isinstance(p, dict)}
+            if not want.issubset(have):
+                return True
+            if any("clinical_features" in pid for pid in have):
+                return True
+        return False
+
+    if not _needs_regen():
         return path
     specs = semantic_specs if isinstance(semantic_specs, dict) else {}
     keys = [str(k).strip().lower() for k in specs.keys() if str(k).strip()]

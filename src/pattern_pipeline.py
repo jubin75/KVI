@@ -155,25 +155,32 @@ class PatternContractLoader:
             intent, surface_forms = _parse_question_skeleton(it.get("question_skeleton"))
             slots_payload = it.get("slots") if isinstance(it.get("slots"), dict) else {}
             slots: Dict[str, SlotSpec] = {}
+            pid_norm = pid
             for k, v in slots_payload.items():
                 if not isinstance(v, dict):
                     continue
                 name = str(k or "").strip()
                 if not name:
                     continue
-                sem_type = str(v.get("semantic_type") or "").strip() or _infer_semantic_type_from_slot(name)
+                pid2, norm_name, norm_level = _normalize_schema_alias(
+                    pattern_id=pid_norm,
+                    slot_name=name,
+                    inference_level=str(v.get("inference_level") or "schema"),
+                )
+                pid_norm = pid2 or pid_norm
+                sem_type = str(v.get("semantic_type") or "").strip() or _infer_semantic_type_from_slot(norm_name)
                 slots[name] = SlotSpec(
-                    name=name,
+                    name=norm_name,
                     required=bool(v.get("required", False)),
                     evidence_type=list(v.get("evidence_type") or []),
                     min_evidence=int(v.get("min_evidence", 1)),
-                    inference_level=str(v.get("inference_level") or "schema"),
+                    inference_level=str(norm_level or "schema"),
                     slot_type=str(v.get("type") or "string"),
                     semantic_type=sem_type,
                 )
             out.append(
                 PatternSpec(
-                    pattern_id=pid,
+                    pattern_id=pid_norm,
                     question_intent=intent,
                     question_surface_forms=surface_forms,
                     slots=slots,
@@ -213,19 +220,24 @@ class PatternContractLoader:
                 )
             if kind == "schema":
                 slot_name = pid.split(":", 1)[1] if ":" in pid else "schema"
-                sem_type = _infer_semantic_type_from_slot(slot_name)
+                pid_norm, norm_name, norm_level = _normalize_schema_alias(
+                    pattern_id=pid,
+                    slot_name=slot_name,
+                    inference_level="schema",
+                )
+                sem_type = _infer_semantic_type_from_slot(norm_name)
                 slots[slot_name] = SlotSpec(
-                    name=slot_name,
+                    name=norm_name,
                     required=False,
                     evidence_type=["schema"],
                     min_evidence=1,
-                    inference_level="schema",
+                    inference_level=str(norm_level or "schema"),
                     slot_type="string",
                     semantic_type=sem_type,
                 )
             out.append(
                 PatternSpec(
-                    pattern_id=pid,
+                    pattern_id=pid_norm if kind == "schema" else pid,
                     question_intent="legacy",
                     question_surface_forms=_default_question_skeleton(kind, slot_name=pid),
                     slots=slots,
@@ -638,6 +650,22 @@ def _infer_semantic_type_from_slot(slot_name: str) -> str:
     ):
         return "location"
     return "generic"
+
+
+def _normalize_schema_alias(*, pattern_id: str, slot_name: str, inference_level: str) -> Tuple[str, str, str]:
+    """
+    Normalize legacy schema aliases to align contract + slot gating.
+    - schema:clinical_features -> schema:symptom (soft)
+    """
+    pid = str(pattern_id or "").strip()
+    sname = str(slot_name or "").strip().lower()
+    lvl = str(inference_level or "").strip().lower()
+    if pid == "schema:clinical_features" or sname in {"clinical_features", "clinical_feature", "clinical_symptoms"}:
+        pid = "schema:symptom"
+        sname = "symptom"
+        if lvl == "schema":
+            lvl = "soft"
+    return pid, sname, lvl
 
 
 def _default_question_skeleton(kind: str, slot_name: str = "") -> List[str]:
