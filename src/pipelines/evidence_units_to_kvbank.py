@@ -233,9 +233,30 @@ def build_kvbank_from_authoring_evidence_jsonl(
             v_list.append(v_item)
             metas.append(meta)
             total_written += 1
-        except Exception:
+        except Exception as e:
             skipped_errors += 1
+            eid = rec.get("evidence_id") or rec.get("id") or f"idx_{total_read}"
+            etxt = str(rec.get("semantic_text") or rec.get("claim") or "")[:60]
+            print(
+                f"[evidence_to_kvbank] SKIPPED id={eid} "
+                f"text={etxt!r} error={type(e).__name__}: {e}",
+                flush=True,
+            )
             continue
+
+    # ---- Compile summary ----
+    print(
+        f"[evidence_to_kvbank] compile_summary: "
+        f"read={total_read} approved={approved_read} written={total_written} "
+        f"skipped_empty={skipped_empty_text} skipped_errors={skipped_errors} "
+        f"layers={list(layers)} max_tokens={max_tokens}",
+        flush=True,
+    )
+    if skipped_errors > 0:
+        print(
+            f"[evidence_to_kvbank] WARNING: {skipped_errors} evidence(s) LOST during compilation!",
+            flush=True,
+        )
 
     if total_written <= 0:
         raise RuntimeError(

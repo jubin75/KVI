@@ -372,6 +372,13 @@ def build_kvbank_from_blocks_jsonl(
             error_types[name] = int(error_types.get(name, 0)) + 1
             if first_error is None:
                 first_error = f"{name}: {e}"
+            # Always log the skipped sentence so data loss is visible
+            bid = rec.get("block_id") or rec.get("id") or f"idx_{idx}"
+            print(
+                f"[blocks_to_kvbank] SKIPPED block={bid} "
+                f"text={text[:60]!r} error={name}: {e}",
+                flush=True,
+            )
             continue
 
         # Sharded flushing (方案A): write every `shard_size` items to disk to control RAM.
@@ -396,6 +403,22 @@ def build_kvbank_from_blocks_jsonl(
                     shard_idx=tables_shards_written,
                 )
                 tables_shards_written += 1
+
+    # ---- Compile summary (always print, highlight data loss) ----
+    print(
+        f"[blocks_to_kvbank] compile_summary: "
+        f"read={total_read} written={total_written} "
+        f"skipped_empty={skipped_bad_len} skipped_errors={skipped_errors} "
+        f"layers={list(layers)} block_tokens={block_tokens}",
+        flush=True,
+    )
+    if skipped_errors > 0:
+        top = sorted(error_types.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        print(
+            f"[blocks_to_kvbank] WARNING: {skipped_errors} sentence(s) LOST during compilation! "
+            f"error_types={dict(top)} first_error={first_error}",
+            flush=True,
+        )
 
     if total_written == 0:
         hint = (

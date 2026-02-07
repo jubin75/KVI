@@ -1747,7 +1747,7 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=128,
+                max_new_tokens=256,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
@@ -1758,7 +1758,7 @@ def main() -> None:
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=pkv,
-                max_new_tokens=128,
+                max_new_tokens=256,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
@@ -1802,7 +1802,7 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=128,
+                max_new_tokens=256,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
@@ -1813,7 +1813,7 @@ def main() -> None:
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=128,
+                max_new_tokens=256,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
