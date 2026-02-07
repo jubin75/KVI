@@ -9,11 +9,16 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, Optional, TYPE_CHECKING
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
+if TYPE_CHECKING:
+    try:
+        from external_kv_injection.src.kv_bank import KVItem  # type: ignore
+    except ModuleNotFoundError:
+        from src.kv_bank import KVItem  # type: ignore
 
 def _load_semantic_type_specs(*, pattern_index_dir: str) -> Dict[str, Dict[str, Any]]:
     """
@@ -1578,24 +1583,9 @@ def main() -> None:
             # Evidence Routing + KV injection (no evidence text in prompt).
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
-            intent_key = str((routing.get("routing_debug") or {}).get("intent") or "").strip().lower() if isinstance(routing, dict) else ""
-            intent_guard = ""
-            if intent_key == "drug":
-                intent_guard = (
-                    "\n\n【意图约束】只允许复述证据中出现的治疗/用药信息；"
-                    "不得引入其他疾病、药物、机制或并发症。"
-                    "若证据不足，请仅回复“现有证据不足以回答该问题。”"
-                )
-            elif intent_key == "symptom":
-                intent_guard = (
-                    "\n\n【意图约束】只允许复述证据中出现的临床症状/体征；"
-                    "不得引入其他疾病、治疗、机制或并发症。"
-                    "若证据不足，请仅回复“现有证据不足以回答该问题。”"
-                )
             modeA_prompt = (
                 str(args.prompt).strip()
                 + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
-                + intent_guard
             )
             pkv = None
             injected_dbg: Dict[str, Any] = {
@@ -1658,17 +1648,12 @@ def main() -> None:
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
-            answer, post_dbg = _postprocess_answer_grounding_only(
-                answer=answer,
-                evidence_texts=(routing.get("evidence_texts") or []) if isinstance(routing, dict) else [],
-            )
             out = {
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
                 "injection_debug": injected_dbg,
-                "postprocess_debug": post_dbg,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
