@@ -1712,35 +1712,46 @@ def main() -> None:
             priming_items: List[Any] = []
             if priming_dir and Path(priming_dir).exists():
                 # Load entity priming KV bank (complementary injection)
+                # Detect sharded vs single from manifest.json
                 try:
-                    priming_bank = FaissKVBank.load(Path(priming_dir))
-                    # Inject ALL items from priming bank (small set by design)
-                    priming_metas = getattr(priming_bank, "metas", None) or []
-                    priming_k = getattr(priming_bank, "k_ext", None)
-                    priming_v = getattr(priming_bank, "v_ext", None)
-                    if priming_metas and priming_k is not None and priming_v is not None:
-                        for pi, pm in enumerate(priming_metas):
-                            if not isinstance(pm, dict):
-                                continue
-                            try:
-                                priming_items.append(KVItem(score=1.0, meta=pm, K_ext=priming_k[pi], V_ext=priming_v[pi]))
-                            except Exception:
-                                continue
-                    # Also scan shards
-                    if not priming_items and hasattr(priming_bank, "shards"):
-                        for shard in (getattr(priming_bank, "shards") or []):
-                            sm = getattr(shard, "metas", None) or []
-                            sk = getattr(shard, "k_ext", None)
-                            sv = getattr(shard, "v_ext", None)
-                            if sm and sk is not None and sv is not None:
-                                for pi, pm in enumerate(sm):
-                                    if not isinstance(pm, dict):
-                                        continue
-                                    try:
-                                        priming_items.append(KVItem(score=1.0, meta=pm, K_ext=sk[pi], V_ext=sv[pi]))
-                                    except Exception:
-                                        continue
-                except Exception:
+                    _priming_path = Path(priming_dir)
+                    _manifest_path = _priming_path / "manifest.json"
+                    _is_sharded = False
+                    if _manifest_path.exists():
+                        _mf = json.loads(_manifest_path.read_text(encoding="utf-8"))
+                        _is_sharded = isinstance(_mf, dict) and _mf.get("format") == "sharded"
+
+                    def _extract_all_items(bank: Any) -> List[Any]:
+                        """Extract all KVItems from a FaissKVBank (single or shard)."""
+                        out: List[Any] = []
+                        metas = getattr(bank, "metas", None) or []
+                        k_ext = getattr(bank, "k_ext", None)
+                        v_ext = getattr(bank, "v_ext", None)
+                        if metas and k_ext is not None and v_ext is not None:
+                            for i, m in enumerate(metas):
+                                if not isinstance(m, dict):
+                                    continue
+                                try:
+                                    out.append(KVItem(score=1.0, meta=m, K_ext=k_ext[i], V_ext=v_ext[i]))
+                                except Exception:
+                                    continue
+                        return out
+
+                    if _is_sharded:
+                        try:
+                            from external_kv_injection.src.vector_store.faiss_kv_bank import ShardedFaissKVBank  # type: ignore
+                        except ModuleNotFoundError:
+                            from src.vector_store.faiss_kv_bank import ShardedFaissKVBank  # type: ignore
+                        sharded_bank = ShardedFaissKVBank.load(_priming_path)
+                        for shard in (getattr(sharded_bank, "shards", None) or []):
+                            priming_items.extend(_extract_all_items(shard))
+                    else:
+                        single_bank = FaissKVBank.load(_priming_path)
+                        priming_items = _extract_all_items(single_bank)
+                except Exception as _ep_err:
+                    import traceback as _tb
+                    print(f"[modeA] WARNING: entity_priming load failed: {_ep_err}", flush=True)
+                    _tb.print_exc()
                     priming_items = []
             # Choose injection source: priming (complementary) or evidence (fallback)
             if priming_items:
