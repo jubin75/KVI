@@ -1285,7 +1285,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             priming_kv_dir = out_dir / "kvbank_entity_priming"
             if entity_priming_jsonl.exists():
                 cmd_priming = [
-                    str(python_exe),
+                    sys.executable,
                     str(PROJECT_ROOT / "scripts" / "build_kvbank_from_blocks_jsonl.py"),
                     "--blocks_jsonl",
                     str(entity_priming_jsonl),
