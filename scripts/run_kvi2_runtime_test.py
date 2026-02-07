@@ -904,19 +904,31 @@ def _char_shingles(text: str, k: int = 3) -> set:
 
 
 def _shingle_overlap(sent: str, evidence_texts: Sequence[str], k: int = 3) -> float:
-    """Max Jaccard shingle overlap between *sent* and any evidence sentence."""
+    """Best shingle overlap between *sent* and any evidence sentence.
+
+    Uses **containment** (intersection / len(query_shingles)) for short
+    sentences (< 15 chars after whitespace removal) so that fragments like
+    "急性发热" that are literal substrings of the evidence are not penalised
+    by the large union denominator of Jaccard.  For longer sentences the
+    standard Jaccard measure is used.
+    """
     s_shingles = _char_shingles(sent, k)
     if not s_shingles:
         return 0.0
+    short = len(re.sub(r"\s+", "", sent)) < 15  # use containment for short
     best = 0.0
     for ev in evidence_texts:
         ev_shingles = _char_shingles(ev, k)
         if not ev_shingles:
             continue
         inter = len(s_shingles & ev_shingles)
-        union = len(s_shingles | ev_shingles)
-        if union > 0:
-            best = max(best, inter / union)
+        if short:
+            # containment: what fraction of *sent*'s shingles appear in evidence?
+            score = inter / len(s_shingles) if s_shingles else 0.0
+        else:
+            union = len(s_shingles | ev_shingles)
+            score = inter / union if union > 0 else 0.0
+        best = max(best, score)
     return best
 
 
@@ -1680,12 +1692,12 @@ def main() -> None:
             ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
-                + "\n\n### 已检索证据（你只能使用以下证据回答，不得引入任何外部知识）：\n"
+                + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
                 + ev_block
                 + "\n\n### 要求：\n"
-                + "1. 只使用上述证据中明确出现的事实，逐条组织回答。\n"
-                + '2. 如果证据不足以完整回答问题，请明确说明\u201c当前证据未覆盖\u201d。\n'
-                + "3. 不得对疾病名称、药物机制等做任何推测或补充。"
+                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实。\n"
+                + "2. 不得引入证据中未提及的疾病名称全称、药物机制或其他外部知识。\n"
+                + "3. 如果证据不足以完整回答，在末尾注明。"
             )
             pkv = None
             injected_dbg: Dict[str, Any] = {
@@ -1700,7 +1712,7 @@ def main() -> None:
                 if items:
                     dtype2 = next(model.parameters()).dtype
                     _num_layers = getattr(getattr(model, "config", None), "num_hidden_layers", 32)
-                    _inject_layers = min(16, _num_layers)  # inject up to first 16 layers
+                    _inject_layers = min(8, _num_layers)  # inject first 8 layers (balance signal vs distortion)
                     ext_by_layer: Dict[int, Any] = {}
                     for li in range(_inject_layers):
                         try:
@@ -1773,12 +1785,12 @@ def main() -> None:
             ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
-                + "\n\n### 已检索证据（你只能使用以下证据回答，不得引入任何外部知识）：\n"
+                + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
                 + ev_block
                 + "\n\n### 要求：\n"
-                + "1. 只使用上述证据中明确出现的事实，逐条组织回答。\n"
-                + '2. 如果证据不足以完整回答问题，请明确说明\u201c当前证据未覆盖\u201d。\n'
-                + "3. 不得对疾病名称、药物机制等做任何推测或补充。"
+                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实。\n"
+                + "2. 不得引入证据中未提及的疾病名称全称、药物机制或其他外部知识。\n"
+                + "3. 如果证据不足以完整回答，在末尾注明。"
             )
             if tok is None or model is None:
                 raise SystemExit("Mode A RAG requires model/tokenizer")
