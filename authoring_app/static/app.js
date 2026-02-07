@@ -298,6 +298,7 @@ async function runDebug() {
       if (r.routing_debug) debugObj.modeA_routing_debug = r.routing_debug;
       if (r.injection_debug) debugObj.modeA_injection_debug = r.injection_debug;
       if (r.grounding_report) debugObj.modeA_grounding = r.grounding_report;
+      if (resp && resp.stderr_tail) debugObj.modeA_stderr = resp.stderr_tail;
       if (respRag && respRag.result) {
         if (respRag.result.routing_debug) debugObj.rag_routing_debug = respRag.result.routing_debug;
         if (respRag.result.grounding_report) debugObj.rag_grounding = respRag.result.grounding_report;

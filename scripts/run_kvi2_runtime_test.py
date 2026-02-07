@@ -1710,6 +1710,9 @@ def main() -> None:
             }
             priming_dir = str(args.entity_priming_kv_dir or "").strip()
             priming_items: List[Any] = []
+            injected_dbg["priming_dir"] = priming_dir or "(not set)"
+            injected_dbg["priming_dir_exists"] = bool(priming_dir and Path(priming_dir).exists())
+            print(f"[modeA] entity_priming_kv_dir arg='{priming_dir}' exists={injected_dbg['priming_dir_exists']}", file=sys.stderr, flush=True)
             if priming_dir and Path(priming_dir).exists():
                 # Load entity priming KV bank (complementary injection)
                 # Detect sharded vs single from manifest.json
@@ -1720,6 +1723,8 @@ def main() -> None:
                     if _manifest_path.exists():
                         _mf = json.loads(_manifest_path.read_text(encoding="utf-8"))
                         _is_sharded = isinstance(_mf, dict) and _mf.get("format") == "sharded"
+                    print(f"[modeA] priming bank sharded={_is_sharded} manifest_exists={_manifest_path.exists()}", file=sys.stderr, flush=True)
+                    injected_dbg["priming_is_sharded"] = _is_sharded
 
                     def _extract_all_items(bank: Any) -> List[Any]:
                         """Extract all KVItems from a FaissKVBank (single or shard)."""
@@ -1727,13 +1732,16 @@ def main() -> None:
                         metas = getattr(bank, "metas", None) or []
                         k_ext = getattr(bank, "k_ext", None)
                         v_ext = getattr(bank, "v_ext", None)
+                        print(f"[modeA] _extract_all_items: metas={len(metas)} k_ext={'OK' if k_ext is not None else 'None'} v_ext={'OK' if v_ext is not None else 'None'}", file=sys.stderr, flush=True)
                         if metas and k_ext is not None and v_ext is not None:
                             for i, m in enumerate(metas):
                                 if not isinstance(m, dict):
+                                    print(f"[modeA] _extract_all_items: skip idx={i} meta not dict: {type(m)}", file=sys.stderr, flush=True)
                                     continue
                                 try:
                                     out.append(KVItem(score=1.0, meta=m, K_ext=k_ext[i], V_ext=v_ext[i]))
-                                except Exception:
+                                except Exception as _item_err:
+                                    print(f"[modeA] _extract_all_items: KVItem create fail idx={i}: {type(_item_err).__name__}: {_item_err}", file=sys.stderr, flush=True)
                                     continue
                         return out
 
@@ -1743,16 +1751,21 @@ def main() -> None:
                         except ModuleNotFoundError:
                             from src.vector_store.faiss_kv_bank import ShardedFaissKVBank  # type: ignore
                         sharded_bank = ShardedFaissKVBank.load(_priming_path)
+                        _n_shards = len(getattr(sharded_bank, "shards", None) or [])
+                        print(f"[modeA] sharded priming bank loaded, shards={_n_shards}", file=sys.stderr, flush=True)
                         for shard in (getattr(sharded_bank, "shards", None) or []):
                             priming_items.extend(_extract_all_items(shard))
                     else:
                         single_bank = FaissKVBank.load(_priming_path)
                         priming_items = _extract_all_items(single_bank)
+                    print(f"[modeA] priming_items extracted: {len(priming_items)}", file=sys.stderr, flush=True)
                 except Exception as _ep_err:
                     import traceback as _tb
-                    print(f"[modeA] WARNING: entity_priming load failed: {_ep_err}", flush=True)
-                    _tb.print_exc()
+                    injected_dbg["priming_error"] = f"{type(_ep_err).__name__}: {_ep_err}"
+                    print(f"[modeA] entity_priming load FAILED: {type(_ep_err).__name__}: {_ep_err}", file=sys.stderr, flush=True)
+                    _tb.print_exc(file=sys.stderr)
                     priming_items = []
+            injected_dbg["priming_items_loaded"] = len(priming_items)
             # Choose injection source: priming (complementary) or evidence (fallback)
             if priming_items:
                 inject_items = priming_items

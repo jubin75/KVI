@@ -1614,7 +1614,9 @@ class KVIHandler(BaseHTTPRequestHandler):
             ]
             # Entity priming KV bank (complementary injection)
             priming_kv_dir = out_dir / "kvbank_entity_priming"
-            if priming_kv_dir.exists():
+            _ep_exists = priming_kv_dir.exists()
+            print(f"[modeA_cmd] entity_priming check: path={priming_kv_dir} exists={_ep_exists}", flush=True)
+            if _ep_exists:
                 cmd.extend(["--entity_priming_kv_dir", str(priming_kv_dir)])
             if rerank_wo_ann:
                 cmd.append("--route_rerank_without_ann")
@@ -1648,6 +1650,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "topic": topic,
                     "cmd": " ".join(cmd),
                     "result": out,
+                    "stderr_tail": (r.stderr or "")[-4000:],
                 },
             )
             return
