@@ -1256,7 +1256,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--domain_encoder_model",
                 encoder,
                 "--layers",
-                "0,1,2,3",
+                "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
                 "--block_tokens",
                 str(int(max_sentence_tokens)),
                 "--shard_size",

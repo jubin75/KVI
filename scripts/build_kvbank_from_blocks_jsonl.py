@@ -75,7 +75,7 @@ def main() -> None:
     p.add_argument("--out_dir", required=True)
     p.add_argument("--base_llm", required=True)
     p.add_argument("--domain_encoder_model", required=True)
-    p.add_argument("--layers", default="0,1,2,3")
+    p.add_argument("--layers", default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15")
     p.add_argument("--block_tokens", type=int, default=256)
     p.add_argument("--split_tables", action="store_true")
     p.add_argument("--out_dir_tables", default=None)

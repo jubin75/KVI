@@ -54,7 +54,7 @@ def build_kvbank_from_blocks_jsonl(
     out_dir_tables: Optional[Path] = None,
     base_llm_name_or_path: str,
     retrieval_encoder_model: str,
-    layers: Sequence[int] = (0, 1, 2, 3),
+    layers: Sequence[int] = tuple(range(16)),
     block_tokens: int = 256,
     max_blocks: Optional[int] = None,
     device: Optional[str] = None,

@@ -56,7 +56,7 @@ def build_kvbank_from_authoring_evidence_jsonl(
     out_dir: Path,
     base_llm_name_or_path: str,
     retrieval_encoder_model: str,
-    layers: Sequence[int] = (0, 1, 2, 3),
+    layers: Sequence[int] = tuple(range(16)),
     max_tokens: int = 256,
     max_items: Optional[int] = None,
     device: Optional[str] = None,
