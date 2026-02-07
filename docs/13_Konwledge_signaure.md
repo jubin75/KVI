@@ -205,7 +205,52 @@ Collect provenance sentences → RAG prompt
 Collect entity priming → KV injection
 ```
 
-### 14. 对当前系统的替换关系
+### 14. Context-Unaware Injection 问题（已确认 · 待方案 C 解决）
+
+#### 14.1 问题定义
+
+当用户查询的目标实体 **不属于** 当前加载的 topic 时，系统仍会盲目注入该 topic 的
+entity priming KV 和 evidence，产生错误输出。
+
+**实测案例**：
+
+| 查询 | 当前 topic | 注入的 entity priming | 结果 |
+|------|-----------|---------------------|------|
+| "SARS2 的临床症状有哪些？" | SFTSV | ep_sftsv_name, ep_favipiravir | LLM 把 SFTSV 的症状嫁接到 SARS2 上，完全错误 |
+
+**根因**：当前架构中 entity priming 和 evidence retrieval 都在 **单 topic 上下文** 中执行，
+没有 **query-topic 相关性门控**。系统不会检查"用户问的是不是这个 topic 的内容"。
+
+#### 14.2 为什么 Stage 0 / Stage 1 无法解决
+
+| 架构 | 问题 |
+|------|------|
+| Stage 0（tag routing） | Tag + ANN 在当前 topic 的 sentence pool 里搜索，无法判断 query 实体是否匹配 topic |
+| Stage 1（互补注入） | Entity priming 无条件注入当前 topic 的术语锚点，不关心 query 实体 |
+
+即使加一个"topic 名称匹配"的硬规则，也无法处理实体别名、近义词、跨 topic 关联等复杂场景。
+
+#### 14.3 方案 C (GraphRAG) 的自然解决
+
+在 Graph-based Knowledge Index 中，检索的第一步就是 **Entity Recognition**：
+
+```
+Query: "SARS2 的临床症状有哪些？"
+  ↓
+Entity recognition: SARS2
+  ↓
+Graph lookup: SARS2 ∉ graph nodes → 没有任何匹配的 evidence
+  ↓
+Result: "当前知识库不包含 SARS2 的相关信息。"
+```
+
+- **Entity 锚定检索**：只有 query 中的实体命中 graph 中的 node 时，才会触发 graph walk 和 evidence 收集
+- **不命中 = 不注入**：如果实体不在 graph 中，则不会检索任何 evidence，也不会注入任何 KV
+- **跨 topic 扩展**：多个 topic 的 knowledge graph 可以合并为一个统一 graph，query 中的实体自动路由到正确的 topic 子图
+
+这是 GraphRAG 相对于 flat tag routing 的结构性优势：**实体是检索的入口，不是 topic 是检索的入口**。
+
+### 15. 对当前系统的替换关系
 
 ```
 当前:   Query → intent tag → ANN + soft_bonus → sentences → KV inject (重复)
@@ -215,38 +260,45 @@ Collect entity priming → KV injection
 替换的组件：
 - `semantic_type_specs.json` + `soft_filter` → **graph traversal**
 - `annotate_sentences_semantic_tags.py` → **entity/relation extraction**
+- **Context-Unaware Injection 问题** → **entity-anchored retrieval（实体锚定检索）**
 - 保留：KV injection 管线、grounding filter、Mode A/B 行为约束
 
-### 15. 渐进迁移路径
+### 16. 渐进迁移路径
 
 ```
 Stage 0 (当前): tag + soft_bonus routing + 同内容 KV/RAG
-Stage 1 (路线B): tag routing 不变 + 互补 KV (entity priming)  ← 下一步实现
+                ⚠ Context-Unaware: 不检查 query 实体是否属于当前 topic
+Stage 1 (路线B): tag routing 不变 + 互补 KV (entity priming)  ← 已实现验证
+                ⚠ Context-Unaware 仍然存在
 Stage 2:        自动 entity extraction + 简单 graph index
+                → 初步解决 Context-Unaware（entity 不命中 = 不注入）
 Stage 3 (方案C): 完整 graph retrieval + 互补 KV + 无 tag
+                → 彻底解决 Context-Unaware + 多 topic 统一 graph
 ```
 
 ---
 
 ## Part V — 校验规则与禁止设计（继承自 v1）
 
-### 16. 编译期强校验
+### 17. 编译期强校验
 
 - `primary_axis ∉ allowed set` → 拒绝
 - `role_axis ∉ allowed set` → 拒绝
 - `role_axis` 与 `constraints` 不匹配 → 拒绝
 - 同一 Evidence 同时标记 `reasoning_input` 与 `grounding_only` → 拒绝
 
-### 17. 明确禁止的设计
+### 18. 明确禁止的设计
 
 - ❌ 在 signature 中引入 intent / task / question
 - ❌ role_axis 与 primary_axis 语义重叠
 - ❌ 运行时基于 evidence 内容推断 role
 - ❌ KV 注入与 RAG prompt 注入相同内容（v2 新增）
 - ❌ 用 KV 注入抽象行为约束（如"不得推测"）
+- ❌ 不检查 query 实体与 topic 的匹配即注入 KV / evidence（v2 新增 · Context-Unaware 禁令）
 
-### 18. 一句话总结
+### 19. 一句话总结
 
 > Signature 声明"语义位置 + 行为许可"；
 > RAG 传递 evidence 事实；KV 注入传递互补信号（实体锚定 + 跨证据关系）；
-> 三者分工明确，不重叠，不干扰。
+> 检索以实体为锚点，不以 topic 为锚点；
+> 三者分工明确，不重叠，不干扰，不盲注。
