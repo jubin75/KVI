@@ -1777,7 +1777,8 @@ def main() -> None:
                 if inject_items:
                     dtype2 = next(model.parameters()).dtype
                     _num_layers = getattr(getattr(model, "config", None), "num_hidden_layers", 32)
-                    _inject_layers = min(8, _num_layers)
+                    # Entity priming = light anchor (4 layers); evidence = stronger signal (8 layers)
+                    _inject_layers = min(4, _num_layers) if injected_dbg["source"] == "entity_priming" else min(8, _num_layers)
                     ext_by_layer: Dict[int, Any] = {}
                     for li in range(_inject_layers):
                         try:
