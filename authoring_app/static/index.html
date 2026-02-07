@@ -3,76 +3,49 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>知识注入KVI（Key Value Injection）</title>
+  <title>KVI Console</title>
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
   <div class="app">
     <div class="header">
-      <h1>知识注入KVI（Key Value Injection）</h1>
+      <h1>KVI Console</h1>
       <div class="sub">
-        KVI 是用于大模型幻觉定点消除和长期记忆外挂的开源框架。<br/>
-        本控制台提供两条人工闭环：① 人工编制知识（编辑 sentence+meta → 编译 KVBank → 注入调试）；② 从文献编制知识（doc_meta → blocks.evidence → 导入 sentence+meta）。
+        Knowledge Value Injection -- 大模型幻觉定点消除与长期记忆外挂框架
       </div>
       <div class="tabs">
-        <button class="tab active" id="tab_simple">人工编制知识</button>
-        <button class="tab" id="tab_docs">从文献编制知识</button>
-        <button class="tab" id="tab_debug">调试：Prompt → 输出</button>
+        <button class="tab active" id="tab_simple">Knowledge Authoring</button>
+        <button class="tab" id="tab_docs">Literature Import</button>
+        <button class="tab" id="tab_debug">Inference Debug</button>
       </div>
     </div>
 
+    <!-- ==================== TAB: Knowledge Authoring ==================== -->
     <div class="panel" id="view_simple">
       <div class="row">
         <div class="field">
-          <label>Topic（主题库）</label>
+          <label>Topic</label>
           <div class="row">
-            <div class="field">
-              <input id="topic_new_name" placeholder="输入主题库名字，例如 SFTSV" />
-            </div>
-            <div class="field">
-              <button class="primary" id="btn_create_topic">新建主题库</button>
-            </div>
-            <div class="field">
-              <button class="danger" id="btn_delete_topic">删除当前主题库</button>
-            </div>
+            <div class="field"><input id="topic_new_name" placeholder="New topic name, e.g. SFTSV" /></div>
+            <div class="field"><button class="primary" id="btn_create_topic">Create</button></div>
+            <div class="field"><button class="danger" id="btn_delete_topic">Delete</button></div>
           </div>
           <select id="topic_select"></select>
           <div class="note" id="topic_goal"></div>
         </div>
         <div class="field">
-          <label>知识文件目录（sentence + meta）</label>
+          <label>Evidence Directory</label>
           <input id="evidence_sets_dir" class="mono" disabled />
-          <div class="note">每条 sentence 是一行 JSON（JSONL）。支持多文件（evidence_001.jsonl 等），便于规模化维护与协作。</div>
+          <div class="note">Each sentence is a JSONL line. Supports multiple files for collaborative maintenance.</div>
         </div>
       </div>
 
       <div class="field">
-        <label>Evidence 编译不变式（Mode A 专用）</label>
-        <div class="note">
-          每一条进入 KV space 的 Evidence，必须满足：
-          <br />1️⃣ 表达一个 单一医学事实或现象
-          <br />2️⃣ 以 临床语言自然句 表达
-          <br />3️⃣ 不包含推理、结论或解释
-          <br />4️⃣ 不跨越多个医学维度（症状 / 机制 / 检查 / 预后）
-          <br /><br />【举例说明】
-          <br />❌ 不合格（信息密度过高）
-          <br />“SFTSV感染后患者常出现发热、乏力、血小板减少，并可伴有消化道症状，严重者可进展为多器官功能障碍。”
-          <br /><br />✅ 合格（语义最小化）
-          <br />“SFTSV感染的早期症状常包括发热。”
-          <br />“部分SFTSV感染者会出现乏力。”
-          <br />“SFTSV感染可导致血小板计数下降。”
-        </div>
-      </div>
-
-      <div class="field">
-        <label>知识文件（可多文件）</label>
+        <label>Evidence Set</label>
         <div class="row">
+          <div class="field"><select id="set_select"></select></div>
           <div class="field">
-            <label>选择 evidence set</label>
-            <select id="set_select"></select>
-          </div>
-          <div class="field">
-            <label>enabled（参与编译）</label>
+            <label>Enabled</label>
             <select id="set_enabled">
               <option value="true" selected>true</option>
               <option value="false">false</option>
@@ -80,212 +53,181 @@
           </div>
         </div>
         <div class="btns">
-          <button class="primary" id="btn_create_set">新建 evidence set</button>
-          <button id="btn_reload_sets">刷新列表</button>
-          <button class="ok" id="btn_compile">编译：生成 sentence-KVBank（kvbank_sentences）</button>
+          <button class="primary" id="btn_create_set">New Set</button>
+          <button id="btn_reload_sets">Refresh</button>
+          <button class="ok" id="btn_compile">Compile KVBank</button>
         </div>
         <div class="row">
           <div class="field">
-            <label>编译时使用 LLM 意图标注（可选）</label>
+            <label>LLM Intent Tagging</label>
             <select id="compile_use_llm_intent">
               <option value="false" selected>false</option>
               <option value="true">true</option>
             </select>
           </div>
         </div>
-        <div class="note" id="set_stats">未选择</div>
+        <div class="note" id="set_stats">No set selected</div>
       </div>
 
       <div class="field">
-        <label>新增 / 编辑 sentence（按 sentence 为主）</label>
+        <label>Add Sentence</label>
         <div class="row">
           <div class="field">
-            <label>max_sentence_tokens *（target token budget，默认 128；过长会自动拆分为 2–4 条）</label>
+            <label>Max Sentence Tokens</label>
             <input id="sent_token_budget" value="128" />
           </div>
         </div>
         <div class="row">
-          <div class="field">
-            <label>source_id（doc_id/DOI；可空）</label>
-            <input id="sent_source_id" placeholder="例如：10.1234/abcd 或 doc_id" />
-          </div>
-          <div class="field">
-            <label>DOI（可空）</label>
-            <input id="sent_doi" placeholder="10.xxxx/xxxx" />
-          </div>
+          <div class="field"><label>Source ID</label><input id="sent_source_id" placeholder="DOI or doc_id" /></div>
+          <div class="field"><label>DOI</label><input id="sent_doi" placeholder="10.xxxx/xxxx" /></div>
         </div>
         <div class="row">
-          <div class="field">
-            <label>title（可空）</label>
-            <input id="sent_title" placeholder="Paper title..." />
-          </div>
-          <div class="field">
-            <label>author（可空）</label>
-            <input id="sent_author" placeholder="your name" />
-          </div>
+          <div class="field"><label>Title</label><input id="sent_title" placeholder="Paper title" /></div>
+          <div class="field"><label>Author</label><input id="sent_author" placeholder="Author name" /></div>
         </div>
         <div class="field">
-          <label>claim *（支持多条：用 ### 作为每条知识结束标记）</label>
-          <textarea id="sent_claim" placeholder="可一次输入多条知识，每条以 ### 结尾。例如：\nSFTSV 的主要传播媒介为蜱虫。###\nSFTSV 可引起血小板减少。###"></textarea>
+          <label>Claim (use ### as delimiter for multiple)</label>
+          <textarea id="sent_claim" placeholder="Enter evidence claims, delimited by ###"></textarea>
         </div>
         <div class="btns">
-          <button class="primary" id="btn_add_sentence">添加到当前 set</button>
-          <button id="btn_save_set">保存当前 set</button>
+          <button class="primary" id="btn_add_sentence">Add to Set</button>
+          <button id="btn_save_set">Save Set</button>
         </div>
       </div>
 
       <div class="field">
-        <label>当前 set：按 doc/source 归类（只读概览）</label>
-        <div class="pre" id="doc_group_view">未加载</div>
+        <label>Set Overview (by source)</label>
+        <div class="pre" id="doc_group_view">Not loaded</div>
       </div>
-
       <div class="field">
-        <label>当前 set：JSONL（高级/批量编辑）</label>
-        <textarea id="set_raw" placeholder="每行一个 JSON 对象（JSONL）"></textarea>
+        <label>Raw JSONL (Advanced)</label>
+        <textarea id="set_raw" placeholder="One JSON object per line"></textarea>
       </div>
-
       <div class="field">
-        <label>编译日志 / 状态</label>
-        <div class="pre" id="compile_log">等待操作...</div>
+        <label>Compile Log</label>
+        <div class="pre" id="compile_log">Waiting...</div>
       </div>
     </div>
 
+    <!-- ==================== TAB: Literature Import ==================== -->
     <div class="panel" id="view_docs" style="display:none">
       <div class="row">
         <div class="field">
-          <label>Topic（主题库）</label>
+          <label>Topic</label>
           <select id="topic_select_docs"></select>
-          <div class="note">来源：该 topic 的 work_dir 下 `docs.meta.jsonl` + `blocks.evidence.jsonl`</div>
         </div>
         <div class="field">
-          <label>操作</label>
+          <label>Actions</label>
           <div class="btns">
-            <button class="primary" id="btn_load_docs_topic">加载 doc_meta 列表</button>
+            <button class="primary" id="btn_load_docs_topic">Load Documents</button>
           </div>
-          <div class="note">先为 doc 标记 approved，再导入该 doc 的 blocks 到知识文件（会写入一个启用的 evidence_*.jsonl）。</div>
+          <div class="note">Mark documents as approved, then import their blocks into evidence sets.</div>
         </div>
       </div>
-
       <div id="docs_list_view">
         <div class="field">
-          <label>doc_meta 列表（PDF 名 + 是否 approved）</label>
+          <label>Documents</label>
           <div class="list" id="docs_list"></div>
         </div>
       </div>
-
       <div id="doc_detail_view" style="display:none">
         <div class="btns">
-          <button id="btn_back_to_docs">返回 doc 列表</button>
-          <button class="ok" id="btn_import_doc_blocks" disabled>导入该 doc 的 blocks → 知识文件</button>
+          <button id="btn_back_to_docs">Back</button>
+          <button class="ok" id="btn_import_doc_blocks" disabled>Import Blocks</button>
         </div>
         <div class="field">
-          <label>doc 详情（blocks.evidence 按序展示，仅显示 claim）</label>
-          <div class="pre" id="doc_detail">加载中...</div>
+          <label>Document Blocks</label>
+          <div class="pre" id="doc_detail">Loading...</div>
         </div>
       </div>
     </div>
 
+    <!-- ==================== TAB: Inference Debug ==================== -->
     <div class="panel" id="view_debug" style="display:none">
       <div class="row">
         <div class="field">
-          <label>Topic（主题库）</label>
+          <label>Topic</label>
           <select id="topic_select_debug"></select>
-          <div class="note">模式 A：Evidence Routing + Free Reasoning（LLM 生成）；模式 B：Evidence Routing + Evidence Projection（零生成）。</div>
-          <div class="note">Mode B 强制禁用 LLM intent。</div>
-          <div class="note">Mode B 失败需显式返回：NO_EVIDENCE_FOUND / INSUFFICIENT_GUIDELINE_SUPPORT。</div>
         </div>
         <div class="field">
-          <label>参数</label>
-          <div class="row">
-            <div class="field">
-              <label>注入条目数（默认 2，最大 8）: <span class="mono" id="debug_topk_n">2</span></label>
-              <input id="debug_topk_slider" type="range" min="1" max="8" step="1" value="2" />
-              <input id="debug_top_k" value="2" style="display:none" />
-            </div>
-            <div class="field">
-              <label>模式</label>
-              <select id="debug_mode">
-                <option value="modeA" selected>Mode A（KV 注入 / routing）</option>
-                <option value="modeB">Mode B（证据指向）</option>
-                <option value="route">仅 Evidence Routing（调试）</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>Routing 权重：ANN</label>
-              <input id="route_w_ann" value="0.1" />
-            </div>
-            <div class="field">
-              <label>Routing 权重：Intent</label>
-              <input id="route_w_intent" value="2.0" />
-            </div>
-            <div class="field">
-              <label>Routing 权重：Quality</label>
-              <input id="route_w_quality" value="0.2" />
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>Rerank 不使用 ANN（只用 intent/quality）</label>
-              <select id="route_rerank_without_ann">
-                <option value="false" selected>false</option>
-                <option value="true">true</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>Mode A 使用 LLM 意图分类器</label>
-              <select id="modeA_use_llm_intent">
-                <option value="true" selected>true</option>
-                <option value="false">false</option>
-              </select>
-            </div>
-          </div>
-          <div class="btns">
-            <button class="primary" id="btn_run_debug">运行</button>
-          </div>
+          <label>Mode</label>
+          <select id="debug_mode">
+            <option value="modeA" selected>Mode A (RAG + KV Injection)</option>
+            <option value="modeB">Mode B (Evidence Projection)</option>
+            <option value="route">Route Only (Debug)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>Top-K: <span class="mono" id="debug_topk_n">2</span></label>
+          <input id="debug_topk_slider" type="range" min="1" max="8" step="1" value="2" />
+          <input id="debug_top_k" value="2" style="display:none" />
+        </div>
+        <div class="field">
+          <label>LLM Intent Classifier</label>
+          <select id="modeA_use_llm_intent">
+            <option value="true" selected>true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field"><label>W: ANN</label><input id="route_w_ann" value="0.1" /></div>
+        <div class="field"><label>W: Intent</label><input id="route_w_intent" value="2.0" /></div>
+        <div class="field"><label>W: Quality</label><input id="route_w_quality" value="0.2" /></div>
+        <div class="field">
+          <label>Rerank w/o ANN</label>
+          <select id="route_rerank_without_ann">
+            <option value="false" selected>false</option>
+            <option value="true">true</option>
+          </select>
         </div>
       </div>
 
       <div class="field">
-        <label>提问 prompt</label>
-        <textarea id="debug_prompt" placeholder="例如：SFTSV的主要临床症状有哪些？"></textarea>
+        <label>Prompt</label>
+        <textarea id="debug_prompt" placeholder="e.g. SFTSV's clinical symptoms?"></textarea>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="btn_run_debug">Run Inference</button>
       </div>
 
       <div class="field">
-        <label>CLI（本次运行实际执行的命令）</label>
-        <div class="pre" id="out_cli">等待运行...</div>
+        <label>CLI Command</label>
+        <div class="pre" id="out_cli">Waiting...</div>
       </div>
 
       <div class="field">
-        <label>Mode A 输出（KV 注入 / KVI2）</label>
+        <label>Mode A Output (RAG + KV Injection)</label>
         <div class="note" id="out_modeA_status"></div>
-        <div class="pre" id="out_modeA">等待运行...</div>
+        <div class="pre" id="out_modeA">Waiting...</div>
       </div>
-      <div class="field" id="field_modeA_rag">
-        <label>RAG 输出（证据拼接）</label>
+      <div class="field" id="field_modeA_rag" style="display:none">
+        <label>RAG-Only Output (Text Anchor, No KV)</label>
         <div class="note" id="out_modeA_rag_status"></div>
-        <div class="pre" id="out_modeA_rag">等待运行...</div>
+        <div class="pre" id="out_modeA_rag">Waiting...</div>
       </div>
       <div class="field">
-        <label>Base LLM 输出（无证据，对比用）</label>
-        <div class="pre" id="out_base_llm">等待运行...</div>
+        <label>Base LLM Output (No Evidence)</label>
+        <div class="pre" id="out_base_llm">Waiting...</div>
       </div>
       <div class="field">
-        <label>Mode B 输出（evidence_projection）</label>
+        <label>Mode B Output</label>
         <div class="note" id="out_modeB_status"></div>
-        <div class="pre" id="out_modeB">等待运行...</div>
+        <div class="pre" id="out_modeB">Waiting...</div>
       </div>
       <div class="field">
-        <label>Routing 调试输出</label>
+        <label>Route Output</label>
         <div class="note" id="out_route_status"></div>
-        <div class="pre" id="out_route">等待运行...</div>
+        <div class="pre" id="out_route">Waiting...</div>
       </div>
       <div class="field">
-        <label>调试日志输出</label>
-        <div class="pre" id="out_debug_log">等待运行...</div>
+        <label>Debug Log</label>
+        <div class="pre" id="out_debug_log">Waiting...</div>
       </div>
     </div>
   </div>
@@ -293,4 +235,3 @@
   <script src="/static/app.js"></script>
 </body>
 </html>
-

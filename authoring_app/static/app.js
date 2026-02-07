@@ -37,16 +37,15 @@ function pretty(obj) {
 
 let topics = [];
 let selectedTopic = "";
-let selectedDoc = null; // {doc_id, approved, ...}
-let evidenceSets = []; // [{name,path,enabled,count}]
-let currentSet = null; // {name, enabled, records, by_source}
+let selectedDoc = null;
+let evidenceSets = [];
+let currentSet = null;
 
 async function createTopicFromUi() {
   const name = ($("topic_new_name").value || "").trim();
-  if (!name) throw new Error("请输入主题库名字。");
+  if (!name) throw new Error("Topic name required.");
   await apiPost("/api/kvi/topics/create", { topic: name });
   await loadTopics();
-  // select the newly created topic if present
   if (topics.some(t => t.topic === name)) {
     $("topic_select").value = name;
     $("topic_select_docs").value = name;
@@ -57,8 +56,8 @@ async function createTopicFromUi() {
 }
 
 async function deleteTopicFromUi() {
-  if (!selectedTopic) throw new Error("未选择主题库。");
-  const ok = window.confirm(`确定删除主题库 "${selectedTopic}" 吗？此操作不可恢复。`);
+  if (!selectedTopic) throw new Error("No topic selected.");
+  const ok = window.confirm(`Delete topic "${selectedTopic}"? This cannot be undone.`);
   if (!ok) return;
   await apiPost("/api/kvi/topics/delete", { topic: selectedTopic });
   await loadTopics();
@@ -115,14 +114,14 @@ function toJsonl(records) {
 
 async function compileSimple() {
   const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
-  $("compile_log").textContent = "编译中...（sentence-KVBank：逐条 sentence forward 抽取 KV cache 并建 FAISS；可能需要数分钟）\n";
+  $("compile_log").textContent = "Compiling...";
   const useLlmIntent = ($("compile_use_llm_intent").value || "false") === "true";
   const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
     use_llm_intent: useLlmIntent,
   });
   const ok = !!resp.ok;
-  $("compile_log").textContent = (ok ? "✅ OK\n\n" : "❌ FAILED\n\n") + pretty(resp);
+  $("compile_log").textContent = (ok ? "OK\n\n" : "FAILED\n\n") + pretty(resp);
 }
 
 async function loadEvidenceSets() {
@@ -136,16 +135,16 @@ async function loadEvidenceSets() {
   for (const s of evidenceSets) {
     const opt = document.createElement("option");
     opt.value = s.name;
-    opt.textContent = `${s.enabled ? "✓" : " "} ${s.name} (${s.count || 0})`;
+    opt.textContent = `${s.enabled ? "+" : "-"} ${s.name} (${s.count || 0})`;
     sel.appendChild(opt);
   }
   if (evidenceSets.length > 0) {
     await loadEvidenceSet(evidenceSets[0].name);
   } else {
     currentSet = null;
-    $("set_stats").textContent = "暂无 evidence set。请先新建。";
+    $("set_stats").textContent = "No evidence sets. Create one first.";
     $("set_raw").value = "";
-    $("doc_group_view").textContent = "未加载";
+    $("doc_group_view").textContent = "Not loaded";
   }
 }
 
@@ -154,13 +153,13 @@ async function loadEvidenceSet(name) {
   currentSet = resp;
   $("set_select").value = name;
   $("set_enabled").value = resp.enabled ? "true" : "false";
-  $("set_stats").textContent = `当前：${name}  records=${resp.count || 0}  enabled=${resp.enabled}`;
+  $("set_stats").textContent = `Current: ${name}  records=${resp.count || 0}  enabled=${resp.enabled}`;
   $("set_raw").value = toJsonl(resp.records || []);
   $("doc_group_view").textContent = pretty(resp.by_source || {});
 }
 
 async function saveCurrentSet() {
-  if (!currentSet) throw new Error("未选择 evidence set。");
+  if (!currentSet) throw new Error("No evidence set selected.");
   const name = currentSet.name;
   const enabled = ($("set_enabled").value || "true") === "true";
   const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
@@ -170,7 +169,7 @@ async function saveCurrentSet() {
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
   });
   const ss = resp.split_stats || null;
-  $("set_stats").textContent = `已保存：${resp.name}  count=${resp.count}  enabled=${resp.enabled}` + (ss ? `  split=${ss.split_records||0}→${ss.generated_records||0}  truncated=${ss.truncated_records||0}` : "");
+  $("set_stats").textContent = `Saved: ${resp.name}  count=${resp.count}  enabled=${resp.enabled}` + (ss ? `  split=${ss.split_records||0}->${ss.generated_records||0}  truncated=${ss.truncated_records||0}` : "");
   await loadEvidenceSets();
   await loadEvidenceSet(name);
 }
@@ -183,10 +182,9 @@ async function createEvidenceSet() {
 
 function buildNewSentenceRecords() {
   const raw = ($("sent_claim").value || "");
-  // Split by delimiter "###" (each claim ends with ###). Also allow plain single claim.
   const parts = raw.includes("###") ? raw.split("###") : [raw];
   const claims = parts.map(x => String(x || "").trim()).filter(x => x);
-  if (claims.length === 0) throw new Error("claim * 必填");
+  if (claims.length === 0) throw new Error("Claim is required.");
   const sourceId = ($("sent_source_id").value || "").trim() || null;
   const doi = ($("sent_doi").value || "").trim() || null;
   const title = ($("sent_title").value || "").trim() || null;
@@ -195,20 +193,13 @@ function buildNewSentenceRecords() {
   const pad = (n) => String(n).padStart(2, "0");
   const ts = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   return claims.map((claim) => ({
-    id: null,
-    topic: selectedTopic,
-    claim,
-    source_id: sourceId,
-    source_ref: { doi, title },
-    created_at: ts,
-    updated_at: ts,
-    author,
-    tags: [],
+    id: null, topic: selectedTopic, claim, source_id: sourceId,
+    source_ref: { doi, title }, created_at: ts, updated_at: ts, author, tags: [],
   }));
 }
 
 async function addSentenceToSet() {
-  if (!currentSet) throw new Error("未选择 evidence set。");
+  if (!currentSet) throw new Error("No evidence set selected.");
   const recs = buildNewSentenceRecords();
   const records = parseJsonl($("set_raw").value || "");
   for (const r of recs) records.push(r);
@@ -235,7 +226,7 @@ async function loadDocsList() {
     left.textContent = d.pdf_name || d.doc_id;
     const badge = document.createElement("span");
     badge.className = "badge " + (d.approved ? "ok" : "warn");
-    badge.textContent = d.approved ? "approved" : "not approved";
+    badge.textContent = d.approved ? "approved" : "pending";
     top.appendChild(left);
     top.appendChild(badge);
     const meta = document.createElement("div");
@@ -245,7 +236,7 @@ async function loadDocsList() {
     btns.className = "btns";
     const toggle = document.createElement("button");
     toggle.className = d.approved ? "bad" : "ok";
-    toggle.textContent = d.approved ? "取消 approved" : "标记 approved";
+    toggle.textContent = d.approved ? "Revoke" : "Approve";
     toggle.onclick = async (ev) => {
       ev.stopPropagation();
       await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(d.doc_id)}/set_approved`, { approved: !d.approved });
@@ -254,7 +245,7 @@ async function loadDocsList() {
     btns.appendChild(toggle);
     const open = document.createElement("button");
     open.className = "primary";
-    open.textContent = "打开";
+    open.textContent = "Open";
     open.onclick = async (ev) => {
       ev.stopPropagation();
       selectedDoc = d;
@@ -272,10 +263,7 @@ async function loadDocsList() {
 
 async function loadDocBlocks(docId) {
   const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/blocks`);
-  const lines = [];
-  lines.push(`doc_id=${docId}`);
-  lines.push(`blocks=${resp.count}`);
-  lines.push("");
+  const lines = [`doc_id=${docId}`, `blocks=${resp.count}`, ""];
   let idx = 0;
   for (const b of resp.items || []) {
     idx += 1;
@@ -286,131 +274,87 @@ async function loadDocBlocks(docId) {
 }
 
 async function importDocBlocks() {
-  if (!selectedDoc) throw new Error("请先选择一个 doc。");
-  if (!selectedDoc.approved) throw new Error("doc 未 approved，无法导入。");
+  if (!selectedDoc) throw new Error("Select a doc first.");
+  if (!selectedDoc.approved) throw new Error("Doc not approved.");
   const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/import_to_evidence`, {});
-  $("doc_detail").textContent = $("doc_detail").textContent + `\n\n---\n已导入到 evidence set=${resp.evidence_set}：appended=${resp.appended}`;
+  $("doc_detail").textContent = $("doc_detail").textContent + `\n\n---\nImported to evidence set=${resp.evidence_set}: appended=${resp.appended}`;
   await loadEvidenceSets();
 }
 
+/* ==================== Inference Debug ==================== */
+
 async function runDebug() {
   const prompt = ($("debug_prompt").value || "").trim();
-  if (!prompt) throw new Error("请先输入 prompt。");
+  if (!prompt) throw new Error("Prompt is required.");
   const topK = Number(($("debug_top_k").value || "2").trim());
   const mode = ($("debug_mode").value || "modeA").trim();
-  const ragField = $("field_modeA_rag");
-  if (ragField) {
-    ragField.style.display = (mode === "modeA") ? "block" : "none";
-  }
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
   const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
-  $("out_cli").textContent = "运行中...";
-  $("out_modeA").textContent = "运行中...";
-  $("out_modeA_rag").textContent = "运行中...";
-  $("out_modeB").textContent = "运行中...";
-  $("out_route").textContent = "运行中...";
-  $("out_debug_log").textContent = "运行中...";
-  $("out_base_llm").textContent = "运行中...";
-  $("out_modeA_status").textContent = "";
-  $("out_modeA_rag_status").textContent = "";
-  $("out_modeB_status").textContent = "";
-  $("out_route_status").textContent = "";
+
+  // Show/hide RAG comparison field
+  const ragField = $("field_modeA_rag");
+  if (ragField) ragField.style.display = (mode === "modeA") ? "block" : "none";
+
+  // Reset all outputs
+  const fields = ["out_cli","out_modeA","out_modeA_rag","out_modeB","out_route","out_debug_log","out_base_llm"];
+  for (const f of fields) { const el = $(f); if (el) el.textContent = "Running..."; }
+  const statuses = ["out_modeA_status","out_modeA_rag_status","out_modeB_status","out_route_status"];
+  for (const s of statuses) { const el = $(s); if (el) el.textContent = ""; }
+
+  const params = {
+    prompt,
+    top_k: Number.isFinite(topK) ? topK : 8,
+    route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
+    route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
+    route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
+    route_rerank_without_ann: rerankNoAnn,
+    route_llm_intent_enable: (mode === "modeA") ? modeAUseLlmIntent : routeLlmIntent,
+  };
+
   let resp = null;
   let respRag = null;
+
   if (mode === "modeB") {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: routeLlmIntent,
-    });
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, params);
   } else if (mode === "route") {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: routeLlmIntent,
-    });
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
   } else {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: modeAUseLlmIntent,
-    });
-    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: modeAUseLlmIntent,
-    });
+    // Mode A: main call (RAG anchor + KV injection)
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, params);
+    // Also fetch RAG-only for comparison
+    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, params);
   }
+
   const r = resp && resp.result ? resp.result : {};
   $("out_cli").textContent = (resp && resp.cmd) ? resp.cmd : "(no cmd)";
-  // Debug log: always fetch full /route for routing/evidence inspection.
+
+  // Debug log
   try {
-    const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, {
-      prompt,
-      top_k: Number.isFinite(topK) ? topK : 8,
-      route_w_ann: Number.isFinite(wAnn) ? wAnn : 1.0,
-      route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
-      route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
-      route_rerank_without_ann: rerankNoAnn,
-      route_llm_intent_enable: routeLlmIntent,
-    });
+    const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
     const fullRoute = routeResp.result || {};
     const debugObj = { route: fullRoute };
     if (mode === "modeA") {
-      if (r.routing_debug) {
-        debugObj.modeA_routing_debug = r.routing_debug || {};
-      }
-      if (r.injection_debug) {
-        debugObj.modeA_injection_debug = r.injection_debug || {};
-      }
-      if (r.kvi2_result) {
-        const k = r.kvi2_result || {};
-        const gate = k.gate || {};
-        const retrieval = k.retrieval || {};
-        debugObj.modeA_kvi2_summary = {
-          gate_decision: gate.decision || "",
-          gate_reason: gate.reason || "",
-          pattern_id: gate.pattern_id || "",
-          matched_skeleton: gate.matched_skeleton || "",
-          retrieval_top_k: retrieval.top_k,
-          retrieved_ids: retrieval.retrieved_ids || retrieval.final_rank || [],
-          kv_refresh: retrieval.kv_refresh || {},
-          contract_validation: retrieval.contract_validation || {},
-        };
-      }
+      if (r.routing_debug) debugObj.modeA_routing_debug = r.routing_debug;
+      if (r.injection_debug) debugObj.modeA_injection_debug = r.injection_debug;
       if (respRag && respRag.result && respRag.result.routing_debug) {
-        debugObj.modeA_rag_routing_debug = respRag.result.routing_debug || {};
+        debugObj.rag_routing_debug = respRag.result.routing_debug;
       }
     }
     $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) {
     $("out_debug_log").textContent = String(e && e.message ? e.message : e);
   }
+
+  // Populate outputs
   if (mode === "modeB") {
     $("out_modeB").textContent = pretty(r);
     $("out_modeB_status").textContent = r.mode ? `mode: ${r.mode}` : "";
     $("out_modeA").textContent = "";
-    $("out_modeA_true").textContent = "";
+    $("out_modeA_rag").textContent = "";
     $("out_route").textContent = "";
     $("out_base_llm").textContent = "";
   } else if (mode === "route") {
@@ -423,29 +367,21 @@ async function runDebug() {
   } else {
     $("out_modeA").textContent = r.diagnosis_result || "";
     $("out_modeA_status").textContent = "status: OK";
+    $("out_base_llm").textContent = r.base_llm_result || "";
     $("out_modeB").textContent = "";
     $("out_route").textContent = "";
-    $("out_base_llm").textContent = r.base_llm_result || "";
     const rr = respRag && respRag.result ? respRag.result : {};
     $("out_modeA_rag").textContent = rr.diagnosis_result || "";
     $("out_modeA_rag_status").textContent = "status: OK";
   }
 }
 
+/* ==================== Wiring ==================== */
+
 function wire() {
   $("tab_simple").onclick = () => setTab("simple");
   $("tab_docs").onclick = () => setTab("docs");
   $("tab_debug").onclick = () => setTab("debug");
-
-  const modeSel = $("debug_mode");
-  if (modeSel) {
-    modeSel.onchange = () => {
-      const ragField = $("field_modeA_rag");
-      if (ragField) {
-        ragField.style.display = (String(modeSel.value) === "modeA") ? "block" : "none";
-      }
-    };
-  }
 
   $("topic_select").onchange = async (e) => { await onTopicChange(e.target.value); };
   $("topic_select_docs").onchange = async (e) => {
@@ -477,8 +413,12 @@ function wire() {
     $("docs_list_view").style.display = "block";
     $("doc_detail_view").style.display = "none";
   };
-  $("btn_run_debug").onclick = () => runDebug().catch(err => { $("out_debug").textContent = String(err.message || err); });
-  // top_k slider
+  $("btn_run_debug").onclick = () => runDebug().catch(err => {
+    const el = $("out_debug_log");
+    if (el) el.textContent = String(err.message || err);
+  });
+
+  // Top-K slider sync
   const slider = $("debug_topk_slider");
   const show = $("debug_topk_n");
   const topKInput = $("debug_top_k");
@@ -495,10 +435,8 @@ function wire() {
 async function init() {
   wire();
   await loadTopics();
-  // keep doc/debug topic selectors consistent with simple selector
   $("topic_select_docs").value = selectedTopic;
   $("topic_select_debug").value = selectedTopic;
 }
 
 window.addEventListener("DOMContentLoaded", () => init().catch(err => console.error(err)));
-

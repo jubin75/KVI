@@ -1580,11 +1580,15 @@ def main() -> None:
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
         if pipeline == "modeA":
-            # Evidence Routing + KV injection (no evidence text in prompt).
+            # Evidence Routing + RAG anchor + KV injection (dual-channel).
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
+            ev_texts = routing.get("evidence_texts") or [] if isinstance(routing, dict) else []
+            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
+                + "\n\n以下是检索到的证据（仅供参考，请严格基于这些证据回答）：\n"
+                + ev_block
                 + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
             )
             pkv = None
