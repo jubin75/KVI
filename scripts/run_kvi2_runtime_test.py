@@ -1280,6 +1280,53 @@ def _postprocess_answer_citation_guardrails(
     return out, dbg
 
 
+def _postprocess_answer_grounding_only(*, answer: str, evidence_texts: Sequence[str]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Drop sentences that do not overlap with injected evidence (lightweight grounding check).
+    This is deletion-only and does not synthesize new text.
+    """
+    a = str(answer or "").strip()
+    ev_pairs = [(f"E{i+1}", str(t or "")) for i, t in enumerate(evidence_texts or []) if str(t or "").strip()]
+    if not a or not ev_pairs:
+        return a, {"dropped_count": 0, "dropped_examples": []}
+
+    def _strip_cites(s: str) -> str:
+        return _SIMPLE_CITE_RE.sub("", s).strip()
+
+    def _tokenize_shingles(s: str) -> List[str]:
+        t = str(s or "")
+        en = re.findall(r"[A-Za-z0-9]+", t)
+        zh = "".join(re.findall(r"[\u4e00-\u9fff]+", t))
+        z2 = [zh[i : i + 2] for i in range(0, max(0, len(zh) - 1))]
+        out = [x.lower() for x in en] + z2
+        return [x for x in out if len(x) >= 2]
+
+    def _best_overlap(s: str) -> float:
+        stoks = set(_tokenize_shingles(_strip_cites(s)))
+        if not stoks:
+            return 0.0
+        best = 0.0
+        for _eid, etxt in ev_pairs:
+            etoks = set(_tokenize_shingles(etxt))
+            if not etoks:
+                continue
+            inter = len(stoks & etoks)
+            frac = float(inter) / float(max(1, len(stoks)))
+            if inter >= 3 and frac > best:
+                best = frac
+        return best
+
+    parts = [p.strip() for p in _SIMPLE_SENT_SPLIT_RE.split(a) if p and p.strip()]
+    kept: List[str] = []
+    dropped: List[Dict[str, Any]] = []
+    for s in parts:
+        if _best_overlap(s) < 0.22:
+            dropped.append({"sentence": s, "reason": "low_overlap"})
+            continue
+        kept.append(s)
+    out = "\n".join(kept).strip()
+    return out, {"dropped_count": len(dropped), "dropped_examples": dropped[:3]}
+
 def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query: str) -> bool:
     """
     Minimal relevance filter (deletion-only) to avoid cross-intent contamination.
@@ -1531,9 +1578,24 @@ def main() -> None:
             # Evidence Routing + KV injection (no evidence text in prompt).
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
+            intent_key = str((routing.get("routing_debug") or {}).get("intent") or "").strip().lower() if isinstance(routing, dict) else ""
+            intent_guard = ""
+            if intent_key == "drug":
+                intent_guard = (
+                    "\n\n【意图约束】只允许复述证据中出现的治疗/用药信息；"
+                    "不得引入其他疾病、药物、机制或并发症。"
+                    "若证据不足，请仅回复“现有证据不足以回答该问题。”"
+                )
+            elif intent_key == "symptom":
+                intent_guard = (
+                    "\n\n【意图约束】只允许复述证据中出现的临床症状/体征；"
+                    "不得引入其他疾病、治疗、机制或并发症。"
+                    "若证据不足，请仅回复“现有证据不足以回答该问题。”"
+                )
             modeA_prompt = (
                 str(args.prompt).strip()
                 + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
+                + intent_guard
             )
             pkv = None
             injected_dbg: Dict[str, Any] = {
@@ -1596,12 +1658,17 @@ def main() -> None:
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
+            answer, post_dbg = _postprocess_answer_grounding_only(
+                answer=answer,
+                evidence_texts=(routing.get("evidence_texts") or []) if isinstance(routing, dict) else [],
+            )
             out = {
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
                 "injection_debug": injected_dbg,
+                "postprocess_debug": post_dbg,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
