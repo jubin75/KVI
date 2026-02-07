@@ -892,6 +892,99 @@ def _select_kv_items_by_ids(*, bank: Any, ids: Sequence[str]) -> List[Any]:
     # Preserve input order.
     return [by_id[x] for x in target if x in by_id]
 
+
+# ---- Post-generation evidence grounding filter ----
+
+def _char_shingles(text: str, k: int = 3) -> set:
+    """Return set of character k-shingles from *text* (Chinese-friendly)."""
+    t = re.sub(r"\s+", "", text)
+    if len(t) < k:
+        return {t} if t else set()
+    return {t[i : i + k] for i in range(len(t) - k + 1)}
+
+
+def _shingle_overlap(sent: str, evidence_texts: Sequence[str], k: int = 3) -> float:
+    """Max Jaccard shingle overlap between *sent* and any evidence sentence."""
+    s_shingles = _char_shingles(sent, k)
+    if not s_shingles:
+        return 0.0
+    best = 0.0
+    for ev in evidence_texts:
+        ev_shingles = _char_shingles(ev, k)
+        if not ev_shingles:
+            continue
+        inter = len(s_shingles & ev_shingles)
+        union = len(s_shingles | ev_shingles)
+        if union > 0:
+            best = max(best, inter / union)
+    return best
+
+
+def _evidence_grounding_filter(
+    *,
+    generated_text: str,
+    evidence_texts: Sequence[str],
+    shingle_k: int = 3,
+    min_overlap: float = 0.1,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Split *generated_text* into sentences and check each against evidence.
+
+    Returns (filtered_text, report).
+    - Sentences with shingle overlap >= min_overlap are kept.
+    - Sentences below threshold are tagged as [ungrounded] but still kept
+      (so the user can see what was flagged).
+    - Sentences with zero overlap are dropped entirely.
+    """
+    # Split on Chinese / Western sentence boundaries
+    raw_sents = re.split(r"(?<=[。！？\.\!\?])", generated_text)
+    # Also handle numbered list items (e.g. "1. xxx\n2. xxx")
+    expanded: List[str] = []
+    for seg in raw_sents:
+        parts = seg.split("\n")
+        for p in parts:
+            p = p.strip()
+            if p:
+                expanded.append(p)
+
+    kept: List[str] = []
+    report_items: List[Dict[str, Any]] = []
+    total = len(expanded)
+    grounded_count = 0
+    dropped_count = 0
+
+    for sent in expanded:
+        # Skip very short decorative lines (headers, numbering only, etc.)
+        clean = re.sub(r"[\d\.\*\#\-\s]+", "", sent)
+        if len(clean) < 4:
+            kept.append(sent)
+            continue
+
+        overlap = _shingle_overlap(sent, evidence_texts, shingle_k)
+        item = {"sentence": sent[:60], "overlap": round(overlap, 4), "grounded": overlap >= min_overlap}
+        report_items.append(item)
+
+        if overlap >= min_overlap:
+            kept.append(sent)
+            grounded_count += 1
+        elif overlap > 0:
+            # Low but non-zero overlap — keep with warning tag
+            kept.append(f"{sent} [ungrounded]")
+            dropped_count += 1
+        else:
+            # Zero overlap — pure hallucination, drop
+            dropped_count += 1
+
+    filtered = "\n".join(kept)
+    report = {
+        "total_sentences": total,
+        "grounded": grounded_count,
+        "dropped_or_tagged": dropped_count,
+        "details": report_items[:20],  # cap detail output
+    }
+    return filtered, report
+
+
 def _load_block_metadata_lookup(path: str) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     p = Path(path)
@@ -1587,9 +1680,12 @@ def main() -> None:
             ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
-                + "\n\n以下是检索到的证据（仅供参考，请严格基于这些证据回答）：\n"
+                + "\n\n### 已检索证据（你只能使用以下证据回答，不得引入任何外部知识）：\n"
                 + ev_block
-                + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
+                + "\n\n### 要求：\n"
+                + "1. 只使用上述证据中明确出现的事实，逐条组织回答。\n"
+                + '2. 如果证据不足以完整回答问题，请明确说明\u201c当前证据未覆盖\u201d。\n'
+                + "3. 不得对疾病名称、药物机制等做任何推测或补充。"
             )
             pkv = None
             injected_dbg: Dict[str, Any] = {
@@ -1603,8 +1699,10 @@ def main() -> None:
                 items = [it for it in (routing_kv_items or []) if it is not None]
                 if items:
                     dtype2 = next(model.parameters()).dtype
+                    _num_layers = getattr(getattr(model, "config", None), "num_hidden_layers", 32)
+                    _inject_layers = min(16, _num_layers)  # inject up to first 16 layers
                     ext_by_layer: Dict[int, Any] = {}
-                    for li in (0, 1, 2, 3):
+                    for li in range(_inject_layers):
                         try:
                             ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
                                 items=items,
@@ -1637,27 +1735,35 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=192,
+                max_new_tokens=128,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
-            answer = MultiStepInjector._greedy_generate_with_past_prefix(
+            raw_answer = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
                 tokenizer=tok,
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=pkv,
-                max_new_tokens=192,
+                max_new_tokens=128,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
+            # -- Post-generation evidence grounding check --
+            answer, grounding_report = _evidence_grounding_filter(
+                generated_text=raw_answer,
+                evidence_texts=ev_texts,
+                shingle_k=3,
+                min_overlap=0.1,
+            )
             out = {
                 "mode": "A",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
                 "injection_debug": injected_dbg,
+                "grounding_report": grounding_report,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
@@ -1667,9 +1773,12 @@ def main() -> None:
             ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
-                + "\n\n请基于以下证据进行自由推理并给出诊断性结论：\n"
+                + "\n\n### 已检索证据（你只能使用以下证据回答，不得引入任何外部知识）：\n"
                 + ev_block
-                + "\n\n要求：可归纳、可综合，但不得捏造证据中不存在的事实。"
+                + "\n\n### 要求：\n"
+                + "1. 只使用上述证据中明确出现的事实，逐条组织回答。\n"
+                + '2. 如果证据不足以完整回答问题，请明确说明\u201c当前证据未覆盖\u201d。\n'
+                + "3. 不得对疾病名称、药物机制等做任何推测或补充。"
             )
             if tok is None or model is None:
                 raise SystemExit("Mode A RAG requires model/tokenizer")
@@ -1681,26 +1790,34 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=192,
+                max_new_tokens=128,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
-            answer = MultiStepInjector._greedy_generate_with_past_prefix(
+            raw_answer = MultiStepInjector._greedy_generate_with_past_prefix(
                 model=model,
                 tokenizer=tok,
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=192,
+                max_new_tokens=128,
                 no_repeat_ngram_size=12,
                 repetition_penalty=1.08,
             ).strip()
+            # -- Post-generation evidence grounding check --
+            answer, grounding_report = _evidence_grounding_filter(
+                generated_text=raw_answer,
+                evidence_texts=ev_texts,
+                shingle_k=3,
+                min_overlap=0.1,
+            )
             out = {
                 "mode": "A_RAG",
                 "diagnosis_result": str(answer or ""),
                 "base_llm_result": str(base_answer or ""),
                 "routing_debug": routing.get("routing_debug") if isinstance(routing, dict) else {},
+                "grounding_report": grounding_report,
             }
             print(json.dumps(out, ensure_ascii=False, indent=2))
             return
