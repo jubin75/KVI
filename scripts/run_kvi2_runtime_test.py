@@ -1571,7 +1571,7 @@ def main() -> None:
     try:
         from external_kv_injection.src.runtime.kvi2_runtime import KVI2Runtime, KVI2Config  # type: ignore
         from external_kv_injection.src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
-        from external_kv_injection.src.kv_bank import FaissKVBank  # type: ignore
+        from external_kv_injection.src.kv_bank import FaissKVBank, KVItem  # type: ignore
         from external_kv_injection.src.retriever import Retriever  # type: ignore
         from external_kv_injection.src.runtime.hf_cache_prefix_injection import (  # type: ignore
             build_past_key_values_prefix,
@@ -1581,7 +1581,7 @@ def main() -> None:
     except ModuleNotFoundError:
         from src.runtime.kvi2_runtime import KVI2Runtime, KVI2Config  # type: ignore
         from src.domain_encoder import DomainEncoder, DomainEncoderConfig  # type: ignore
-        from src.kv_bank import FaissKVBank  # type: ignore
+        from src.kv_bank import FaissKVBank, KVItem  # type: ignore
         from src.retriever import Retriever  # type: ignore
         from src.runtime.hf_cache_prefix_injection import build_past_key_values_prefix, stack_ext_kv_items_by_layer  # type: ignore
         from src.runtime.multistep_injector import MultiStepInjector  # type: ignore
