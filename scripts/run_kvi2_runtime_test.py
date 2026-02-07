@@ -761,13 +761,15 @@ def _run_evidence_routing(
                 "semantic_primary": payload.get("semantic_primary"),
             }
         )
-    # Stage 3: rerank with soft intent bonus (no hard filtering)
-    # - primary match: +0.3 bonus to final_score
-    # - tag match:     +0.15 bonus to final_score
-    # All items stay in the pool; the bonus ensures intent-aligned evidence
-    # ranks higher without silently dropping relevant sentences.
+    # Stage 3: rerank with soft intent bonus + off-intent penalty
+    # - primary == intent:           +0.3  (strong boost)
+    # - intent in tags, primary !=:  +0.15 (mild boost — relevant but not primary)
+    # - intent not in tags at all:   -0.2  (penalty — likely off-topic)
+    # Net effect: primary-match items get +0.3, tag-match get +0.15,
+    # off-topic items get -0.2.  Gap between tag-match and off-topic = 0.35.
     _PRIMARY_BONUS = 0.3
     _TAG_BONUS = 0.15
+    _OFF_INTENT_PENALTY = -0.2
     soft_filter_used = "soft_bonus"
     if intent_key:
         for it in items:
@@ -779,6 +781,8 @@ def _run_evidence_routing(
                 bonus = _PRIMARY_BONUS
             elif tag_match:
                 bonus = _TAG_BONUS
+            else:
+                bonus = _OFF_INTENT_PENALTY
             it["intent_bonus"] = round(bonus, 4)
             it["final_score"] = round(float(it.get("final_score", 0.0)) + bonus, 6)
     use_items = items
@@ -1556,6 +1560,7 @@ def main() -> None:
     p.add_argument("--route_llm_intent_enable", action="store_true", help="Use base LLM to classify query intent (Mode A only)")
     p.add_argument("--route_llm_intent_max_new_tokens", type=int, default=8)
     p.add_argument("--route_trace_text", default="", help="Optional: trace a target sentence in routing candidate pool/output.")
+    p.add_argument("--entity_priming_kv_dir", default="", help="KVBank dir for entity priming (complementary injection). If empty, falls back to evidence KV.")
     # NOTE (iron law): Evidence Units text MUST NOT be appended to prompt at runtime.
     # Simple pipeline only supports KV cache injection.
     # Output controls: baseline is frequently hallucinated; keep it opt-in.
@@ -1694,25 +1699,66 @@ def main() -> None:
                 + "2. 不得引入证据中未提及的疾病名称全称、药物机制或其他外部知识。\n"
                 + "3. 如果证据不足以完整回答，在末尾注明。"
             )
+            # -- KV injection: complementary (entity priming) or fallback (evidence) --
             pkv = None
             injected_dbg: Dict[str, Any] = {
                 "enabled": False,
-                "source": "routing_kv_items",
+                "source": "none",
                 "selected_ids": [],
                 "selected_kv_lens": [],
                 "layers": [],
             }
+            priming_dir = str(args.entity_priming_kv_dir or "").strip()
+            priming_items: List[Any] = []
+            if priming_dir and Path(priming_dir).exists():
+                # Load entity priming KV bank (complementary injection)
+                try:
+                    priming_bank = FaissKVBank.load(Path(priming_dir))
+                    # Inject ALL items from priming bank (small set by design)
+                    priming_metas = getattr(priming_bank, "metas", None) or []
+                    priming_k = getattr(priming_bank, "k_ext", None)
+                    priming_v = getattr(priming_bank, "v_ext", None)
+                    if priming_metas and priming_k is not None and priming_v is not None:
+                        for pi, pm in enumerate(priming_metas):
+                            if not isinstance(pm, dict):
+                                continue
+                            try:
+                                priming_items.append(KVItem(score=1.0, meta=pm, K_ext=priming_k[pi], V_ext=priming_v[pi]))
+                            except Exception:
+                                continue
+                    # Also scan shards
+                    if not priming_items and hasattr(priming_bank, "shards"):
+                        for shard in (getattr(priming_bank, "shards") or []):
+                            sm = getattr(shard, "metas", None) or []
+                            sk = getattr(shard, "k_ext", None)
+                            sv = getattr(shard, "v_ext", None)
+                            if sm and sk is not None and sv is not None:
+                                for pi, pm in enumerate(sm):
+                                    if not isinstance(pm, dict):
+                                        continue
+                                    try:
+                                        priming_items.append(KVItem(score=1.0, meta=pm, K_ext=sk[pi], V_ext=sv[pi]))
+                                    except Exception:
+                                        continue
+                except Exception:
+                    priming_items = []
+            # Choose injection source: priming (complementary) or evidence (fallback)
+            if priming_items:
+                inject_items = priming_items
+                injected_dbg["source"] = "entity_priming"
+            else:
+                inject_items = [it for it in (routing_kv_items or []) if it is not None]
+                injected_dbg["source"] = "evidence_fallback"
             try:
-                items = [it for it in (routing_kv_items or []) if it is not None]
-                if items:
+                if inject_items:
                     dtype2 = next(model.parameters()).dtype
                     _num_layers = getattr(getattr(model, "config", None), "num_hidden_layers", 32)
-                    _inject_layers = min(8, _num_layers)  # inject first 8 layers (balance signal vs distortion)
+                    _inject_layers = min(8, _num_layers)
                     ext_by_layer: Dict[int, Any] = {}
                     for li in range(_inject_layers):
                         try:
                             ext_by_layer[int(li)] = stack_ext_kv_items_by_layer(
-                                items=items,
+                                items=inject_items,
                                 layer_id=int(li),
                                 batch_size=1,
                                 device=device,
@@ -1724,9 +1770,9 @@ def main() -> None:
                         pkv = build_past_key_values_prefix(model=model, ext_kv_by_layer=ext_by_layer)
                         injected_dbg["enabled"] = True
                         injected_dbg["layers"] = sorted([int(x) for x in ext_by_layer.keys()])
-                        injected_dbg["selected_ids"] = [str(_kv_id(it)) for it in items]
+                        injected_dbg["selected_ids"] = [str(_kv_id(it)) for it in inject_items]
                         kv_lens = []
-                        for it in items:
+                        for it in inject_items:
                             try:
                                 meta = getattr(it, "meta", None) or {}
                                 kv_lens.append(int(meta.get("kv_len")) if isinstance(meta.get("kv_len"), int) else None)

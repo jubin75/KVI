@@ -1280,6 +1280,45 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_cmd": " ".join(cmd_kv), "logs": logs})
                 return
 
+            # -- Entity priming KV bank (complementary injection) --
+            entity_priming_jsonl = out_dir / "entity_priming.jsonl"
+            priming_kv_dir = out_dir / "kvbank_entity_priming"
+            if entity_priming_jsonl.exists():
+                cmd_priming = [
+                    str(python_exe),
+                    str(PROJECT_ROOT / "scripts" / "build_kvbank_from_blocks_jsonl.py"),
+                    "--blocks_jsonl",
+                    str(entity_priming_jsonl),
+                    "--disable_enriched",
+                    "--out_dir",
+                    str(priming_kv_dir),
+                    "--base_llm",
+                    base_llm,
+                    "--domain_encoder_model",
+                    encoder,
+                    "--layers",
+                    "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
+                    "--block_tokens",
+                    str(int(max_sentence_tokens)),
+                    "--shard_size",
+                    "1024",
+                ]
+                if device:
+                    cmd_priming.extend(["--device", device])
+                if dtype:
+                    cmd_priming.extend(["--dtype", dtype])
+                r_priming = subprocess.run(cmd_priming, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False)
+                logs.append(
+                    {
+                        "step": "entity_priming_kvbank",
+                        "cmd": " ".join(cmd_priming),
+                        "returncode": int(r_priming.returncode),
+                        "stdout": (r_priming.stdout or "")[-4000:],
+                        "stderr": (r_priming.stderr or "")[-4000:],
+                    }
+                )
+                # Non-fatal: priming is optional; log but don't fail compile
+
             _json_response(
                 self,
                 HTTPStatus.OK,
@@ -1295,6 +1334,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "compiled_stats": rec_stats,
                     "written_sentences": int(written),
                     "kv_dir": str(kv_dir),
+                    "entity_priming_kv_dir": str(priming_kv_dir) if entity_priming_jsonl.exists() else None,
                     "logs": logs,
                 },
             )
@@ -1572,6 +1612,10 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--route_w_quality",
                 str(w_quality),
             ]
+            # Entity priming KV bank (complementary injection)
+            priming_kv_dir = out_dir / "kvbank_entity_priming"
+            if priming_kv_dir.exists():
+                cmd.extend(["--entity_priming_kv_dir", str(priming_kv_dir)])
             if rerank_wo_ann:
                 cmd.append("--route_rerank_without_ann")
             if llm_intent:
