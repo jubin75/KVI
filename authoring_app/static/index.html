@@ -8,229 +8,281 @@
 </head>
 <body>
   <div class="app">
-    <div class="header">
-      <h1>KVI Console</h1>
-      <div class="sub">
-        Knowledge Value Injection -- 大模型幻觉定点消除与长期记忆外挂框架
-      </div>
-      <div class="tabs">
-        <button class="tab active" id="tab_simple">Knowledge Authoring</button>
-        <button class="tab" id="tab_docs">Literature Import</button>
-        <button class="tab" id="tab_debug">Inference Debug</button>
-      </div>
-    </div>
 
-    <!-- ==================== TAB: Knowledge Authoring ==================== -->
-    <div class="panel" id="view_simple">
-      <div class="row">
-        <div class="field">
-          <label>Topic</label>
-          <div class="row">
-            <div class="field"><input id="topic_new_name" placeholder="New topic name, e.g. SFTSV" /></div>
-            <div class="field"><button class="primary" id="btn_create_topic">Create</button></div>
-            <div class="field"><button class="danger" id="btn_delete_topic">Delete</button></div>
-          </div>
-          <select id="topic_select"></select>
-          <div class="note" id="topic_goal"></div>
-        </div>
-        <div class="field">
-          <label>Evidence Directory</label>
-          <input id="evidence_sets_dir" class="mono" disabled />
-          <div class="note">Each sentence is a JSONL line. Supports multiple files for collaborative maintenance.</div>
-        </div>
-      </div>
+    <!-- ==================== LEFT SIDEBAR ==================== -->
+    <div class="sidebar">
+      <div class="logo">KVI Console</div>
+      <div class="logo-sub">Knowledge Value Injection<br/>大模型幻觉定点消除与长期记忆外挂</div>
 
-      <div class="field">
-        <label>Evidence Set</label>
-        <div class="row">
-          <div class="field"><select id="set_select"></select></div>
-          <div class="field">
-            <label>Enabled</label>
-            <select id="set_enabled">
-              <option value="true" selected>true</option>
-              <option value="false">false</option>
-            </select>
-          </div>
-        </div>
-        <div class="btns">
-          <button class="primary" id="btn_create_set">New Set</button>
-          <button id="btn_reload_sets">Refresh</button>
-          <button class="ok" id="btn_compile">Compile KVBank</button>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>LLM Intent Tagging</label>
-            <select id="compile_use_llm_intent">
-              <option value="false" selected>false</option>
-              <option value="true">true</option>
-            </select>
-          </div>
-        </div>
-        <div class="note" id="set_stats">No set selected</div>
-      </div>
+      <div class="nav-section">Workspace</div>
+      <div class="nav-item active" id="tab_simple"><span class="nav-icon">K</span> Knowledge Authoring</div>
+      <div class="nav-item" id="tab_docs"><span class="nav-icon">L</span> Literature Import</div>
+      <div class="nav-item" id="tab_debug"><span class="nav-icon">D</span> Inference Debug</div>
 
-      <div class="field">
-        <label>Add Sentence</label>
-        <div class="row">
-          <div class="field">
-            <label>Max Sentence Tokens</label>
-            <input id="sent_token_budget" value="128" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Source ID</label><input id="sent_source_id" placeholder="DOI or doc_id" /></div>
-          <div class="field"><label>DOI</label><input id="sent_doi" placeholder="10.xxxx/xxxx" /></div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Title</label><input id="sent_title" placeholder="Paper title" /></div>
-          <div class="field"><label>Author</label><input id="sent_author" placeholder="Author name" /></div>
-        </div>
-        <div class="field">
-          <label>Claim (use ### as delimiter for multiple)</label>
-          <textarea id="sent_claim" placeholder="Enter evidence claims, delimited by ###"></textarea>
-        </div>
-        <div class="btns">
-          <button class="primary" id="btn_add_sentence">Add to Set</button>
-          <button id="btn_save_set">Save Set</button>
-        </div>
+      <div class="nav-section">Topic</div>
+      <div class="field" style="min-width:0">
+        <select id="topic_select"></select>
       </div>
+      <div class="row" style="gap:4px">
+        <input id="topic_new_name" placeholder="New topic" style="flex:1;padding:5px 7px;font-size:11px;border-radius:6px;border:1px solid var(--border)" />
+        <button class="primary" id="btn_create_topic" style="padding:5px 8px;font-size:11px">+</button>
+        <button class="danger" id="btn_delete_topic" style="padding:5px 8px;font-size:11px">x</button>
+      </div>
+      <div class="note" id="topic_goal" style="padding:0 2px"></div>
 
-      <div class="field">
-        <label>Set Overview (by source)</label>
-        <div class="pre" id="doc_group_view">Not loaded</div>
-      </div>
-      <div class="field">
-        <label>Raw JSONL (Advanced)</label>
-        <textarea id="set_raw" placeholder="One JSON object per line"></textarea>
-      </div>
-      <div class="field">
-        <label>Compile Log</label>
-        <div class="pre" id="compile_log">Waiting...</div>
-      </div>
-    </div>
-
-    <!-- ==================== TAB: Literature Import ==================== -->
-    <div class="panel" id="view_docs" style="display:none">
-      <div class="row">
-        <div class="field">
-          <label>Topic</label>
-          <select id="topic_select_docs"></select>
-        </div>
-        <div class="field">
-          <label>Actions</label>
-          <div class="btns">
-            <button class="primary" id="btn_load_docs_topic">Load Documents</button>
-          </div>
-          <div class="note">Mark documents as approved, then import their blocks into evidence sets.</div>
-        </div>
-      </div>
-      <div id="docs_list_view">
-        <div class="field">
-          <label>Documents</label>
-          <div class="list" id="docs_list"></div>
-        </div>
-      </div>
-      <div id="doc_detail_view" style="display:none">
-        <div class="btns">
-          <button id="btn_back_to_docs">Back</button>
-          <button class="ok" id="btn_import_doc_blocks" disabled>Import Blocks</button>
-        </div>
-        <div class="field">
-          <label>Document Blocks</label>
-          <div class="pre" id="doc_detail">Loading...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==================== TAB: Inference Debug ==================== -->
-    <div class="panel" id="view_debug" style="display:none">
-      <div class="row">
-        <div class="field">
-          <label>Topic</label>
-          <select id="topic_select_debug"></select>
-        </div>
+      <!-- Sidebar params (for debug tab) -->
+      <div class="sidebar-params" id="sidebar_debug_params" style="display:none">
+        <div class="nav-section">Parameters</div>
         <div class="field">
           <label>Mode</label>
           <select id="debug_mode">
-            <option value="modeA" selected>Mode A (RAG + KV Injection)</option>
-            <option value="modeB">Mode B (Evidence Projection)</option>
-            <option value="route">Route Only (Debug)</option>
+            <option value="modeA" selected>Mode A (RAG+KV)</option>
+            <option value="modeB">Mode B (Projection)</option>
+            <option value="route">Route Only</option>
           </select>
         </div>
-      </div>
-
-      <div class="row">
         <div class="field">
           <label>Top-K: <span class="mono" id="debug_topk_n">2</span></label>
           <input id="debug_topk_slider" type="range" min="1" max="8" step="1" value="2" />
           <input id="debug_top_k" value="2" style="display:none" />
         </div>
         <div class="field">
-          <label>LLM Intent Classifier</label>
+          <label>LLM Intent</label>
           <select id="modeA_use_llm_intent">
             <option value="true" selected>true</option>
             <option value="false">false</option>
           </select>
         </div>
+        <div class="row">
+          <div class="field"><label>W:ANN</label><input id="route_w_ann" value="0.1" /></div>
+          <div class="field"><label>W:Intent</label><input id="route_w_intent" value="2.0" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>W:Quality</label><input id="route_w_quality" value="0.2" /></div>
+          <div class="field">
+            <label>No ANN</label>
+            <select id="route_rerank_without_ann">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+        </div>
       </div>
+    </div>
 
-      <div class="row">
-        <div class="field"><label>W: ANN</label><input id="route_w_ann" value="0.1" /></div>
-        <div class="field"><label>W: Intent</label><input id="route_w_intent" value="2.0" /></div>
-        <div class="field"><label>W: Quality</label><input id="route_w_quality" value="0.2" /></div>
-        <div class="field">
-          <label>Rerank w/o ANN</label>
-          <select id="route_rerank_without_ann">
-            <option value="false" selected>false</option>
-            <option value="true">true</option>
-          </select>
+    <!-- ==================== RIGHT MAIN CONTENT ==================== -->
+    <div class="main">
+
+      <!-- ==================== TAB: Knowledge Authoring ==================== -->
+      <div id="view_simple">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>Evidence Directory</label>
+              <input id="evidence_sets_dir" class="mono" disabled />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>
+              Evidence Compilation Rules
+              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+            </label>
+            <div class="help-content">
+              每一条进入 KV space 的 Evidence，必须满足：<br/>
+              1. 表达一个单一医学事实或现象<br/>
+              2. 以临床语言自然句表达<br/>
+              3. 不包含推理、结论或解释<br/>
+              4. 不跨越多个医学维度（症状 / 机制 / 检查 / 预后）<br/><br/>
+              <strong>Example (Bad):</strong> "SFTSV感染后患者常出现发热、乏力、血小板减少，并可伴有消化道症状，严重者可进展为多器官功能障碍。"<br/>
+              <strong>Example (Good):</strong> "SFTSV感染的早期症状常包括发热。"
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>Evidence Set</label>
+              <select id="set_select"></select>
+            </div>
+            <div class="field">
+              <label>Enabled</label>
+              <select id="set_enabled">
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+          </div>
+          <div class="btns">
+            <button class="primary" id="btn_create_set">New Set</button>
+            <button id="btn_reload_sets">Refresh</button>
+            <button class="ok" id="btn_compile">Compile KVBank</button>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>
+                LLM Intent Tagging
+                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              </label>
+              <div class="help-content">编译时用 base LLM 为每条 sentence 标注语义意图（symptom/drug/location/mechanism）。可选，会增加编译时间。</div>
+              <select id="compile_use_llm_intent">
+                <option value="false" selected>false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+          </div>
+          <div class="note" id="set_stats">No set selected</div>
+        </div>
+
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>Max Sentence Tokens</label>
+              <input id="sent_token_budget" value="128" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Source ID</label><input id="sent_source_id" placeholder="DOI or doc_id" /></div>
+            <div class="field"><label>DOI</label><input id="sent_doi" placeholder="10.xxxx/xxxx" /></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Title</label><input id="sent_title" placeholder="Paper title" /></div>
+            <div class="field"><label>Author</label><input id="sent_author" placeholder="Author" /></div>
+          </div>
+          <div class="field">
+            <label>
+              Claim
+              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+            </label>
+            <div class="help-content">支持多条输入：每条知识以 ### 作为结束标记分隔。</div>
+            <textarea id="sent_claim" placeholder="Enter evidence claims, use ### as delimiter"></textarea>
+          </div>
+          <div class="btns">
+            <button class="primary" id="btn_add_sentence">Add to Set</button>
+            <button id="btn_save_set">Save Set</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>Set Overview (by source)</label>
+            <div class="pre" id="doc_group_view">Not loaded</div>
+          </div>
+          <div class="field">
+            <label>Raw JSONL (Advanced)</label>
+            <textarea id="set_raw" placeholder="One JSON per line"></textarea>
+          </div>
+          <div class="field">
+            <label>Compile Log</label>
+            <div class="pre" id="compile_log">Waiting...</div>
+          </div>
         </div>
       </div>
 
-      <div class="field">
-        <label>Prompt</label>
-        <textarea id="debug_prompt" placeholder="e.g. SFTSV's clinical symptoms?"></textarea>
+      <!-- ==================== TAB: Literature Import ==================== -->
+      <div id="view_docs" style="display:none">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>Topic</label>
+              <select id="topic_select_docs"></select>
+            </div>
+            <div class="field">
+              <div class="btns">
+                <button class="primary" id="btn_load_docs_topic">Load Documents</button>
+              </div>
+              <div class="note">
+                Mark documents as approved, then import blocks into evidence sets.
+                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              </div>
+              <div class="help-content">来源：该 topic 的 work_dir 下 docs.meta.jsonl + blocks.evidence.jsonl。先标记 approved，再导入 blocks 到知识文件。</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel" id="docs_list_view">
+          <div class="field">
+            <label>Documents</label>
+            <div class="list" id="docs_list"></div>
+          </div>
+        </div>
+        <div class="panel" id="doc_detail_view" style="display:none">
+          <div class="btns">
+            <button id="btn_back_to_docs">Back</button>
+            <button class="ok" id="btn_import_doc_blocks" disabled>Import Blocks</button>
+          </div>
+          <div class="field">
+            <label>Document Blocks</label>
+            <div class="pre" id="doc_detail">Loading...</div>
+          </div>
+        </div>
       </div>
 
-      <div class="btns">
-        <button class="primary" id="btn_run_debug">Run Inference</button>
+      <!-- ==================== TAB: Inference Debug ==================== -->
+      <div id="view_debug" style="display:none">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>Topic</label>
+              <select id="topic_select_debug"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Prompt</label>
+            <textarea id="debug_prompt" placeholder="e.g. SFTSV的主要临床症状有哪些？"></textarea>
+          </div>
+          <div class="btns">
+            <button class="primary" id="btn_run_debug">Run Inference</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>CLI Command</label>
+            <div class="pre" id="out_cli">Waiting...</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>Mode A Output (RAG + KV Injection)</label>
+            <div class="note" id="out_modeA_status"></div>
+            <div class="pre" id="out_modeA">Waiting...</div>
+          </div>
+          <div class="field" id="field_modeA_rag" style="display:none">
+            <label>RAG-Only Output (comparison)</label>
+            <div class="note" id="out_modeA_rag_status"></div>
+            <div class="pre" id="out_modeA_rag">Waiting...</div>
+          </div>
+          <div class="field">
+            <label>Base LLM Output (no evidence)</label>
+            <div class="pre" id="out_base_llm">Waiting...</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>Mode B Output</label>
+            <div class="note" id="out_modeB_status"></div>
+            <div class="pre" id="out_modeB">Waiting...</div>
+          </div>
+          <div class="field">
+            <label>Route Output</label>
+            <div class="note" id="out_route_status"></div>
+            <div class="pre" id="out_route">Waiting...</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>Debug Log</label>
+            <div class="pre" id="out_debug_log">Waiting...</div>
+          </div>
+        </div>
       </div>
 
-      <div class="field">
-        <label>CLI Command</label>
-        <div class="pre" id="out_cli">Waiting...</div>
-      </div>
-
-      <div class="field">
-        <label>Mode A Output (RAG + KV Injection)</label>
-        <div class="note" id="out_modeA_status"></div>
-        <div class="pre" id="out_modeA">Waiting...</div>
-      </div>
-      <div class="field" id="field_modeA_rag" style="display:none">
-        <label>RAG-Only Output (Text Anchor, No KV)</label>
-        <div class="note" id="out_modeA_rag_status"></div>
-        <div class="pre" id="out_modeA_rag">Waiting...</div>
-      </div>
-      <div class="field">
-        <label>Base LLM Output (No Evidence)</label>
-        <div class="pre" id="out_base_llm">Waiting...</div>
-      </div>
-      <div class="field">
-        <label>Mode B Output</label>
-        <div class="note" id="out_modeB_status"></div>
-        <div class="pre" id="out_modeB">Waiting...</div>
-      </div>
-      <div class="field">
-        <label>Route Output</label>
-        <div class="note" id="out_route_status"></div>
-        <div class="pre" id="out_route">Waiting...</div>
-      </div>
-      <div class="field">
-        <label>Debug Log</label>
-        <div class="pre" id="out_debug_log">Waiting...</div>
-      </div>
-    </div>
-  </div>
+    </div><!-- end .main -->
+  </div><!-- end .app -->
 
   <script src="/static/app.js"></script>
 </body>

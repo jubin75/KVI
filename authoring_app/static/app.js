@@ -29,6 +29,9 @@ function setTab(active) {
     $(t.id).classList.toggle("active", t.key === active);
     $(t.view).style.display = (t.key === active) ? "block" : "none";
   }
+  // Show/hide sidebar debug params
+  const dp = $("sidebar_debug_params");
+  if (dp) dp.style.display = (active === "debug") ? "block" : "none";
 }
 
 function pretty(obj) {
@@ -57,8 +60,7 @@ async function createTopicFromUi() {
 
 async function deleteTopicFromUi() {
   if (!selectedTopic) throw new Error("No topic selected.");
-  const ok = window.confirm(`Delete topic "${selectedTopic}"? This cannot be undone.`);
-  if (!ok) return;
+  if (!window.confirm(`Delete "${selectedTopic}"?`)) return;
   await apiPost("/api/kvi/topics/delete", { topic: selectedTopic });
   await loadTopics();
 }
@@ -66,8 +68,7 @@ async function deleteTopicFromUi() {
 async function loadTopics() {
   const resp = await apiGet("/api/kvi/topics");
   topics = resp.items || [];
-  const sels = ["topic_select", "topic_select_docs", "topic_select_debug"];
-  for (const sid of sels) {
+  for (const sid of ["topic_select", "topic_select_docs", "topic_select_debug"]) {
     const sel = $(sid);
     sel.innerHTML = "";
     for (const t of topics) {
@@ -84,12 +85,15 @@ async function loadTopics() {
   await onTopicChange(selectedTopic);
 }
 
-function topicByName(name) {
-  return (topics || []).find(x => x.topic === name) || null;
-}
+function topicByName(name) { return (topics || []).find(x => x.topic === name) || null; }
 
 async function onTopicChange(topic) {
   selectedTopic = topic;
+  // Sync all selectors
+  for (const sid of ["topic_select", "topic_select_docs", "topic_select_debug"]) {
+    const el = $(sid);
+    if (el) el.value = topic;
+  }
   const t = topicByName(topic);
   $("topic_goal").textContent = t && t.goal ? String(t.goal) : "";
   await loadEvidenceSets();
@@ -97,8 +101,7 @@ async function onTopicChange(topic) {
 
 function parseJsonl(text) {
   const out = [];
-  const lines = String(text || "").split(/\r?\n/);
-  for (const ln of lines) {
+  for (const ln of String(text || "").split(/\r?\n/)) {
     const s = ln.trim();
     if (!s) continue;
     try { out.push(JSON.parse(s)); } catch {}
@@ -107,9 +110,7 @@ function parseJsonl(text) {
 }
 
 function toJsonl(records) {
-  return (records || []).map(r => {
-    try { return JSON.stringify(r); } catch { return ""; }
-  }).filter(x => x).join("\n") + "\n";
+  return (records || []).map(r => { try { return JSON.stringify(r); } catch { return ""; } }).filter(x => x).join("\n") + "\n";
 }
 
 async function compileSimple() {
@@ -120,8 +121,7 @@ async function compileSimple() {
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
     use_llm_intent: useLlmIntent,
   });
-  const ok = !!resp.ok;
-  $("compile_log").textContent = (ok ? "OK\n\n" : "FAILED\n\n") + pretty(resp);
+  $("compile_log").textContent = (resp.ok ? "OK\n\n" : "FAILED\n\n") + pretty(resp);
 }
 
 async function loadEvidenceSets() {
@@ -142,9 +142,9 @@ async function loadEvidenceSets() {
     await loadEvidenceSet(evidenceSets[0].name);
   } else {
     currentSet = null;
-    $("set_stats").textContent = "No evidence sets. Create one first.";
+    $("set_stats").textContent = "No evidence sets.";
     $("set_raw").value = "";
-    $("doc_group_view").textContent = "Not loaded";
+    $("doc_group_view").textContent = "";
   }
 }
 
@@ -153,13 +153,13 @@ async function loadEvidenceSet(name) {
   currentSet = resp;
   $("set_select").value = name;
   $("set_enabled").value = resp.enabled ? "true" : "false";
-  $("set_stats").textContent = `Current: ${name}  records=${resp.count || 0}  enabled=${resp.enabled}`;
+  $("set_stats").textContent = `${name}  |  records: ${resp.count || 0}  |  enabled: ${resp.enabled}`;
   $("set_raw").value = toJsonl(resp.records || []);
   $("doc_group_view").textContent = pretty(resp.by_source || {});
 }
 
 async function saveCurrentSet() {
-  if (!currentSet) throw new Error("No evidence set selected.");
+  if (!currentSet) throw new Error("No set selected.");
   const name = currentSet.name;
   const enabled = ($("set_enabled").value || "true") === "true";
   const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
@@ -169,7 +169,7 @@ async function saveCurrentSet() {
     max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
   });
   const ss = resp.split_stats || null;
-  $("set_stats").textContent = `Saved: ${resp.name}  count=${resp.count}  enabled=${resp.enabled}` + (ss ? `  split=${ss.split_records||0}->${ss.generated_records||0}  truncated=${ss.truncated_records||0}` : "");
+  $("set_stats").textContent = `Saved: ${resp.name}  |  count: ${resp.count}  |  enabled: ${resp.enabled}` + (ss ? `  |  split: ${ss.split_records||0}->${ss.generated_records||0}` : "");
   await loadEvidenceSets();
   await loadEvidenceSet(name);
 }
@@ -184,7 +184,7 @@ function buildNewSentenceRecords() {
   const raw = ($("sent_claim").value || "");
   const parts = raw.includes("###") ? raw.split("###") : [raw];
   const claims = parts.map(x => String(x || "").trim()).filter(x => x);
-  if (claims.length === 0) throw new Error("Claim is required.");
+  if (!claims.length) throw new Error("Claim required.");
   const sourceId = ($("sent_source_id").value || "").trim() || null;
   const doi = ($("sent_doi").value || "").trim() || null;
   const title = ($("sent_title").value || "").trim() || null;
@@ -192,14 +192,11 @@ function buildNewSentenceRecords() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const ts = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  return claims.map((claim) => ({
-    id: null, topic: selectedTopic, claim, source_id: sourceId,
-    source_ref: { doi, title }, created_at: ts, updated_at: ts, author, tags: [],
-  }));
+  return claims.map(claim => ({ id: null, topic: selectedTopic, claim, source_id: sourceId, source_ref: { doi, title }, created_at: ts, updated_at: ts, author, tags: [] }));
 }
 
 async function addSentenceToSet() {
-  if (!currentSet) throw new Error("No evidence set selected.");
+  if (!currentSet) throw new Error("No set selected.");
   const recs = buildNewSentenceRecords();
   const records = parseJsonl($("set_raw").value || "");
   for (const r of recs) records.push(r);
@@ -217,47 +214,20 @@ async function loadDocsList() {
   $("docs_list_view").style.display = "block";
   $("doc_detail_view").style.display = "none";
   for (const d of resp.items || []) {
-    const card = document.createElement("div");
-    card.className = "card";
-    const top = document.createElement("div");
-    top.className = "top";
-    const left = document.createElement("div");
-    left.className = "mono";
-    left.textContent = d.pdf_name || d.doc_id;
-    const badge = document.createElement("span");
-    badge.className = "badge " + (d.approved ? "ok" : "warn");
-    badge.textContent = d.approved ? "approved" : "pending";
-    top.appendChild(left);
-    top.appendChild(badge);
-    const meta = document.createElement("div");
-    meta.className = "note";
-    meta.textContent = `doc_id=${d.doc_id}  year=${d.publication_year || ""}  doi=${d.doi || ""}`;
-    const btns = document.createElement("div");
-    btns.className = "btns";
-    const toggle = document.createElement("button");
-    toggle.className = d.approved ? "bad" : "ok";
-    toggle.textContent = d.approved ? "Revoke" : "Approve";
-    toggle.onclick = async (ev) => {
-      ev.stopPropagation();
-      await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(d.doc_id)}/set_approved`, { approved: !d.approved });
-      await loadDocsList();
-    };
+    const card = document.createElement("div"); card.className = "card";
+    const top = document.createElement("div"); top.className = "top";
+    const left = document.createElement("div"); left.className = "mono"; left.textContent = d.pdf_name || d.doc_id;
+    const badge = document.createElement("span"); badge.className = "badge " + (d.approved ? "ok" : "warn"); badge.textContent = d.approved ? "approved" : "pending";
+    top.appendChild(left); top.appendChild(badge);
+    const meta = document.createElement("div"); meta.className = "note"; meta.textContent = `doc_id=${d.doc_id}  year=${d.publication_year || ""}  doi=${d.doi || ""}`;
+    const btns = document.createElement("div"); btns.className = "btns";
+    const toggle = document.createElement("button"); toggle.className = d.approved ? "bad" : "ok"; toggle.textContent = d.approved ? "Revoke" : "Approve";
+    toggle.onclick = async (ev) => { ev.stopPropagation(); await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(d.doc_id)}/set_approved`, { approved: !d.approved }); await loadDocsList(); };
     btns.appendChild(toggle);
-    const open = document.createElement("button");
-    open.className = "primary";
-    open.textContent = "Open";
-    open.onclick = async (ev) => {
-      ev.stopPropagation();
-      selectedDoc = d;
-      $("docs_list_view").style.display = "none";
-      $("doc_detail_view").style.display = "block";
-      await loadDocBlocks(d.doc_id);
-    };
+    const open = document.createElement("button"); open.className = "primary"; open.textContent = "Open";
+    open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocBlocks(d.doc_id); };
     btns.appendChild(open);
-    card.appendChild(top);
-    card.appendChild(meta);
-    card.appendChild(btns);
-    el.appendChild(card);
+    card.appendChild(top); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
   }
 }
 
@@ -265,19 +235,16 @@ async function loadDocBlocks(docId) {
   const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/blocks`);
   const lines = [`doc_id=${docId}`, `blocks=${resp.count}`, ""];
   let idx = 0;
-  for (const b of resp.items || []) {
-    idx += 1;
-    lines.push(`[${String(idx).padStart(3,"0")}] (${b.block_type}) ${b.claim}`);
-  }
+  for (const b of resp.items || []) { idx++; lines.push(`[${String(idx).padStart(3,"0")}] (${b.block_type}) ${b.claim}`); }
   $("doc_detail").textContent = lines.join("\n");
   $("btn_import_doc_blocks").disabled = !(selectedDoc && selectedDoc.approved);
 }
 
 async function importDocBlocks() {
-  if (!selectedDoc) throw new Error("Select a doc first.");
-  if (!selectedDoc.approved) throw new Error("Doc not approved.");
+  if (!selectedDoc) throw new Error("Select a doc.");
+  if (!selectedDoc.approved) throw new Error("Not approved.");
   const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/import_to_evidence`, {});
-  $("doc_detail").textContent = $("doc_detail").textContent + `\n\n---\nImported to evidence set=${resp.evidence_set}: appended=${resp.appended}`;
+  $("doc_detail").textContent += `\n\n---\nImported: set=${resp.evidence_set} appended=${resp.appended}`;
   await loadEvidenceSets();
 }
 
@@ -285,7 +252,7 @@ async function importDocBlocks() {
 
 async function runDebug() {
   const prompt = ($("debug_prompt").value || "").trim();
-  if (!prompt) throw new Error("Prompt is required.");
+  if (!prompt) throw new Error("Prompt required.");
   const topK = Number(($("debug_top_k").value || "2").trim());
   const mode = ($("debug_mode").value || "modeA").trim();
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
@@ -293,17 +260,12 @@ async function runDebug() {
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
-  const routeLlmIntent = (mode === "modeA") && modeAUseLlmIntent;
 
-  // Show/hide RAG comparison field
   const ragField = $("field_modeA_rag");
   if (ragField) ragField.style.display = (mode === "modeA") ? "block" : "none";
 
-  // Reset all outputs
-  const fields = ["out_cli","out_modeA","out_modeA_rag","out_modeB","out_route","out_debug_log","out_base_llm"];
-  for (const f of fields) { const el = $(f); if (el) el.textContent = "Running..."; }
-  const statuses = ["out_modeA_status","out_modeA_rag_status","out_modeB_status","out_route_status"];
-  for (const s of statuses) { const el = $(s); if (el) el.textContent = ""; }
+  for (const f of ["out_cli","out_modeA","out_modeA_rag","out_modeB","out_route","out_debug_log","out_base_llm"]) { const el = $(f); if (el) el.textContent = "Running..."; }
+  for (const s of ["out_modeA_status","out_modeA_rag_status","out_modeB_status","out_route_status"]) { const el = $(s); if (el) el.textContent = ""; }
 
   const params = {
     prompt,
@@ -312,64 +274,47 @@ async function runDebug() {
     route_w_intent: Number.isFinite(wIntent) ? wIntent : 0.6,
     route_w_quality: Number.isFinite(wQuality) ? wQuality : 0.2,
     route_rerank_without_ann: rerankNoAnn,
-    route_llm_intent_enable: (mode === "modeA") ? modeAUseLlmIntent : routeLlmIntent,
+    route_llm_intent_enable: modeAUseLlmIntent,
   };
 
-  let resp = null;
-  let respRag = null;
+  let resp = null, respRag = null;
 
   if (mode === "modeB") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, params);
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
   } else {
-    // Mode A: main call (RAG anchor + KV injection)
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, params);
-    // Also fetch RAG-only for comparison
     respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, params);
   }
 
   const r = resp && resp.result ? resp.result : {};
   $("out_cli").textContent = (resp && resp.cmd) ? resp.cmd : "(no cmd)";
 
-  // Debug log
   try {
     const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
-    const fullRoute = routeResp.result || {};
-    const debugObj = { route: fullRoute };
+    const debugObj = { route: routeResp.result || {} };
     if (mode === "modeA") {
       if (r.routing_debug) debugObj.modeA_routing_debug = r.routing_debug;
       if (r.injection_debug) debugObj.modeA_injection_debug = r.injection_debug;
-      if (respRag && respRag.result && respRag.result.routing_debug) {
-        debugObj.rag_routing_debug = respRag.result.routing_debug;
-      }
+      if (respRag && respRag.result && respRag.result.routing_debug) debugObj.rag_routing_debug = respRag.result.routing_debug;
     }
     $("out_debug_log").textContent = pretty(debugObj);
-  } catch (e) {
-    $("out_debug_log").textContent = String(e && e.message ? e.message : e);
-  }
+  } catch (e) { $("out_debug_log").textContent = String(e && e.message ? e.message : e); }
 
-  // Populate outputs
   if (mode === "modeB") {
     $("out_modeB").textContent = pretty(r);
     $("out_modeB_status").textContent = r.mode ? `mode: ${r.mode}` : "";
-    $("out_modeA").textContent = "";
-    $("out_modeA_rag").textContent = "";
-    $("out_route").textContent = "";
-    $("out_base_llm").textContent = "";
+    $("out_modeA").textContent = ""; $("out_modeA_rag").textContent = ""; $("out_route").textContent = ""; $("out_base_llm").textContent = "";
   } else if (mode === "route") {
     $("out_route").textContent = pretty(r);
     $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
-    $("out_modeA").textContent = "";
-    $("out_modeA_rag").textContent = "";
-    $("out_modeB").textContent = "";
-    $("out_base_llm").textContent = "";
+    $("out_modeA").textContent = ""; $("out_modeA_rag").textContent = ""; $("out_modeB").textContent = ""; $("out_base_llm").textContent = "";
   } else {
     $("out_modeA").textContent = r.diagnosis_result || "";
     $("out_modeA_status").textContent = "status: OK";
     $("out_base_llm").textContent = r.base_llm_result || "";
-    $("out_modeB").textContent = "";
-    $("out_route").textContent = "";
+    $("out_modeB").textContent = ""; $("out_route").textContent = "";
     const rr = respRag && respRag.result ? respRag.result : {};
     $("out_modeA_rag").textContent = rr.diagnosis_result || "";
     $("out_modeA_rag_status").textContent = "status: OK";
@@ -383,20 +328,9 @@ function wire() {
   $("tab_docs").onclick = () => setTab("docs");
   $("tab_debug").onclick = () => setTab("debug");
 
-  $("topic_select").onchange = async (e) => { await onTopicChange(e.target.value); };
-  $("topic_select_docs").onchange = async (e) => {
-    const v = e.target.value;
-    $("topic_select").value = v;
-    $("topic_select_debug").value = v;
-    await onTopicChange(v);
-    await loadDocsList();
-  };
-  $("topic_select_debug").onchange = async (e) => {
-    const v = e.target.value;
-    $("topic_select").value = v;
-    $("topic_select_docs").value = v;
-    await onTopicChange(v);
-  };
+  $("topic_select").onchange = async (e) => await onTopicChange(e.target.value);
+  $("topic_select_docs").onchange = async (e) => { await onTopicChange(e.target.value); await loadDocsList(); };
+  $("topic_select_debug").onchange = async (e) => await onTopicChange(e.target.value);
 
   $("btn_compile").onclick = () => compileSimple().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
@@ -408,25 +342,12 @@ function wire() {
   $("btn_add_sentence").onclick = () => addSentenceToSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_load_docs_topic").onclick = () => loadDocsList().catch(err => { $("doc_detail").textContent = String(err.message || err); });
   $("btn_import_doc_blocks").onclick = () => importDocBlocks().catch(err => { $("doc_detail").textContent = String(err.message || err); });
-  $("btn_back_to_docs").onclick = () => {
-    selectedDoc = null;
-    $("docs_list_view").style.display = "block";
-    $("doc_detail_view").style.display = "none";
-  };
-  $("btn_run_debug").onclick = () => runDebug().catch(err => {
-    const el = $("out_debug_log");
-    if (el) el.textContent = String(err.message || err);
-  });
+  $("btn_back_to_docs").onclick = () => { selectedDoc = null; $("docs_list_view").style.display = "block"; $("doc_detail_view").style.display = "none"; };
+  $("btn_run_debug").onclick = () => runDebug().catch(err => { const el = $("out_debug_log"); if (el) el.textContent = String(err.message || err); });
 
-  // Top-K slider sync
-  const slider = $("debug_topk_slider");
-  const show = $("debug_topk_n");
-  const topKInput = $("debug_top_k");
+  const slider = $("debug_topk_slider"), show = $("debug_topk_n"), topKInput = $("debug_top_k");
   if (slider && show) {
-    const sync = () => {
-      show.textContent = String(slider.value || "2");
-      if (topKInput) topKInput.value = String(slider.value || "2");
-    };
+    const sync = () => { show.textContent = String(slider.value || "2"); if (topKInput) topKInput.value = String(slider.value || "2"); };
     slider.addEventListener("input", sync);
     sync();
   }
