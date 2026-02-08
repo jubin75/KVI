@@ -112,6 +112,8 @@ class TripleKVItem:
     layer_start: int
     layer_end: int
     token_count: int = 0    # filled after tokenization
+    graph_triple_id: str = ""  # original triple_id from graph (for walk-based filtering)
+    object_name: str = ""      # object entity name (for debug display)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -127,6 +129,8 @@ class TripleKVItem:
             layer_start=int(d.get("layer_start") or 0),
             layer_end=int(d.get("layer_end") or 0),
             token_count=int(d.get("token_count") or 0),
+            graph_triple_id=str(d.get("graph_triple_id") or ""),
+            object_name=str(d.get("object_name") or ""),
         )
 
 
@@ -137,6 +141,8 @@ class TripleKVManifest:
     entity_items: Dict[str, List[str]] = field(default_factory=dict)
     # item_id → TripleKVItem metadata
     items: Dict[str, TripleKVItem] = field(default_factory=dict)
+    # graph_triple_id → item_id (for walk-based filtering)
+    triple_id_index: Dict[str, str] = field(default_factory=dict)
     # model info
     model_name: str = ""
     num_layers: int = 0
@@ -147,15 +153,23 @@ class TripleKVManifest:
             "num_layers": self.num_layers,
             "entity_items": self.entity_items,
             "items": {k: v.to_dict() for k, v in self.items.items()},
+            "triple_id_index": self.triple_id_index,
         }
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TripleKVManifest":
         items_raw = d.get("items") or {}
         items = {k: TripleKVItem.from_dict(v) for k, v in items_raw.items()}
+        # Rebuild triple_id_index from items if not in data
+        triple_id_index = dict(d.get("triple_id_index") or {})
+        if not triple_id_index:
+            for item_id, item in items.items():
+                if item.graph_triple_id:
+                    triple_id_index[item.graph_triple_id] = item_id
         return cls(
             entity_items=dict(d.get("entity_items") or {}),
             items=items,
+            triple_id_index=triple_id_index,
             model_name=str(d.get("model_name") or ""),
             num_layers=int(d.get("num_layers") or 0),
         )
@@ -339,9 +353,13 @@ def compile_triple_kvbank(
 
         # 2. Triple KVs (where this entity is subject)
         triple_idx = 0
+        seen_triple_ids: set = set()
         for rel_type, edges in node.outgoing.items():
             for edge in edges:
                 tid = edge.get("triple_id", "")
+                if not tid or tid in seen_triple_ids:
+                    continue
+                seen_triple_ids.add(tid)
                 triple = graph.triples.get(tid)
                 if not triple:
                     continue
@@ -363,12 +381,15 @@ def compile_triple_kvbank(
                         layer_start=layer_range[0],
                         layer_end=layer_range[1],
                         token_count=tok_count,
+                        graph_triple_id=tid,
+                        object_name=triple.object,
                     )
                     manifest.items[triple_item_id] = item
+                    manifest.triple_id_index[tid] = triple_item_id
                     item_ids_for_entity.append(triple_item_id)
                     print(
                         f"[triple_kv]   triple: {triple_text} ({tok_count} tokens, "
-                        f"layers {layer_range[0]}-{layer_range[1]})",
+                        f"layers {layer_range[0]}-{layer_range[1]}, tid={tid})",
                         file=sys.stderr,
                     )
                 triple_idx += 1
@@ -417,23 +438,26 @@ def load_triple_kvbank(kvbank_dir: Path) -> Tuple[TripleKVManifest, Dict[str, An
 def assemble_kv_for_entities(
     *,
     matched_entity_names: List[str],
-    related_triples: Optional[List[Dict[str, Any]]] = None,
+    walk_triple_ids: Optional[List[str]] = None,
     manifest: TripleKVManifest,
     kv_cache_dict: Dict[str, Any],
     device: Any = None,
     dtype: Any = None,
-) -> Optional[Tuple[Any, ...]]:
+) -> Optional[Tuple[Any, List[str]]]:
     """
     Assemble per-layer KV prefix from matched entities' KV items.
 
     For each matched entity:
-    - Include its subject anchor (always, if exists)
-    - Include triple KVs that match related_triples (if provided)
-      or all triples (if related_triples is None)
+    - **Always** include its subject anchor (if exists)
+    - **Only** include triple KVs whose ``graph_triple_id`` is in
+      ``walk_triple_ids`` (i.e., triples the graph walk actually returned).
+      If ``walk_triple_ids`` is None, include all triples (fallback).
 
     Returns:
-        past_key_values compatible with HuggingFace generate():
-        tuple of (key, value) per layer, or None if no KV to inject.
+        (past_key_values, selected_item_ids):
+        - past_key_values: tuple of (key, value) per layer, HF-compatible
+        - selected_item_ids: list of item_ids that were actually assembled
+        Returns (None, []) if no KV to inject.
 
     Implementation:
         For layers within an item's [layer_start, layer_end] range,
@@ -444,7 +468,16 @@ def assemble_kv_for_entities(
 
     num_layers = manifest.num_layers
     if num_layers <= 0:
-        return None
+        return None, []
+
+    # Build set of allowed item_ids from walk triple_ids
+    allowed_triple_item_ids: Optional[set] = None
+    if walk_triple_ids is not None:
+        allowed_triple_item_ids = set()
+        for tid in walk_triple_ids:
+            iid = manifest.triple_id_index.get(tid)
+            if iid:
+                allowed_triple_item_ids.add(iid)
 
     # Collect relevant item_ids
     relevant_items: List[str] = []
@@ -455,19 +488,19 @@ def assemble_kv_for_entities(
             if not meta:
                 continue
             if meta.item_type == "subject_anchor":
+                # Subject anchors are always included
                 relevant_items.append(iid)
             elif meta.item_type == "triple":
-                # If related_triples filter is provided, check relation match
-                if related_triples is not None:
-                    # Include if any related triple has matching relation
-                    rel_types = {str(rt.get("relation", "")) for rt in related_triples}
-                    if meta.relation in rel_types or not rel_types:
+                if allowed_triple_item_ids is not None:
+                    # Precise filtering: only include triples from the walk
+                    if iid in allowed_triple_item_ids:
                         relevant_items.append(iid)
                 else:
+                    # Fallback: include all triples (no walk info)
                     relevant_items.append(iid)
 
     if not relevant_items:
-        return None
+        return None, []
 
     # Build per-layer KV lists
     per_layer_keys: List[List[Any]] = [[] for _ in range(num_layers)]
@@ -506,7 +539,7 @@ def assemble_kv_for_entities(
             result.append(None)
 
     if not has_any:
-        return None
+        return None, []
 
     # For layers with None (no KV), we need to either:
     # (a) create zero-length KV, or (b) pad to match max seq_len.
@@ -522,7 +555,7 @@ def assemble_kv_for_entities(
             ref_shape = k_shape
 
     if ref_shape is None or max_seq == 0:
-        return None
+        return None, []
 
     batch, heads, _, head_dim = ref_shape
     padded_result = []
@@ -553,7 +586,7 @@ def assemble_kv_for_entities(
                                  device=target_device, dtype=target_dtype)
             padded_result.append((zero_k, zero_v))
 
-    return tuple(padded_result)
+    return tuple(padded_result), relevant_items
 
 
 # ---------------------------------------------------------------------------

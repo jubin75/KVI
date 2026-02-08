@@ -125,6 +125,8 @@ class GraphRetrievalResult:
     evidence_sentences: List[Dict[str, Any]] = field(default_factory=list)
     # Entity context sentence (for prompt-level subject anchoring)
     entity_context: str = ""
+    # All triple_ids from graph walk (for KV injection filtering)
+    walk_triple_ids: List[str] = field(default_factory=list)
     # Debug information
     debug: Dict[str, Any] = field(default_factory=dict)
 
@@ -193,6 +195,7 @@ class GraphRetriever:
                 matched_entities=[],
                 evidence_sentences=[],
                 entity_context="",
+                walk_triple_ids=[],
                 debug=debug,
             )
 
@@ -238,6 +241,15 @@ class GraphRetriever:
 
         debug["walk_results_count"] = len(walk_results)
 
+        # 3b. Collect all triple_ids from walk (for KV injection filtering)
+        walk_triple_ids: List[str] = []
+        seen_tids: set = set()
+        for wr in walk_results:
+            tid = wr.get("triple_id", "")
+            if tid and tid not in seen_tids:
+                seen_tids.add(tid)
+                walk_triple_ids.append(tid)
+
         # 4. Collect provenance sentences from triples
         seen_sentences: set = set()
         evidence: List[Dict[str, Any]] = []
@@ -275,6 +287,7 @@ class GraphRetriever:
             matched_entities=matches,
             evidence_sentences=evidence,
             entity_context=entity_context,
+            walk_triple_ids=walk_triple_ids,
             debug=debug,
         )
 

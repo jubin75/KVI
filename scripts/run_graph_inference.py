@@ -262,40 +262,38 @@ def main() -> None:
     assembled_kv = None
     if triple_kv_manifest and triple_kv_cache_dict:
         matched_names = [m["entity_name"] for m in gr.matched_entities]
-        # Get related triples from walk results for relation filtering
-        walk_results_for_kv = []
-        for ev in gr.evidence_sentences:
-            if ev.get("relation"):
-                walk_results_for_kv.append({"relation": ev["relation"]})
+        # Use walk_triple_ids from graph retrieval for precise KV filtering
+        walk_triple_ids = gr.walk_triple_ids
 
         try:
-            assembled_kv = assemble_kv_for_entities(
+            assembled_kv, selected_item_ids = assemble_kv_for_entities(
                 matched_entity_names=matched_names,
-                related_triples=walk_results_for_kv if walk_results_for_kv else None,
+                walk_triple_ids=walk_triple_ids if walk_triple_ids else None,
                 manifest=triple_kv_manifest,
                 kv_cache_dict=triple_kv_cache_dict,
                 device=device,
                 dtype=dtype,
             )
             if assembled_kv is not None:
-                # Count active KV items
+                # Build debug from ACTUALLY selected items only
                 active_items = []
-                for ename in matched_names:
-                    for iid in triple_kv_manifest.entity_items.get(ename, []):
-                        meta = triple_kv_manifest.items.get(iid)
-                        if meta:
-                            active_items.append({
-                                "item_id": iid,
-                                "type": meta.item_type,
-                                "text": meta.text,
-                                "relation": meta.relation,
-                                "layers": f"{meta.layer_start}-{meta.layer_end}",
-                                "tokens": meta.token_count,
-                            })
+                for iid in selected_item_ids:
+                    meta = triple_kv_manifest.items.get(iid)
+                    if meta:
+                        active_items.append({
+                            "item_id": iid,
+                            "type": meta.item_type,
+                            "text": meta.text,
+                            "relation": meta.relation,
+                            "object": meta.object_name,
+                            "layers": f"{meta.layer_start}-{meta.layer_end}",
+                            "tokens": meta.token_count,
+                        })
                 kv_injection_debug["active_items"] = active_items
                 kv_injection_debug["total_kv_tokens"] = sum(
                     it.get("tokens", 0) for it in active_items
                 )
+                kv_injection_debug["walk_triple_ids"] = walk_triple_ids
                 kv_seq_len = assembled_kv[0][0].shape[2] if assembled_kv[0] is not None else 0
                 kv_injection_debug["assembled_seq_len"] = int(kv_seq_len)
                 print(
@@ -306,6 +304,7 @@ def main() -> None:
             else:
                 kv_injection_debug["assembled"] = False
                 kv_injection_debug["reason"] = "no_matching_items"
+                kv_injection_debug["walk_triple_ids"] = walk_triple_ids
         except Exception as e:
             print(f"[graphC] WARNING: KV assembly failed: {e}", file=sys.stderr)
             kv_injection_debug["assembly_error"] = str(e)
