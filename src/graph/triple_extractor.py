@@ -44,14 +44,14 @@ _EXTRACTION_SYSTEM = """\
 返回一个 JSON 数组，每个元素是一个三元组对象：
 ```json
 [
-  {
+  {{
     "subject": "主语实体（如：SFTSV）",
     "subject_type": "实体类型",
     "predicate": "关系类型",
     "object": "宾语实体（如：发热）",
     "object_type": "实体类型",
     "confidence": 0.95
-  }
+  }}
 ]
 ```
 
