@@ -912,6 +912,73 @@ def _select_kv_items_by_ids(*, bank: Any, ids: Sequence[str]) -> List[Any]:
     return [by_id[x] for x in target if x in by_id]
 
 
+# ---- Intent-based entity priming filter ----
+
+def _filter_priming_by_intent(
+    priming_items: List[Any],
+    query_intent: str,
+    query_text: str = "",
+    evidence_texts: Sequence[str] = (),
+) -> Tuple[List[Any], List[Dict[str, Any]]]:
+    """
+    Filter entity priming items by query-intent relevance.
+
+    Selection rules (priority order):
+    1. If item meta has ``intent_tags`` list → inject only when *query_intent*
+       matches one of the tags (or ``"*"`` present).
+    2. If block_id contains ``_name`` → always inject (core entity identity).
+    3. Otherwise check whether the entity keyword extracted from block_id
+       appears anywhere in *query_text* or *evidence_texts*; skip if absent.
+
+    Returns (kept_items, filter_log).
+    """
+    if not priming_items:
+        return [], []
+
+    intent = str(query_intent or "").strip().lower()
+    query_lower = str(query_text or "").lower()
+    ev_combined = " ".join([str(t or "").lower() for t in (evidence_texts or [])])
+
+    kept: List[Any] = []
+    flog: List[Dict[str, Any]] = []
+
+    for it in priming_items:
+        meta = getattr(it, "meta", None) or {}
+        bid = str(meta.get("block_id") or meta.get("id") or "")
+
+        # Rule 1 – explicit intent_tags in metadata
+        tags_raw = meta.get("intent_tags")
+        if tags_raw is not None:
+            tags = [tags_raw] if isinstance(tags_raw, str) else list(tags_raw or [])
+            tag_set = {str(t).strip().lower() for t in tags}
+            if "*" in tag_set or intent in tag_set:
+                kept.append(it)
+                flog.append({"block_id": bid, "action": "keep", "reason": "intent_tag_match"})
+            else:
+                flog.append({"block_id": bid, "action": "skip",
+                             "reason": f"intent_tag_mismatch: tags={sorted(tag_set)} intent={intent}"})
+            continue
+
+        # Rule 2 – entity name items are always injected
+        bid_lower = bid.lower()
+        if "_name" in bid_lower or bid_lower.endswith("_name"):
+            kept.append(it)
+            flog.append({"block_id": bid, "action": "keep", "reason": "name_item_always"})
+            continue
+
+        # Rule 3 – entity keyword must appear in query or evidence
+        entity_kw = bid_lower.replace("ep_", "").replace("_", " ").strip()
+        if entity_kw and (entity_kw in query_lower or entity_kw in ev_combined):
+            kept.append(it)
+            flog.append({"block_id": bid, "action": "keep", "reason": f"entity_in_context: '{entity_kw}'"})
+            continue
+
+        flog.append({"block_id": bid, "action": "skip",
+                     "reason": f"entity_not_in_context: '{entity_kw}'"})
+
+    return kept, flog
+
+
 # ---- Post-generation evidence grounding filter ----
 
 def _char_shingles(text: str, k: int = 3) -> set:
@@ -925,16 +992,26 @@ def _char_shingles(text: str, k: int = 3) -> set:
 def _shingle_overlap(sent: str, evidence_texts: Sequence[str], k: int = 3) -> float:
     """Best shingle overlap between *sent* and any evidence sentence.
 
-    Uses **containment** (intersection / len(query_shingles)) for short
-    sentences (< 15 chars after whitespace removal) so that fragments like
-    "急性发热" that are literal substrings of the evidence are not penalised
-    by the large union denominator of Jaccard.  For longer sentences the
-    standard Jaccard measure is used.
+    Scoring strategy (designed for Chinese medical QA):
+    - **Short sentences** (< 20 chars after whitespace removal):
+      containment = intersection / len(sent_shingles).
+    - **Long sentences**:
+      max(Jaccard, evidence_containment * 0.6).
+      Evidence containment = intersection / len(ev_shingles) — measures what
+      fraction of the *evidence* is reproduced in the sentence.  This prevents
+      penalising long sentences that faithfully include evidence content but
+      also contain additional (possibly grounded) material.
+    - **Clause-level fallback** for very long sentences (> 30 chars):
+      If whole-sentence score is below 0.15, split at Chinese commas and check
+      each clause independently.  If any clause has containment >= 0.3 against
+      any evidence, boost the score.  This handles sentences that merge multiple
+      evidence fragments or mix grounded + parametric content.
     """
     s_shingles = _char_shingles(sent, k)
     if not s_shingles:
         return 0.0
-    short = len(re.sub(r"\s+", "", sent)) < 20  # use containment for short (< ~7 CJK chars)
+    sent_clean_len = len(re.sub(r"\s+", "", sent))
+    short = sent_clean_len < 20
     best = 0.0
     for ev in evidence_texts:
         ev_shingles = _char_shingles(ev, k)
@@ -942,12 +1019,35 @@ def _shingle_overlap(sent: str, evidence_texts: Sequence[str], k: int = 3) -> fl
             continue
         inter = len(s_shingles & ev_shingles)
         if short:
-            # containment: what fraction of *sent*'s shingles appear in evidence?
             score = inter / len(s_shingles) if s_shingles else 0.0
         else:
             union = len(s_shingles | ev_shingles)
-            score = inter / union if union > 0 else 0.0
+            jaccard = inter / union if union > 0 else 0.0
+            # Evidence containment: what fraction of the *evidence* is present
+            # in the sentence?  Discounted by 0.6 to avoid false positives when
+            # a sentence happens to contain a few common shingles.
+            ev_containment = inter / len(ev_shingles) if ev_shingles else 0.0
+            score = max(jaccard, ev_containment * 0.6)
         best = max(best, score)
+
+    # Clause-level fallback for long sentences
+    if sent_clean_len > 30 and best < 0.15:
+        clauses = re.split(r"[，,；;]", sent)
+        for clause in clauses:
+            clause = clause.strip()
+            if len(re.sub(r"\s+", "", clause)) < 6:
+                continue
+            c_shingles = _char_shingles(clause, k)
+            if not c_shingles:
+                continue
+            for ev in evidence_texts:
+                ev_shingles = _char_shingles(ev, k)
+                if not ev_shingles:
+                    continue
+                inter_c = len(c_shingles & ev_shingles)
+                c_containment = inter_c / len(c_shingles) if c_shingles else 0.0
+                if c_containment >= 0.3:
+                    best = max(best, c_containment * 0.8)
     return best
 
 
@@ -1554,6 +1654,22 @@ def main() -> None:
                     _tb.print_exc(file=sys.stderr)
                     priming_items = []
             injected_dbg["priming_items_loaded"] = len(priming_items)
+            # Intent-based priming filter: only inject items relevant to the query intent.
+            # Prevents e.g. drug priming from interfering with symptom queries.
+            _route_intent = ""
+            if isinstance(routing, dict):
+                _rd = routing.get("routing_debug") or {}
+                _route_intent = str(_rd.get("intent") or "") if isinstance(_rd, dict) else ""
+            if priming_items:
+                priming_items, _priming_filter_log = _filter_priming_by_intent(
+                    priming_items,
+                    query_intent=_route_intent,
+                    query_text=str(args.prompt),
+                    evidence_texts=(routing.get("evidence_texts") or []) if isinstance(routing, dict) else [],
+                )
+                injected_dbg["priming_intent_filter"] = _priming_filter_log
+                injected_dbg["priming_items_after_filter"] = len(priming_items)
+                print(f"[modeA] priming_items after intent filter: {len(priming_items)} (intent={_route_intent})", file=sys.stderr, flush=True)
             # Choose injection source: priming (complementary) or evidence (fallback)
             if priming_items:
                 inject_items = priming_items
@@ -1603,9 +1719,9 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=256,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
+                max_new_tokens=128,
+                no_repeat_ngram_size=6,
+                repetition_penalty=1.15,
             ).strip()
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
             raw_answer = MultiStepInjector._greedy_generate_with_past_prefix(
@@ -1659,9 +1775,9 @@ def main() -> None:
                 prompt=base_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=256,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
+                max_new_tokens=128,
+                no_repeat_ngram_size=6,
+                repetition_penalty=1.15,
             ).strip()
             modeA_prompt = KVI2Runtime._format_prompt(tok, modeA_prompt, use_chat_template=bool(args.use_chat_template))
             raw_answer = MultiStepInjector._greedy_generate_with_past_prefix(
@@ -1705,9 +1821,9 @@ def main() -> None:
             prompt=base_prompt,
             device=device,
             past_key_values=None,
-            max_new_tokens=192,
-            no_repeat_ngram_size=12,
-            repetition_penalty=1.08,
+            max_new_tokens=128,
+            no_repeat_ngram_size=6,
+            repetition_penalty=1.15,
         ).strip()
 
         # Load entity priming texts (for post-processing abbreviation approval).
@@ -1927,8 +2043,8 @@ def main() -> None:
                     device=device,
                     past_key_values=pkv,
                     max_new_tokens=int(step_new_tokens),
-                    no_repeat_ngram_size=12,
-                    repetition_penalty=1.08,
+                    no_repeat_ngram_size=6,
+                    repetition_penalty=1.15,
                 )
                 chunk = str(chunk or "").strip()
                 generated = (generated + ("\n" if (generated and chunk) else "") + chunk).strip()
