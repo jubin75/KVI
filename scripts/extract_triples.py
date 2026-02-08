@@ -30,13 +30,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Extract knowledge triples from sentences")
     p.add_argument("--sentences_jsonl", required=True, help="Input sentences JSONL file")
     p.add_argument("--out_triples", required=True, help="Output triples JSONL file")
-    p.add_argument("--model", required=True, help="HF model name or local path (base LLM)")
+    p.add_argument("--model", default="", help="HF model name or local path (base LLM, for local mode)")
     p.add_argument("--batch_size", type=int, default=3, help="Sentences per extraction batch")
     p.add_argument("--max_new_tokens", type=int, default=1024, help="Max tokens for extraction output")
     p.add_argument("--relation_types_json", default="", help="Custom relation types JSON file")
     p.add_argument("--entity_types_json", default="", help="Custom entity types JSON file")
     p.add_argument("--device", default="auto", help="Device (auto/cuda/cpu)")
     p.add_argument("--aliases_jsonl", default="", help="Entity aliases JSONL (canonical + aliases)")
+    # DeepSeek API mode
+    p.add_argument("--use_deepseek", action="store_true", help="Use DeepSeek API instead of local LLM")
+    p.add_argument("--deepseek_base_url", default="https://api.deepseek.com", help="DeepSeek API base URL")
+    p.add_argument("--deepseek_model", default="deepseek-chat", help="DeepSeek model name")
+    p.add_argument("--deepseek_api_key_env", default="DEEPSEEK_API_KEY", help="Env var for DeepSeek API key")
     args = p.parse_args()
 
     # Load sentences
@@ -63,24 +68,6 @@ def main() -> None:
         print("ERROR: no sentences to process", file=sys.stderr)
         sys.exit(1)
 
-    # Load model
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    if args.device == "auto":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(args.device)
-
-    print(f"Loading model: {args.model} → {device}", file=sys.stderr)
-    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        dtype=torch.float16 if device.type == "cuda" else torch.float32,
-        trust_remote_code=True,
-    )
-    model.to(device).eval()
-
     # Load optional configs
     from src.graph.schema import load_relation_types, load_entity_types
     rel_path = Path(args.relation_types_json) if args.relation_types_json else None
@@ -88,18 +75,55 @@ def main() -> None:
     rel_types = load_relation_types(rel_path)
     ent_types = load_entity_types(ent_path)
 
-    # Extract
     from src.graph.triple_extractor import TripleExtractor
 
-    extractor = TripleExtractor(
-        model=model,
-        tokenizer=tokenizer,
-        device=device,
-        relation_types=rel_types,
-        entity_types=ent_types,
-        max_new_tokens=args.max_new_tokens,
-        batch_size=args.batch_size,
-    )
+    if args.use_deepseek:
+        # ---- DeepSeek API mode (no GPU needed) ----
+        from src.llm_filter.deepseek_client import DeepSeekClient, DeepSeekClientConfig
+        print(f"Using DeepSeek API: model={args.deepseek_model} base_url={args.deepseek_base_url}", file=sys.stderr)
+        client = DeepSeekClient(DeepSeekClientConfig(
+            base_url=args.deepseek_base_url,
+            model=args.deepseek_model,
+            api_key_env=args.deepseek_api_key_env,
+            timeout_s=120,
+        ))
+        extractor = TripleExtractor(
+            deepseek_client=client,
+            relation_types=rel_types,
+            entity_types=ent_types,
+            batch_size=args.batch_size,
+        )
+    else:
+        # ---- Local LLM mode ----
+        if not args.model:
+            print("ERROR: --model is required when not using --use_deepseek", file=sys.stderr)
+            sys.exit(1)
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        if args.device == "auto":
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            device = torch.device(args.device)
+
+        print(f"Loading model: {args.model} → {device}", file=sys.stderr)
+        tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            trust_remote_code=True,
+        )
+        model.to(device).eval()
+
+        extractor = TripleExtractor(
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+            relation_types=rel_types,
+            entity_types=ent_types,
+            max_new_tokens=args.max_new_tokens,
+            batch_size=args.batch_size,
+        )
 
     print(f"Extracting triples (batch_size={args.batch_size})...", file=sys.stderr)
     triples = extractor.extract_from_sentences(sentences)

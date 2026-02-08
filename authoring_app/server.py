@@ -1343,15 +1343,23 @@ class KVIHandler(BaseHTTPRequestHandler):
         # ==================== Scheme C: Build Knowledge Graph ====================
         if path.startswith("/api/kvi/topic/") and path.endswith("/compile_graph"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/compile_graph")].strip("/"))
+            topic_cfg = _load_topic_config(topic)
             build = _topic_build_cfg(topic)
             base_llm = str(build.get("base_llm") or "").strip()
-            if not base_llm:
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm in topic config.json"})
-                return
             topic_dir = _topic_dir(topic)
             work_dir_raw = str(build.get("work_dir") or "").strip()
             out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
             out_dir.mkdir(parents=True, exist_ok=True)
+
+            # DeepSeek config from topic config.json (top-level)
+            ds_base_url = str(topic_cfg.get("deepseek_base_url") or "https://api.deepseek.com").strip()
+            ds_model = str(topic_cfg.get("deepseek_model") or "deepseek-chat").strip()
+            ds_api_key_env = str(topic_cfg.get("deepseek_api_key_env") or "DEEPSEEK_API_KEY").strip()
+            use_deepseek = bool(ds_model and ds_api_key_env)
+
+            if not use_deepseek and not base_llm:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing DeepSeek config or build.base_llm in topic config.json"})
+                return
 
             # Use tagged sentences if available, else raw sentences
             sentences_src = out_dir / "sentences.tagged.jsonl"
@@ -1364,8 +1372,18 @@ class KVIHandler(BaseHTTPRequestHandler):
             obj, _ = _read_body_json(self)
             obj = obj if isinstance(obj, dict) else {}
             device = str(obj.get("device") or "").strip()
-            timeout_s = int(obj.get("timeout_s") or 600)  # Graph build can be slow
+            timeout_s = int(obj.get("timeout_s") or 600)
             graph_logs: List[Dict[str, Any]] = []
+
+            # -- Write aliases.jsonl from request body (if provided) --
+            aliases_jsonl = out_dir / "aliases.jsonl"
+            aliases_data = obj.get("aliases")
+            if isinstance(aliases_data, list) and aliases_data:
+                with aliases_jsonl.open("w", encoding="utf-8") as af:
+                    for alias_rec in aliases_data:
+                        if isinstance(alias_rec, dict):
+                            af.write(json.dumps(alias_rec, ensure_ascii=False) + "\n")
+                graph_logs.append({"step": "write_aliases", "count": len(aliases_data), "path": str(aliases_jsonl)})
 
             # Step 1: Extract triples
             triples_jsonl = out_dir / "triples.jsonl"
@@ -1374,11 +1392,20 @@ class KVIHandler(BaseHTTPRequestHandler):
                 str(PROJECT_ROOT / "scripts" / "extract_triples.py"),
                 "--sentences_jsonl", str(sentences_src),
                 "--out_triples", str(triples_jsonl),
-                "--model", base_llm,
                 "--batch_size", "3",
             ]
-            if device:
-                cmd_extract.extend(["--device", device])
+            if use_deepseek:
+                cmd_extract.extend([
+                    "--use_deepseek",
+                    "--deepseek_base_url", ds_base_url,
+                    "--deepseek_model", ds_model,
+                    "--deepseek_api_key_env", ds_api_key_env,
+                ])
+            else:
+                cmd_extract.extend(["--model", base_llm])
+                if device:
+                    cmd_extract.extend(["--device", device])
+
             try:
                 r_extract = subprocess.run(cmd_extract, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
             except subprocess.TimeoutExpired:
@@ -1386,6 +1413,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 return
             graph_logs.append({
                 "step": "extract_triples",
+                "backend": "deepseek" if use_deepseek else "local_llm",
                 "cmd": " ".join(cmd_extract),
                 "returncode": int(r_extract.returncode),
                 "stdout": (r_extract.stdout or "")[-4000:],
@@ -1397,7 +1425,6 @@ class KVIHandler(BaseHTTPRequestHandler):
 
             # Step 2: Build knowledge graph
             graph_index_json = out_dir / "graph_index.json"
-            aliases_jsonl = out_dir / "aliases.jsonl"
             cmd_build = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "build_knowledge_graph.py"),
@@ -1438,6 +1465,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "topic": topic,
+                    "extraction_backend": "deepseek" if use_deepseek else "local_llm",
                     "graph_index": str(graph_index_json),
                     "triples_jsonl": str(triples_jsonl),
                     "sentences_source": str(sentences_src),

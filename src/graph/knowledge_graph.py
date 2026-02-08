@@ -76,6 +76,10 @@ class KnowledgeGraphBuilder:
 
     def build(self) -> KnowledgeGraphIndex:
         """Build the knowledge graph index from accumulated triples."""
+        # 0. Merge aliased entities: if an entity name maps to a different
+        #    canonical name via _name_index, merge it.
+        self._merge_aliased_entities()
+
         # 1. Create nodes from entities
         nodes: Dict[str, GraphNode] = {}
         canon_to_node_id: Dict[str, str] = {}
@@ -151,6 +155,57 @@ class KnowledgeGraphBuilder:
         elif entity_type.strip() and not self._entities[name].entity_type:
             self._entities[name].entity_type = entity_type.strip()
         self._name_index[_normalise(name)] = name
+
+    def _merge_aliased_entities(self) -> None:
+        """
+        Merge entities that are aliases of a canonical entity.
+
+        After aliases are registered, ``_name_index`` may map a normalised
+        entity name to a *different* canonical name.  This method:
+        1. Identifies entities whose normalised name resolves to a different
+           canonical entity via ``_name_index``.
+        2. Merges their aliases and entity_type into the canonical entity.
+        3. Rewrites all triples to use the canonical name.
+        4. Removes the alias entity from ``_entities``.
+        """
+        # Build merge map: alias_name → canonical_name
+        merge_map: Dict[str, str] = {}
+        for ent_name in list(self._entities.keys()):
+            norm = _normalise(ent_name)
+            canonical = self._name_index.get(norm, ent_name)
+            if canonical != ent_name:
+                merge_map[ent_name] = canonical
+
+        if not merge_map:
+            return
+
+        # Merge entity metadata
+        for alias_name, canon_name in merge_map.items():
+            alias_ent = self._entities.get(alias_name)
+            canon_ent = self._entities.get(canon_name)
+            if not alias_ent or not canon_ent:
+                continue
+            # Merge aliases
+            if alias_name not in canon_ent.aliases:
+                canon_ent.aliases.append(alias_name)
+            for a in alias_ent.aliases:
+                if a not in canon_ent.aliases and a != canon_name:
+                    canon_ent.aliases.append(a)
+            # Merge entity_type (prefer canonical's type)
+            if not canon_ent.entity_type and alias_ent.entity_type:
+                canon_ent.entity_type = alias_ent.entity_type
+            # Merge description
+            if not canon_ent.description and alias_ent.description:
+                canon_ent.description = alias_ent.description
+            # Remove alias entity
+            del self._entities[alias_name]
+
+        # Rewrite triples to use canonical names
+        for triple in self._triples.values():
+            if triple.subject in merge_map:
+                triple.subject = merge_map[triple.subject]
+            if triple.object in merge_map:
+                triple.object = merge_map[triple.object]
 
 
 # ---------------------------------------------------------------------------

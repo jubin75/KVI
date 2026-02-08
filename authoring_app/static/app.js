@@ -125,9 +125,21 @@ async function compileSimple() {
 }
 
 async function compileGraph() {
-  $("compile_log").textContent = "Building Knowledge Graph (Scheme C)...\nThis may take several minutes (LLM triple extraction).";
+  $("compile_log").textContent = "Building Knowledge Graph (Scheme C)...\nUsing DeepSeek for triple extraction. This may take 1-2 minutes.";
   try {
-    const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_graph`, {});
+    // Parse aliases from textarea
+    const aliasesRaw = ($("graph_aliases").value || "").trim();
+    const aliases = [];
+    if (aliasesRaw) {
+      for (const ln of aliasesRaw.split(/\r?\n/)) {
+        const s = ln.trim();
+        if (!s) continue;
+        try { aliases.push(JSON.parse(s)); } catch {}
+      }
+    }
+    const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_graph`, {
+      aliases: aliases.length > 0 ? aliases : undefined,
+    });
     $("compile_log").textContent = (resp.ok ? "Graph Build OK\n\n" : "Graph Build FAILED\n\n") + pretty(resp);
   } catch (err) {
     $("compile_log").textContent = "Graph Build FAILED\n\n" + String(err.message || err);

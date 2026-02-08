@@ -119,7 +119,7 @@
             <button class="primary" id="btn_create_set">New Set</button>
             <button id="btn_reload_sets">Refresh</button>
             <button class="ok" id="btn_compile">Compile KVBank</button>
-            <button class="ok" id="btn_compile_graph" style="background:#2c7a4b">Build Graph</button>
+            <button class="ok" id="btn_compile_graph" style="background:#5cb585;color:#fff">Build Graph</button>
           </div>
           <div class="row">
             <div class="field">
@@ -135,6 +135,20 @@
             </div>
           </div>
           <div class="note" id="set_stats">No set selected</div>
+        </div>
+
+        <div class="panel">
+          <div class="field">
+            <label>
+              Entity Aliases (Graph Build)
+              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+            </label>
+            <div class="help-content">实体别名表，用于图谱构建时合并同一实体的不同名称。每行一条 JSON：<br/><code>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒"]}</code><br/>Build Graph 时自动发送到服务器。</div>
+            <textarea id="graph_aliases" rows="4" placeholder='{"canonical": "SFTSV", "aliases": ["SFTSV病毒"]}'>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒", "严重发热伴血小板减少综合征"]}
+{"canonical": "流感样症状", "aliases": ["急性发热", "发热"]}
+{"canonical": "山东", "aliases": [], "entity_type": "epidemiology"}
+{"canonical": "安徽", "aliases": [], "entity_type": "epidemiology"}</textarea>
+          </div>
         </div>
 
         <div class="panel">

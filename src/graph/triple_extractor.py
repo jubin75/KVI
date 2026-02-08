@@ -92,20 +92,32 @@ class ExtractionResult:
 
 class TripleExtractor:
     """
-    Extract knowledge triples from evidence sentences using a local LLM.
+    Extract knowledge triples from evidence sentences.
 
-    Usage::
+    Supports two backends:
+    * **Local LLM** — pass ``model``, ``tokenizer``, ``device``.
+    * **DeepSeek API** — pass ``deepseek_client`` (a :class:`DeepSeekClient`
+      instance from ``src.llm_filter.deepseek_client``).  When provided,
+      ``model``/``tokenizer``/``device`` are ignored and no GPU is needed.
+
+    Usage (local)::
 
         extractor = TripleExtractor(model=model, tokenizer=tokenizer, device=device)
-        result = extractor.extract_batch(sentences)
+
+    Usage (DeepSeek)::
+
+        from src.llm_filter.deepseek_client import DeepSeekClient, DeepSeekClientConfig
+        client = DeepSeekClient(DeepSeekClientConfig())
+        extractor = TripleExtractor(deepseek_client=client)
     """
 
     def __init__(
         self,
         *,
-        model: Any,
-        tokenizer: Any,
-        device: Any,
+        model: Any = None,
+        tokenizer: Any = None,
+        device: Any = None,
+        deepseek_client: Any = None,
         relation_types: Optional[Dict[str, Dict[str, Any]]] = None,
         entity_types: Optional[Dict[str, Dict[str, Any]]] = None,
         max_new_tokens: int = 1024,
@@ -114,6 +126,7 @@ class TripleExtractor:
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.deepseek_client = deepseek_client
         self.relation_types = relation_types or dict(DEFAULT_RELATION_TYPES)
         self.entity_types = entity_types or dict(DEFAULT_ENTITY_TYPES)
         self.max_new_tokens = int(max_new_tokens)
@@ -183,7 +196,12 @@ class TripleExtractor:
         return ExtractionResult(triples=triples, raw_output=raw, parse_errors=errors)
 
     def _generate(self, system_msg: str, user_msg: str) -> str:
-        """Generate text using the local LLM."""
+        """Generate text using local LLM or DeepSeek API."""
+        # --- DeepSeek API backend ---
+        if self.deepseek_client is not None:
+            return self.deepseek_client.chat(system=system_msg, user=user_msg)
+
+        # --- Local LLM backend ---
         messages = [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
