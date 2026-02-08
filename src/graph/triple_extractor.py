@@ -50,7 +50,8 @@ _EXTRACTION_SYSTEM = """\
     "predicate": "关系类型",
     "object": "宾语实体（如：发热）",
     "object_type": "实体类型",
-    "confidence": 0.95
+    "confidence": 0.95,
+    "sentence_index": 1
   }}
 ]
 ```
@@ -67,7 +68,8 @@ _EXTRACTION_SYSTEM = """\
 3. predicate 必须从上面的允许列表中选择
 4. 如果一个句子包含多个事实，拆分为多个三元组
 5. confidence 表示你对这个三元组的确信度（0.0-1.0）
-6. 只输出 JSON 数组，不要输出任何其他文字
+6. **每个三元组必须包含 "sentence_index" 字段**，值为该三元组来源句子的编号（如 1, 2, 3）
+7. 只输出 JSON 数组，不要输出任何其他文字
 """
 
 _EXTRACTION_USER = """\
@@ -315,13 +317,27 @@ class TripleExtractor:
             prov = dict(default_prov) if default_prov else {}
             # If LLM provided a sentence index, use it
             sent_idx = item.get("sentence_index") or item.get("sent_idx")
-            if sent_idx is not None and int(sent_idx) in sent_lookup:
-                s = sent_lookup[int(sent_idx)]
-                prov = {
-                    "sentence_id": str(s.get("id") or s.get("sentence_id") or ""),
-                    "sentence_text": str(s.get("text") or ""),
-                    "source_block_id": str(s.get("source_block_id") or s.get("block_id") or ""),
-                }
+            if sent_idx is not None:
+                try:
+                    idx_int = int(sent_idx)
+                    if idx_int in sent_lookup:
+                        s = sent_lookup[idx_int]
+                        prov = {
+                            "sentence_id": str(s.get("id") or s.get("sentence_id") or s.get("block_id") or ""),
+                            "sentence_text": str(s.get("text") or ""),
+                            "source_block_id": str(s.get("source_block_id") or s.get("block_id") or ""),
+                        }
+                except (ValueError, TypeError):
+                    pass
+            # Fallback: if provenance is still empty, try to match by text overlap
+            if not prov.get("sentence_text") and len(sentences) > 1:
+                best_match = _match_triple_to_sentence(subj, obj, sentences)
+                if best_match:
+                    prov = {
+                        "sentence_id": str(best_match.get("id") or best_match.get("sentence_id") or best_match.get("block_id") or ""),
+                        "sentence_text": str(best_match.get("text") or ""),
+                        "source_block_id": str(best_match.get("source_block_id") or best_match.get("block_id") or ""),
+                    }
 
             tid = _make_triple_id(subj, pred, obj, prov.get("sentence_id", ""))
             triples.append(Triple(
@@ -351,6 +367,27 @@ def _make_triple_id(subj: str, pred: str, obj: str, sent_id: str = "") -> str:
     raw = f"{subj}|{pred}|{obj}|{sent_id}"
     h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"t_{h}"
+
+
+def _match_triple_to_sentence(
+    subject: str, obj: str, sentences: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Match a triple's subject+object back to the most likely source sentence."""
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0
+    for s in sentences:
+        text = str(s.get("text") or "").lower()
+        if not text:
+            continue
+        score = 0
+        if subject.lower() in text:
+            score += len(subject)
+        if obj.lower() in text:
+            score += len(obj)
+        if score > best_score:
+            best_score = score
+            best = s
+    return best if best_score > 0 else None
 
 
 def _fuzzy_match_key(value: str, allowed: set) -> Optional[str]:

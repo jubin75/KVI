@@ -63,6 +63,24 @@ class KnowledgeGraphBuilder:
         self._register_entity(triple.subject, triple.subject_type)
         self._register_entity(triple.object, triple.object_type)
 
+    def enrich_entity(self, name: str, *, description: str = "", entity_type: str = "") -> None:
+        """Enrich an entity with description and/or entity_type from aliases config."""
+        name = name.strip()
+        if not name:
+            return
+        ent = self._entities.get(name)
+        if ent:
+            if description and not ent.description:
+                ent.description = description
+            if entity_type and not ent.entity_type:
+                ent.entity_type = entity_type
+        else:
+            # Entity not yet registered — register it
+            self._register_entity(name, entity_type)
+            ent = self._entities.get(name)
+            if ent and description:
+                ent.description = description
+
     def add_entity_alias(self, canonical_name: str, alias: str) -> None:
         """Register an alias for an entity."""
         canon = canonical_name.strip()
@@ -237,7 +255,7 @@ def build_graph_from_triples_jsonl(
             if triple:
                 builder.add_triple(triple)
 
-    # Load aliases
+    # Load aliases (with optional description and entity_type)
     if aliases_path and aliases_path.exists():
         with aliases_path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -247,8 +265,15 @@ def build_graph_from_triples_jsonl(
                 try:
                     rec = json.loads(s)
                     canon = str(rec.get("canonical") or rec.get("name") or "").strip()
+                    if not canon:
+                        continue
                     for alias in (rec.get("aliases") or []):
                         builder.add_entity_alias(canon, str(alias))
+                    # Load description and entity_type if provided
+                    desc = str(rec.get("description") or "").strip()
+                    etype = str(rec.get("entity_type") or "").strip()
+                    if desc or etype:
+                        builder.enrich_entity(canon, description=desc, entity_type=etype)
                 except Exception:
                     continue
 

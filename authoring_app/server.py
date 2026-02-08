@@ -1392,7 +1392,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 str(PROJECT_ROOT / "scripts" / "extract_triples.py"),
                 "--sentences_jsonl", str(sentences_src),
                 "--out_triples", str(triples_jsonl),
-                "--batch_size", "3",
+                "--batch_size", "1",
             ]
             if use_deepseek:
                 cmd_extract.extend([

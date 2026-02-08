@@ -296,11 +296,12 @@ class GraphRetriever:
             ent = node.entity
             desc = ent.description.strip() if ent.description else ""
             aliases = [a for a in ent.aliases if a != ent.name]
+            etype = ent.entity_type.strip() if ent.entity_type else ""
+            alias_str = f"（{', '.join(aliases[:3])}）" if aliases else ""
             if desc:
-                if aliases:
-                    parts.append(f"{ent.name}（{', '.join(aliases[:3])}）：{desc}")
-                else:
-                    parts.append(f"{ent.name}：{desc}")
+                parts.append(f"{ent.name}{alias_str}：{desc}")
+            elif etype:
+                parts.append(f"{ent.name}{alias_str}，类型：{etype}")
             elif aliases:
                 parts.append(f"{ent.name}（又称 {', '.join(aliases[:3])}）")
         if not parts:
