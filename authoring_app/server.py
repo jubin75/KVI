@@ -1340,6 +1340,113 @@ class KVIHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # ==================== Scheme C: Build Knowledge Graph ====================
+        if path.startswith("/api/kvi/topic/") and path.endswith("/compile_graph"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/compile_graph")].strip("/"))
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            if not base_llm:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm in topic config.json"})
+                return
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # Use tagged sentences if available, else raw sentences
+            sentences_src = out_dir / "sentences.tagged.jsonl"
+            if not sentences_src.exists():
+                sentences_src = out_dir / "sentences.jsonl"
+            if not sentences_src.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"sentences.jsonl not found: {out_dir}. Run Compile KVBank first."})
+                return
+
+            obj, _ = _read_body_json(self)
+            obj = obj if isinstance(obj, dict) else {}
+            device = str(obj.get("device") or "").strip()
+            timeout_s = int(obj.get("timeout_s") or 600)  # Graph build can be slow
+            graph_logs: List[Dict[str, Any]] = []
+
+            # Step 1: Extract triples
+            triples_jsonl = out_dir / "triples.jsonl"
+            cmd_extract = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "extract_triples.py"),
+                "--sentences_jsonl", str(sentences_src),
+                "--out_triples", str(triples_jsonl),
+                "--model", base_llm,
+                "--batch_size", "3",
+            ]
+            if device:
+                cmd_extract.extend(["--device", device])
+            try:
+                r_extract = subprocess.run(cmd_extract, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "timeout", "message": f"Triple extraction timed out after {timeout_s}s.", "cmd": " ".join(cmd_extract)})
+                return
+            graph_logs.append({
+                "step": "extract_triples",
+                "cmd": " ".join(cmd_extract),
+                "returncode": int(r_extract.returncode),
+                "stdout": (r_extract.stdout or "")[-4000:],
+                "stderr": (r_extract.stderr or "")[-4000:],
+            })
+            if r_extract.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "extract_triples", "logs": graph_logs})
+                return
+
+            # Step 2: Build knowledge graph
+            graph_index_json = out_dir / "graph_index.json"
+            aliases_jsonl = out_dir / "aliases.jsonl"
+            cmd_build = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "build_knowledge_graph.py"),
+                "--triples_jsonl", str(triples_jsonl),
+                "--out_graph", str(graph_index_json),
+            ]
+            if aliases_jsonl.exists():
+                cmd_build.extend(["--aliases_jsonl", str(aliases_jsonl)])
+            r_build = subprocess.run(cmd_build, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=120)
+            graph_logs.append({
+                "step": "build_knowledge_graph",
+                "cmd": " ".join(cmd_build),
+                "returncode": int(r_build.returncode),
+                "stdout": (r_build.stdout or "")[-4000:],
+                "stderr": (r_build.stderr or "")[-4000:],
+            })
+            if r_build.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "build_knowledge_graph", "logs": graph_logs})
+                return
+
+            # Summary
+            graph_summary: Dict[str, Any] = {}
+            if graph_index_json.exists():
+                try:
+                    gi = json.loads(graph_index_json.read_text(encoding="utf-8"))
+                    meta = gi.get("meta") or {}
+                    graph_summary = {
+                        "num_nodes": meta.get("num_nodes", 0),
+                        "num_triples": meta.get("num_triples", 0),
+                        "num_entity_index_entries": meta.get("num_entity_index_entries", 0),
+                    }
+                except Exception:
+                    pass
+
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "graph_index": str(graph_index_json),
+                    "triples_jsonl": str(triples_jsonl),
+                    "sentences_source": str(sentences_src),
+                    "graph_summary": graph_summary,
+                    "logs": graph_logs,
+                },
+            )
+            return
+
         if path.startswith("/api/kvi/topic/") and path.endswith("/run_simple"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/run_simple")].strip("/"))
             obj, err = _read_body_json(self)
@@ -1759,6 +1866,79 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "topic": topic,
                     "cmd": " ".join(cmd),
                     "result": out,
+                },
+            )
+            return
+
+        # ==================== Scheme C: Graph Inference ====================
+        if path.startswith("/api/kvi/topic/") and path.endswith("/modeA_graph"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/modeA_graph")].strip("/"))
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            prompt = str(obj.get("prompt") or "").strip()
+            if not prompt:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "prompt required"})
+                return
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            if not base_llm:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing build.base_llm in topic config.json"})
+                return
+            # Fail fast if base_llm is a local path that doesn't exist.
+            try:
+                b = str(base_llm or "")
+                b_exp = Path(b).expanduser()
+                if (b.startswith("/") or b.startswith("./") or b.startswith("../") or b.startswith("~")) and not b_exp.exists():
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"base_llm path not found: {b_exp}"})
+                    return
+            except Exception:
+                pass
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            graph_index_json = out_dir / "graph_index.json"
+            if not graph_index_json.exists():
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"graph_index.json not found: {graph_index_json}. Click Build Graph first."})
+                return
+            timeout_s = int(obj.get("timeout_s") or 180)
+            cmd = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "run_graph_inference.py"),
+                "--model", base_llm,
+                "--prompt", prompt,
+                "--graph_index", str(graph_index_json),
+                "--use_chat_template",
+                "--local_files_only",
+            ]
+            try:
+                r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _json_response(
+                    self,
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "error": "timeout",
+                        "message": f"Graph inference timed out after {timeout_s}s.",
+                        "cmd": " ".join(cmd),
+                    },
+                )
+                return
+            if r.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "returncode": int(r.returncode), "stdout": (r.stdout or "")[-8000:], "stderr": (r.stderr or "")[-8000:]})
+                return
+            out = _safe_parse_last_json_obj(r.stdout) or {"raw_stdout": (r.stdout or "")[-8000:]}
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "cmd": " ".join(cmd),
+                    "result": out,
+                    "stderr_tail": (r.stderr or "")[-4000:],
                 },
             )
             return

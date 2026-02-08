@@ -923,10 +923,17 @@ def _filter_priming_by_intent(
     """
     Filter entity priming items by query-intent relevance.
 
-    Selection rules (priority order):
+    **RAG sufficiency gate** (highest priority):
+    When RAG evidence is available in the prompt AND the query intent is NOT
+    about entity identity (definition / abbreviation), ALL entity priming is
+    suppressed.  Empirical finding: any KV prefix injection disrupts the
+    model's attention to prompt-based evidence, producing token-level
+    corruption even with Chinese-primary priming content.
+
+    When priming IS allowed, selection rules (priority order):
     1. If item meta has ``intent_tags`` list → inject only when *query_intent*
        matches one of the tags (or ``"*"`` present).
-    2. If block_id contains ``_name`` → always inject (core entity identity).
+    2. If block_id contains ``_name`` → inject (core entity identity).
     3. Otherwise check whether the entity keyword extracted from block_id
        appears anywhere in *query_text* or *evidence_texts*; skip if absent.
 
@@ -937,6 +944,20 @@ def _filter_priming_by_intent(
 
     intent = str(query_intent or "").strip().lower()
     query_lower = str(query_text or "").lower()
+
+    # ---- RAG sufficiency gate ----
+    # Intents where entity priming provides unique value (identity / naming).
+    # For all other intents, if RAG evidence already exists in the prompt,
+    # KV injection is net-negative: it disrupts attention to prompt evidence.
+    _KV_BENEFICIAL_INTENTS = {"definition", "abbreviation", "identity", "名称", "定义", "缩写"}
+    has_evidence = bool(evidence_texts and any(str(t).strip() for t in evidence_texts))
+    if has_evidence and intent not in _KV_BENEFICIAL_INTENTS:
+        flog = [{"block_id": str((getattr(it, "meta", None) or {}).get("block_id") or ""),
+                 "action": "skip",
+                 "reason": f"rag_sufficiency_gate: intent={intent}, evidence_count={len(evidence_texts)}"}
+                for it in priming_items]
+        return [], flog
+
     ev_combined = " ".join([str(t or "").lower() for t in (evidence_texts or [])])
 
     kept: List[Any] = []
@@ -959,11 +980,11 @@ def _filter_priming_by_intent(
                              "reason": f"intent_tag_mismatch: tags={sorted(tag_set)} intent={intent}"})
             continue
 
-        # Rule 2 – entity name items are always injected
+        # Rule 2 – entity name items
         bid_lower = bid.lower()
         if "_name" in bid_lower or bid_lower.endswith("_name"):
             kept.append(it)
-            flog.append({"block_id": bid, "action": "keep", "reason": "name_item_always"})
+            flog.append({"block_id": bid, "action": "keep", "reason": "name_item"})
             continue
 
         # Rule 3 – entity keyword must appear in query or evidence

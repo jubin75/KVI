@@ -250,30 +250,101 @@ Result: "当前知识库不包含 SARS2 的相关信息。"
 
 这是 GraphRAG 相对于 flat tag routing 的结构性优势：**实体是检索的入口，不是 topic 是检索的入口**。
 
-### 15. 对当前系统的替换关系
+### 15. 三元 KVI 理论与实验修正
+
+GPT 专家提出的"三元 KVI"在 attention / KV Bank 层面有三个核心主张，
+经我们的实验验证后做出以下采纳/修正决策：
+
+| 主张 | 核心思想 | 决策 | 理由 |
+|------|---------|------|------|
+| **Subject Anchoring (Key 侧)** | 将 subject 映射为 Key 偏置向量，提升 subject token 显著性 | **修正** → prompt 级实体上下文 | 多轮实验证明：任何 KV prefix 注入在 RAG 证据充足时均造成 token 腐蚀（"血小板"→"血板"）。改用 prompt 级 entity context 替代 |
+| **Relation as Attention Routing** | Relation embedding 调制 cross-token attention，引导信息在 subject-object 之间流动 | **部分采纳** → 关系引导检索，非引导 attention | 修改 attention forward 违反铁律。改为：relation type 决定 graph walk 方向（检索路由），而非 attention head 激活 |
+| **Triple-structured knowledge** | (s, r, o) 三元组结构化知识表达 | **完全采纳** | 这是 Scheme C 的基础——替代 flat sentence + tag 的平面结构 |
+
+> **关键实验结论**：Relation 的价值在于 **检索路由**（决定哪些 evidence 进入 prompt），
+> 而非 **attention 路由**（调制哪些 head 被激活）。
+> 前者在 RAG 架构中可工程化实现；后者需要修改模型权重或 attention forward。
+
+### 16. 对当前系统的替换关系
 
 ```
-当前:   Query → intent tag → ANN + soft_bonus → sentences → KV inject (重复)
-方案C:  Query → entity + relation → graph walk → sentences → KV inject (互补)
+当前:   Query → intent tag → ANN + soft_bonus → sentences → KV inject (重复/干扰)
+方案C:  Query → entity recognition → graph walk (relation-typed) → sentences → RAG prompt
+                                                                              ↑
+                                                            prompt-level entity context
+                                                            (替代 KV 注入的 subject anchoring)
 ```
 
 替换的组件：
-- `semantic_type_specs.json` + `soft_filter` → **graph traversal**
-- `annotate_sentences_semantic_tags.py` → **entity/relation extraction**
-- **Context-Unaware Injection 问题** → **entity-anchored retrieval（实体锚定检索）**
-- 保留：KV injection 管线、grounding filter、Mode A/B 行为约束
+- `semantic_type_specs.json` + `soft_filter` → **graph traversal (relation-typed)**
+- `annotate_sentences_semantic_tags.py` → **triple extraction (`extract_triples.py`)**
+- Entity priming KV injection → **prompt-level entity context（`graph_retriever._build_entity_context`）**
+- **Context-Unaware Injection 问题** → **entity-anchored retrieval（实体不命中 = 不检索 = 不注入）**
+- 保留：grounding filter、Mode A/B 行为约束、base LLM 管线
 
-### 16. 渐进迁移路径
+### 17. Scheme C 模块结构
+
+```
+src/graph/
+  schema.py             # Triple, Entity, GraphNode, KnowledgeGraphIndex
+  triple_extractor.py   # LLM-based (s,r,o) 抽取
+  knowledge_graph.py    # Graph 构建 + entity index
+  graph_retriever.py    # 运行时 entity recognition + graph walk + evidence 收集
+
+scripts/
+  extract_triples.py        # CLI: sentences.jsonl → triples.jsonl
+  build_knowledge_graph.py  # CLI: triples.jsonl → graph_index.json
+```
+
+### 18. 编译时流程
+
+```
+sentences.jsonl
+      ↓
+  extract_triples.py (base LLM structured extraction)
+      ↓
+  triples.jsonl  (每条: subject, predicate, object, provenance)
+      ↓
+  build_knowledge_graph.py
+      ↓
+  graph_index.json  (nodes + edges + entity_index)
+      ↓
+  [可选] aliases.jsonl → 补充实体别名映射
+```
+
+### 19. 运行时流程
+
+```
+Query: "SFTSV的临床症状有哪些？"
+  ↓
+Entity Recognition: SFTSV → node_0001
+Intent: symptom → relations = [causes, manifests_as]
+  ↓
+Graph Walk: node_0001 --causes--> 发热, 血小板减少, ...
+            node_0001 --manifests_as--> 乏力, 食欲不振, ...
+  ↓
+Collect provenance sentences → RAG prompt evidence
+Build entity context → "SFTSV（发热伴血小板减少综合征病毒）：属于新型布尼亚病毒属。"
+  ↓
+Prompt = entity_context + evidence_block + 要求
+  ↓
+LLM Generation (无 KV 注入) → Grounding Filter → Output
+```
+
+### 20. 渐进迁移路径
 
 ```
 Stage 0 (当前): tag + soft_bonus routing + 同内容 KV/RAG
                 ⚠ Context-Unaware: 不检查 query 实体是否属于当前 topic
-Stage 1 (路线B): tag routing 不变 + 互补 KV (entity priming)  ← 已实现验证
+                ⚠ KV 注入在 RAG 充足时造成 token 腐蚀
+Stage 1 (已验证): tag routing + 互补 KV (entity priming) + RAG sufficiency gate
                 ⚠ Context-Unaware 仍然存在
-Stage 2:        自动 entity extraction + 简单 graph index
-                → 初步解决 Context-Unaware（entity 不命中 = 不注入）
-Stage 3 (方案C): 完整 graph retrieval + 互补 KV + 无 tag
-                → 彻底解决 Context-Unaware + 多 topic 统一 graph
+                ✓ RAG sufficiency gate 避免了非 definition 查询的 KV 干扰
+Stage 2 (进行中): triple extraction + graph index + entity-anchored retrieval
+                → 解决 Context-Unaware（entity 不命中 = 不检索）
+                → prompt-level entity context 替代 KV 注入
+Stage 3 (方案C): 完整 graph retrieval + 多 topic 统一 graph + 无 tag
+                → 彻底解决 Context-Unaware + 跨 topic 实体路由
 ```
 
 ---
