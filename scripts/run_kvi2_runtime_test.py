@@ -478,6 +478,7 @@ def _detect_violations(
     evidence_texts: Sequence[str],
     intent: str,
     specs: Dict[str, Dict[str, Any]],
+    entity_priming_texts: Sequence[str] = (),
 ) -> List[Dict[str, Any]]:
     """
     Lightweight validator for "regen-on-violation".
@@ -485,32 +486,36 @@ def _detect_violations(
     """
     a = str(answer or "").strip()
     q = str(user_prompt or "").strip()
-    ev = "\n".join([str(x or "") for x in (evidence_texts or [])])
+    # Merge evidence + entity priming texts for abbreviation validation.
+    all_ref = "\n".join([str(x or "") for x in (evidence_texts or [])] + [str(x or "") for x in (entity_priming_texts or [])])
     if not a:
         return [{"type": "empty_answer"}]
 
     violations: List[Dict[str, Any]] = []
 
-    # 1) Abbreviation expansion must appear verbatim in evidence.
+    # 1) Abbreviation expansion: approved if exact form OR inner text appears in evidence or entity priming.
     for m in _ABBR_PARENS_RE.finditer(a):
         abbr = m.group(1)
         inner = m.group(2)
         full_zh = f"{abbr}（{inner}）"
         full_en = f"{abbr}({inner})"
-        if full_zh not in ev and full_en not in ev:
-            violations.append({"type": "abbr_expansion_not_in_evidence", "span": m.group(0), "abbr": abbr})
+        inner_stripped = inner.strip()
+        if full_zh in all_ref or full_en in all_ref or (inner_stripped and inner_stripped in all_ref):
+            continue  # approved by evidence or entity priming
+        violations.append({"type": "abbr_expansion_not_in_evidence", "span": m.group(0), "abbr": abbr})
 
-    # 1b) Alias-before-(ABBR) must also appear verbatim in evidence (e.g., "某某病毒（SFTSV）").
+    # 1b) Alias-before-(ABBR): approved if form or alias text appears in evidence or entity priming.
     for m in _ALIAS_PARENS_ABBR_RE.finditer(a):
         alias = m.group(1)
         abbr = m.group(2)
-        # only treat as "alias expansion" if alias contains any CJK character (avoid punishing normal English parentheses too much)
         if not re.search(r"[\u4e00-\u9fff]", alias):
             continue
         full_zh = f"{alias}（{abbr}）"
         full_en = f"{alias}({abbr})"
-        if full_zh not in ev and full_en not in ev:
-            violations.append({"type": "alias_with_abbr_not_in_evidence", "span": m.group(0), "abbr": abbr, "alias": alias})
+        alias_stripped = alias.strip()
+        if full_zh in all_ref or full_en in all_ref or (alias_stripped and alias_stripped in all_ref):
+            continue  # approved
+        violations.append({"type": "alias_with_abbr_not_in_evidence", "span": m.group(0), "abbr": abbr, "alias": alias})
 
     # 2) Config-driven deny terms: if answer contains deny terms for the inferred intent, flag.
     it = str(intent or "").strip().lower()
@@ -587,42 +592,57 @@ def _detect_violations(
     return violations
 
 
-def _strip_unapproved_abbr_expansions(*, text: str, evidence_texts: Sequence[str]) -> str:
+def _strip_unapproved_abbr_expansions(
+    *,
+    text: str,
+    evidence_texts: Sequence[str],
+    entity_priming_texts: Sequence[str] = (),
+) -> str:
     """
-    Enforce "缩写规则" post-hoc: only allow acronym expansions if the exact form appears in
-    injected evidence texts. Otherwise strip the parenthetical part.
+    Post-hoc abbreviation filter: only allow acronym expansions if the exact form
+    (or a substring containing the expansion) appears in *either* evidence texts
+    or entity priming texts.  Entity priming is the primary source for abbreviation
+    definitions (complementary injection), so it MUST be consulted here.
     """
     t = str(text or "")
-    ev = [str(x or "") for x in (evidence_texts or [])]
-    if not t or not ev:
-        # If we don't have evidence texts, still be conservative: strip expansions to reduce hallucinated glosses.
-        # This matches the product rule: do not add bracket expansions unless evidence shows it.
-        ev = []
+    # Merge both text pools — entity priming provides abbreviation definitions,
+    # evidence provides factual content.  Both are valid sources for expansions.
+    all_ref = [str(x or "") for x in (evidence_texts or [])] + [str(x or "") for x in (entity_priming_texts or [])]
+    if not t:
+        return t
+
+    def _expansion_approved(full_zh: str, full_en: str) -> bool:
+        """Check if either form appears in any reference text (evidence or priming)."""
+        for ref in all_ref:
+            if full_zh in ref or full_en in ref:
+                return True
+        return False
 
     def repl(m: re.Match) -> str:
         abbr = m.group(1)
         inner = m.group(2)
-        full_zh = f"{abbr}（{inner}）"
-        full_en = f"{abbr}({inner})"
-        if ev:
-            for e in ev:
-                if full_zh in e or full_en in e:
-                    return m.group(0)  # keep
-        # strip expansion
+        if _expansion_approved(f"{abbr}（{inner}）", f"{abbr}({inner})"):
+            return m.group(0)  # keep
+        # Also approve if the inner text (without parentheses) appears as a
+        # substring in any reference — this handles cases where entity priming
+        # says "SFTSV 的全称是发热伴血小板减少综合征病毒" without the exact
+        # parenthesized form.
+        inner_stripped = inner.strip()
+        if inner_stripped and any(inner_stripped in ref for ref in all_ref):
+            return m.group(0)  # keep
         return abbr
 
-    # First, strip alias-before-(ABBR) patterns that are not present in evidence, e.g. "宋热...病毒（SFTSV）" -> "SFTSV"
     def repl_alias(m: re.Match) -> str:
         alias = m.group(1)
         abbr = m.group(2)
         if not re.search(r"[\u4e00-\u9fff]", alias):
             return m.group(0)
-        full_zh = f"{alias}（{abbr}）"
-        full_en = f"{alias}({abbr})"
-        if ev:
-            for e in ev:
-                if full_zh in e or full_en in e:
-                    return m.group(0)
+        if _expansion_approved(f"{alias}（{abbr}）", f"{alias}({abbr})"):
+            return m.group(0)
+        # Also approve if alias substring appears in reference
+        alias_stripped = alias.strip()
+        if alias_stripped and any(alias_stripped in ref for ref in all_ref):
+            return m.group(0)
         return abbr
 
     t2 = _ALIAS_PARENS_ABBR_RE.sub(repl_alias, t)
@@ -914,7 +934,7 @@ def _shingle_overlap(sent: str, evidence_texts: Sequence[str], k: int = 3) -> fl
     s_shingles = _char_shingles(sent, k)
     if not s_shingles:
         return 0.0
-    short = len(re.sub(r"\s+", "", sent)) < 15  # use containment for short
+    short = len(re.sub(r"\s+", "", sent)) < 20  # use containment for short (< ~7 CJK chars)
     best = 0.0
     for ev in evidence_texts:
         ev_shingles = _char_shingles(ev, k)
@@ -972,7 +992,7 @@ def _evidence_grounding_filter(
             continue
 
         overlap = _shingle_overlap(sent, evidence_texts, shingle_k)
-        item = {"sentence": sent[:60], "overlap": round(overlap, 4), "grounded": overlap >= min_overlap}
+        item = {"sentence": sent, "overlap": round(overlap, 4), "grounded": overlap >= min_overlap}
         report_items.append(item)
 
         if overlap >= min_overlap:
@@ -1250,247 +1270,14 @@ def _infer_target_semantic_type_for_query(
     return "location", dbg
 
 
-def _unit_relevant_to_any_semantic_type(*, unit_text: str, semantic_types: List[str], query: str) -> bool:
-    sts = [str(s or "").strip().lower() for s in (semantic_types or [])]
-    sts = [s for s in sts if s and s not in {"unknown", "generic", "other"}]
-    if not sts:
-        return False
-    return any(_unit_relevant_to_semantic_type(unit_text=unit_text, semantic_type=st, query=query) for st in sts)
 
-
-def _format_evidence_units_with_ids(evidence_units: List[str]) -> Tuple[str, List[Tuple[str, str]]]:
-    """
-    Returns (formatted_text, pairs) where pairs = [(E1, text), ...]
-    """
-    pairs: List[Tuple[str, str]] = []
-    for i, s in enumerate(evidence_units or [], start=1):
-        t = str(s or "").strip()
-        if not t:
-            continue
-        pairs.append((f"E{i}", t))
-    formatted = "\n".join([f"[{eid}] {txt}" for eid, txt in pairs])
-    return formatted, pairs
-
-
-_SIMPLE_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\。\！\？])\s*|\n+")
-_SIMPLE_CITE_RE = re.compile(r"\[E\d+\]")
-
-
-def _postprocess_answer_citation_guardrails(
-    *,
-    answer: str,
-    evidence_pairs: List[Tuple[str, str]],
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Deletion-only guardrails (simple pipeline):
-    - If a sentence looks like it asserts concrete facts but has no [E#] citation, drop it.
-    - If it contains an SFTSV parenthetical expansion not present verbatim in evidence, drop the whole sentence.
-    """
-    a = str(answer or "").strip()
-    evidence_blob = "\n".join([t for _eid, t in (evidence_pairs or [])])
-    dropped: List[Dict[str, Any]] = []
-    auto_cited: List[Dict[str, Any]] = []
-
-    def _looks_like_fact(s: str) -> bool:
-        sl = s.lower()
-        # "Facty" cues: lists, numbers, places, symptoms, explicit definition/alias, institutions.
-        if re.search(r"\d", s):
-            return True
-        if any(k in s for k in ["河南", "湖北", "安徽", "山东", "浙江", "江苏", "辽宁", "吉林", "省", "市", "地区", "分布", "交界处"]):
-            return True
-        if any(k in s for k in ["临床表现", "症状", "包括", "表现为", "常见", "发热", "血小板", "白细胞", "胃肠道", "神经系统", "出血"]):
-            return True
-        if any(k in s for k in ["SFTSV（", "SFTSV(", "简称", "全称", "也称", "又称"]):
-            return True
-        if any(k in sl for k in ["cdc", "fda", "who"]) or any(k in s for k in ["疾控", "疾病预防控制中心"]):
-            return True
-        return False
-
-    def _has_cite(s: str) -> bool:
-        return bool(_SIMPLE_CITE_RE.search(s))
-
-    def _strip_cites(s: str) -> str:
-        return _SIMPLE_CITE_RE.sub("", s).strip()
-
-    def _tokenize_shingles(s: str) -> List[str]:
-        """
-        Very lightweight tokenization for overlap scoring:
-        - English words / numbers as tokens
-        - Chinese text as 2-char shingles (to avoid single-char noise)
-        """
-        t = str(s or "")
-        # keep alnum tokens
-        en = re.findall(r"[A-Za-z0-9]+", t)
-        # Chinese characters only
-        zh = "".join(re.findall(r"[\u4e00-\u9fff]+", t))
-        z2 = [zh[i : i + 2] for i in range(0, max(0, len(zh) - 1))]
-        out = [x.lower() for x in en] + z2
-        # drop very short shingles
-        return [x for x in out if len(x) >= 2]
-
-    def _best_evidence_cites_for_sentence(s: str) -> List[str]:
-        """
-        Return a small list like ["[E2]", "[E3]"] if the sentence matches evidence well.
-        """
-        stoks = set(_tokenize_shingles(_strip_cites(s)))
-        if not stoks:
-            return []
-        scored: List[Tuple[float, str]] = []
-        for eid, etxt in (evidence_pairs or []):
-            etoks = set(_tokenize_shingles(etxt))
-            if not etoks:
-                continue
-            inter = len(stoks & etoks)
-            # fraction of sentence tokens covered by evidence tokens
-            frac = float(inter) / float(max(1, len(stoks)))
-            if inter >= 3 and frac >= 0.22:
-                scored.append((frac, f"[{eid}]"))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [c for _f, c in scored[:2]]
-
-    def _has_unsupported_sftsv_expansion(s: str) -> bool:
-        # If model expands SFTSV in parentheses, require verbatim presence in evidence units.
-        m = re.search(r"SFTSV[（(]([^）)]+)[）)]", s)
-        if not m:
-            return False
-        expanded = str(m.group(0) or "").strip()
-        if not expanded:
-            return False
-        return expanded not in evidence_blob
-
-    # Split and filter sentence-by-sentence.
-    parts = [p.strip() for p in _SIMPLE_SENT_SPLIT_RE.split(a) if p and p.strip()]
-    kept: List[str] = []
-    for s in parts:
-        # Drop citation-only fragments
-        if not _strip_cites(s):
-            dropped.append({"sentence": s, "reason": "citation_only_fragment"})
-            continue
-        if _has_unsupported_sftsv_expansion(s):
-            dropped.append({"sentence": s, "reason": "unsupported_sftsv_parenthetical"})
-            continue
-        if _looks_like_fact(s) and not _has_cite(s):
-            cites = _best_evidence_cites_for_sentence(s)
-            if cites:
-                s2 = (s.rstrip() + " " + "".join(cites)).strip()
-                auto_cited.append({"before": s, "after": s2, "cites": cites})
-                kept.append(s2)
-                continue
-            dropped.append({"sentence": s, "reason": "fact_without_citation"})
-            continue
-        kept.append(s)
-    out = "\n".join(kept).strip()
-    dbg = {
-        "dropped_count": len(dropped),
-        "dropped_examples": dropped[:3],
-        "auto_cited_count": len(auto_cited),
-        "auto_cited_examples": auto_cited[:3],
-    }
-    return out, dbg
-
-
-def _postprocess_answer_grounding_only(*, answer: str, evidence_texts: Sequence[str]) -> Tuple[str, Dict[str, Any]]:
-    """
-    Drop sentences that do not overlap with injected evidence (lightweight grounding check).
-    This is deletion-only and does not synthesize new text.
-    """
-    a = str(answer or "").strip()
-    ev_pairs = [(f"E{i+1}", str(t or "")) for i, t in enumerate(evidence_texts or []) if str(t or "").strip()]
-    if not a or not ev_pairs:
-        return a, {"dropped_count": 0, "dropped_examples": []}
-
-    def _strip_cites(s: str) -> str:
-        return _SIMPLE_CITE_RE.sub("", s).strip()
-
-    def _tokenize_shingles(s: str) -> List[str]:
-        t = str(s or "")
-        en = re.findall(r"[A-Za-z0-9]+", t)
-        zh = "".join(re.findall(r"[\u4e00-\u9fff]+", t))
-        z2 = [zh[i : i + 2] for i in range(0, max(0, len(zh) - 1))]
-        out = [x.lower() for x in en] + z2
-        return [x for x in out if len(x) >= 2]
-
-    def _best_overlap(s: str) -> float:
-        stoks = set(_tokenize_shingles(_strip_cites(s)))
-        if not stoks:
-            return 0.0
-        best = 0.0
-        for _eid, etxt in ev_pairs:
-            etoks = set(_tokenize_shingles(etxt))
-            if not etoks:
-                continue
-            inter = len(stoks & etoks)
-            frac = float(inter) / float(max(1, len(stoks)))
-            if inter >= 3 and frac > best:
-                best = frac
-        return best
-
-    parts = [p.strip() for p in _SIMPLE_SENT_SPLIT_RE.split(a) if p and p.strip()]
-    kept: List[str] = []
-    dropped: List[Dict[str, Any]] = []
-    for s in parts:
-        if _best_overlap(s) < 0.22:
-            dropped.append({"sentence": s, "reason": "low_overlap"})
-            continue
-        kept.append(s)
-    out = "\n".join(kept).strip()
-    return out, {"dropped_count": len(dropped), "dropped_examples": dropped[:3]}
-
-def _unit_relevant_to_semantic_type(*, unit_text: str, semantic_type: str, query: str) -> bool:
-    """
-    Minimal relevance filter (deletion-only) to avoid cross-intent contamination.
-    """
-    st = str(semantic_type or "").strip().lower()
-    if st in {"", "unknown"}:
-        return False  # fail-closed: if we don't know semantic_type, do not inject units
-    t = str(unit_text or "").strip()
-    tl = t.lower()
-    q = str(query or "")
-    ql = q.lower()
-
-    symptom_cues = ["临床表现", "症状", "表现", "manifestation", "symptom", "present with", "including", "includes", "表现包括", "包括"]
-    drug_cues = ["治疗", "药物", "用药", "获批", "批准", "fda", "approved", "approval", "drug", "therapy", "treatment"]
-    loc_cues = ["地区", "分布", "省", "市", "县", "区域", "reported in", "distributed in", "occurred in", "found in"]
-    mech_cues = ["机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism", "免疫", "免疫应答", "免疫抑制", "感染", "内皮细胞", "单核", "巨噬", "树突", "细胞因子", "炎症", "通透性", "多器官"]
-
-    has_symptom = any(c in t for c in symptom_cues) or any(c in tl for c in symptom_cues)
-    has_drug = any(c in t for c in drug_cues) or any(c in tl for c in drug_cues)
-    has_loc = any(c in t for c in loc_cues) or any(c in tl for c in loc_cues)
-    has_mech = any(c in t for c in mech_cues) or any(c in tl for c in mech_cues)
-
-    # Allow explicit query overlap as a weak signal.
-    query_overlap = sum(
-        1
-        for c in ["临床表现", "症状", "治疗", "药物", "分布", "地区", "fda", "approved", "机制", "作用机制", "发病机制", "致病机制", "pathogenesis", "mechanism"]
-        if (c in ql or c in q) and (c in tl or c in t)
-    )
-
-    if st == "symptom":
-        if has_drug and not any(c in ql or c in q for c in drug_cues):
-            return False
-        if has_loc and not any(c in ql or c in q for c in loc_cues):
-            return False
-        return has_symptom or query_overlap >= 1
-    if st == "drug":
-        if has_symptom and not any(c in ql or c in q for c in symptom_cues):
-            return False
-        if has_loc and not any(c in ql or c in q for c in loc_cues):
-            return False
-        return has_drug or query_overlap >= 1
-    if st == "location":
-        if has_drug and not any(c in ql or c in q for c in drug_cues):
-            return False
-        if has_symptom and not any(c in ql or c in q for c in symptom_cues):
-            return False
-        return has_loc or query_overlap >= 1
-    if st == "mechanism":
-        # Mechanism queries are often phrased without explicit keywords besides "机制".
-        # Keep deletion-only filtering: prefer mech-ish sentences, but don't fail-closed if query is clearly mechanism.
-        if any(k in q for k in ["机制", "作用机制", "发病机制", "致病机制"]) or any(k in ql for k in ["mechanism", "pathogenesis"]):
-            return has_mech or query_overlap >= 1 or (len(t) >= 12)
-        # If query isn't explicitly mechanism, be conservative.
-        return has_mech or query_overlap >= 2
-    return False
+# NOTE: The following dead code was removed in v2 audit:
+# - _unit_relevant_to_any_semantic_type / _unit_relevant_to_semantic_type
+#   (hardcoded SFTSV-specific keyword lists, never called)
+# - _postprocess_answer_citation_guardrails / _postprocess_answer_grounding_only
+#   (SFTSV-specific logic, never called, contradicted entity priming)
+# - _format_evidence_units_with_ids
+#   (used [E1] format which caused prompt label leakage; Mode A now uses "- " format)
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -1689,15 +1476,16 @@ def main() -> None:
             if tok is None or model is None:
                 raise SystemExit("Mode A requires model/tokenizer")
             ev_texts = routing.get("evidence_texts") or [] if isinstance(routing, dict) else []
-            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
+            ev_block = "\n".join([f"- {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
                 + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
                 + ev_block
                 + "\n\n### 要求：\n"
-                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实。\n"
-                + "2. 不得引入证据中未提及的疾病名称全称、药物机制或其他外部知识。\n"
-                + "3. 如果证据不足以完整回答，在末尾注明。"
+                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实，不要重复。\n"
+                + "2. 回答中不得引用证据编号或标签。\n"
+                + "3. 如果证据不足以完整回答，在末尾简要注明。\n"
+                + "4. 回答控制在1-2句话，简明扼要。"
             )
             # -- KV injection: complementary (entity priming) or fallback (evidence) --
             pkv = None
@@ -1826,9 +1614,9 @@ def main() -> None:
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=pkv,
-                max_new_tokens=256,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
+                max_new_tokens=128,
+                no_repeat_ngram_size=6,
+                repetition_penalty=1.15,
             ).strip()
             # -- Post-generation evidence grounding check --
             answer, grounding_report = _evidence_grounding_filter(
@@ -1850,15 +1638,16 @@ def main() -> None:
         if pipeline == "modeA_rag":
             # Evidence Routing + Free Reasoning (LLM) with evidence text appended.
             ev_texts = routing.get("evidence_texts") or []
-            ev_block = "\n".join([f"[E{i+1}] {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
+            ev_block = "\n".join([f"- {str(t)}" for i, t in enumerate(ev_texts) if str(t).strip()])
             modeA_prompt = (
                 str(args.prompt).strip()
                 + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
                 + ev_block
                 + "\n\n### 要求：\n"
-                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实。\n"
-                + "2. 不得引入证据中未提及的疾病名称全称、药物机制或其他外部知识。\n"
-                + "3. 如果证据不足以完整回答，在末尾注明。"
+                + "1. 用自然语言组织回答，覆盖上述每条证据的核心事实，不要重复。\n"
+                + "2. 回答中不得引用证据编号或标签。\n"
+                + "3. 如果证据不足以完整回答，在末尾简要注明。\n"
+                + "4. 回答控制在1-2句话，简明扼要。"
             )
             if tok is None or model is None:
                 raise SystemExit("Mode A RAG requires model/tokenizer")
@@ -1881,9 +1670,9 @@ def main() -> None:
                 prompt=modeA_prompt,
                 device=device,
                 past_key_values=None,
-                max_new_tokens=256,
-                no_repeat_ngram_size=12,
-                repetition_penalty=1.08,
+                max_new_tokens=128,
+                no_repeat_ngram_size=6,
+                repetition_penalty=1.15,
             ).strip()
             # -- Post-generation evidence grounding check --
             answer, grounding_report = _evidence_grounding_filter(
@@ -1921,6 +1710,36 @@ def main() -> None:
             repetition_penalty=1.08,
         ).strip()
 
+        # Load entity priming texts (for post-processing abbreviation approval).
+        _ep_texts_simple: List[str] = []
+        _ep_dir = str(args.entity_priming_kv_dir or "").strip()
+        if _ep_dir and Path(_ep_dir).exists():
+            try:
+                _ep_path = Path(_ep_dir)
+                _ep_mf = _ep_path / "manifest.json"
+                if _ep_mf.exists():
+                    _ep_mf_data = json.loads(_ep_mf.read_text(encoding="utf-8"))
+                    _ep_sharded = isinstance(_ep_mf_data, dict) and _ep_mf_data.get("format") == "sharded"
+                else:
+                    _ep_sharded = False
+                if _ep_sharded:
+                    try:
+                        from external_kv_injection.src.vector_store.faiss_kv_bank import ShardedFaissKVBank as _SBank  # type: ignore
+                    except ModuleNotFoundError:
+                        from src.vector_store.faiss_kv_bank import ShardedFaissKVBank as _SBank  # type: ignore
+                    _sbank = _SBank.load(_ep_path)
+                    for _sh in (getattr(_sbank, "shards", None) or []):
+                        for _m in (getattr(_sh, "metas", None) or []):
+                            if isinstance(_m, dict) and _m.get("text"):
+                                _ep_texts_simple.append(str(_m["text"]))
+                else:
+                    _single = FaissKVBank.load(_ep_path)
+                    for _m in (getattr(_single, "metas", None) or []):
+                        if isinstance(_m, dict) and _m.get("text"):
+                            _ep_texts_simple.append(str(_m["text"]))
+            except Exception:
+                pass
+
         bank = FaissKVBank.load(Path(str(args.kv_dir)))
         retriever = Retriever(bank)
         enc = DomainEncoder(
@@ -1937,8 +1756,7 @@ def main() -> None:
         prose_guard = (
             "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
             "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
-            "回答必须严格与证据一致，不要编造。\n"
-            "【缩写规则】除非检索/注入的知识内容原文出现该括号形式，否则禁止输出类似 “SFTSV（……）” 的括号扩展。"
+            "回答必须严格与证据一致，不要编造。"
         )
 
         specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
@@ -2154,6 +1972,7 @@ def main() -> None:
             evidence_texts=ev_texts0,
             intent=str(intent0),
             specs=specs,
+            entity_priming_texts=_ep_texts_simple,
         )
         # Some violations are "format-only" and can be safely handled by postprocess (e.g. acronym expansions).
         # Do NOT trigger regen for those, otherwise the model may overreact and refuse to answer.
@@ -2195,6 +2014,7 @@ def main() -> None:
                 evidence_texts=ev_texts1,
                 intent=str(intent0),
                 specs=specs,
+                entity_priming_texts=_ep_texts_simple,
             )
             injected_final = injected_round1
             steps_final = steps1
@@ -2203,7 +2023,7 @@ def main() -> None:
 
         # Final safety: enforce acronym expansion rule post-hoc (should be rare after regen).
         ev_texts_final = _gather_ev_texts(steps_final)
-        stripped = _strip_unapproved_abbr_expansions(text=injected_final.strip(), evidence_texts=ev_texts_final).strip()
+        stripped = _strip_unapproved_abbr_expansions(text=injected_final.strip(), evidence_texts=ev_texts_final, entity_priming_texts=_ep_texts_simple).strip()
         postprocess_changed = stripped != injected_final.strip()
         injected_final = stripped
         violations_after_postprocess = _detect_violations(
@@ -2212,6 +2032,7 @@ def main() -> None:
             evidence_texts=ev_texts_final,
             intent=str(intent0),
             specs=specs,
+            entity_priming_texts=_ep_texts_simple,
         )
 
         out_simple = {

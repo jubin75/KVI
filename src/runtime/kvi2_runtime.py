@@ -44,10 +44,12 @@ from .multistep_injector import MultiStepInjector
 
 @dataclass(frozen=True)
 class KVI2Config:
-    layers: Sequence[int] = (0, 1, 2, 3)
+    layers: Sequence[int] = (0, 1, 2, 3, 4, 5, 6, 7)
     top_k: int = 8
-    max_new_tokens_base: int = 192
-    max_new_tokens_rim: int = 192
+    max_new_tokens_base: int = 128
+    max_new_tokens_rim: int = 128
+    no_repeat_ngram_size: int = 6
+    repetition_penalty: float = 1.15
     kv_refresh_rounds: int = 2
     kv_irrelevant_logit_delta_threshold: float = 0.05
     tau_cos_dist: float = 0.35
@@ -60,10 +62,8 @@ class KVI2Config:
     # - "narrative": constrained LLM summary (grounded) + bullets
     # - "llm": bypass LIST_ONLY projection and force KV-injected generative answering
     # - "llm_prose": like llm, but also forces prose (no bullets) via a style guard
-    #
-    # TEMP (per product iteration): default to llm_prose so intent routing bypasses LIST_ONLY projection.
     answer_mode: str = "llm_prose"
-    # Pattern contract level config (ids are pattern_id, e.g., "abbr:SFTSV")
+    # Pattern contract level config (ids are pattern_id, e.g., "abbr:entity_name")
     pattern_hard: Sequence[str] = ()
     pattern_soft: Sequence[str] = ()
     # Optional: restrict retrieval to these block_ids (routing-aligned)
@@ -118,8 +118,8 @@ class KVI2Runtime:
             device=device,
             past_key_values=None,
             max_new_tokens=int(self.cfg.max_new_tokens_base),
-            no_repeat_ngram_size=12,
-            repetition_penalty=1.08,
+            no_repeat_ngram_size=int(self.cfg.no_repeat_ngram_size),
+            repetition_penalty=float(self.cfg.repetition_penalty),
         )
 
         # 2) Pattern-first (non-semantic) + topic-level contracts (prompt-agnostic)
@@ -571,7 +571,7 @@ class KVI2Runtime:
                 out["retrieval"]["list_items_source_block_ids"] = [m["source_block_id"] for m in mapping]
                 out["retrieval"]["list_only_audit"] = audit
                 if not items:
-                    out["rim_answer"] = "No list-like evidence found in retrieved sources."
+                    out["rim_answer"] = "现有证据不足以回答该问题。"
                     out["gate"] = dict(chosen_gate_after_validation or {})
                     return out
                 # Optional: narrative rendering (still grounded; items are the only allowed facts).
@@ -590,9 +590,9 @@ class KVI2Runtime:
                         prompt=narrative_prompt,
                         device=device,
                         past_key_values=chosen_pkv,
-                        max_new_tokens=min(256, int(self.cfg.max_new_tokens_rim)),
-                        no_repeat_ngram_size=12,
-                        repetition_penalty=1.08,
+                        max_new_tokens=int(self.cfg.max_new_tokens_rim),
+                        no_repeat_ngram_size=int(self.cfg.no_repeat_ngram_size),
+                        repetition_penalty=float(self.cfg.repetition_penalty),
                     )
                     summary = str(rim_answer or "").strip()
                     if not summary:
@@ -614,8 +614,8 @@ class KVI2Runtime:
             device=device,
             past_key_values=chosen_pkv,
             max_new_tokens=int(self.cfg.max_new_tokens_rim),
-            no_repeat_ngram_size=12,
-            repetition_penalty=1.08,
+            no_repeat_ngram_size=int(self.cfg.no_repeat_ngram_size),
+            repetition_penalty=float(self.cfg.repetition_penalty),
         )
         ans = str(rim_answer or "").strip()
         # If model still outputs bullets in llm_prose mode, rewrite into deterministic prose using extracted items.
@@ -716,11 +716,8 @@ def _rewrite_items_to_prose(*, user_prompt: str, items: Sequence[str], max_items
     it = [str(x).strip() for x in (items or []) if str(x).strip()]
     it = it[: max(1, int(max_items))]
     joined = "、".join(it)
-    q = str(user_prompt or "").strip()
     if not joined:
         return "现有证据不足以回答该问题。"
-    if ("临床" in q) or ("表现" in q) or ("症状" in q):
-        return f"根据检索到的证据，SFTSV/SFTS 的临床表现主要包括：{joined}。"
     return f"根据检索到的证据，主要包括：{joined}。"
 
 
@@ -847,15 +844,12 @@ def _extract_abbr_expansion_from_blocks(
                 continue
             if ap_abbr.upper() != abbr_up:
                 continue
-            if len(ap_abbr) < 3 or len(full) < (len(ap_abbr) + 4):
+            if len(ap_abbr) < 3:
                 continue
+            if not _is_plausible_full(full, abbr_up):
+                continue
+            # Extra strictness for machine-extracted pairs: first word must be >=4 chars
             full_low = full.lower()
-            if full_low.startswith(("abstract", "keywords", "introduction")):
-                continue
-            if " is " in full_low or " are " in full_low or " was " in full_low or " were " in full_low:
-                continue
-            if " caused by " in full_low:
-                continue
             first_word = full_low.split()[0] if full_low.split() else ""
             if len(first_word) < 4:
                 continue
