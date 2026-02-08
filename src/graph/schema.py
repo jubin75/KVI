@@ -1,19 +1,22 @@
 """
-Scheme C — Triple & Graph data schema.
+Scheme C — Triple & Graph data schema (v3: 三元 KVI).
 
 Core data model for the knowledge graph.  Every piece of domain knowledge
 is decomposed into triples ``(subject, predicate, object)`` with typed
 entities and relations.  The graph is built from these triples at compile
 time and traversed at query time for entity-anchored retrieval.
 
-Design decisions (grounded in empirical findings):
-* Relations guide **retrieval routing**, NOT attention-head routing.
-  Our experiments proved that KV prefix injection degrades RAG quality
-  when evidence is already in the prompt.  Relations select *which*
-  evidence enters the prompt, not *how* the model attends.
-* Subject anchoring is prompt-level (entity context sentence prepended),
-  NOT KV-injection-level.  This avoids the token corruption observed
-  with entity priming KV injection.
+Design decisions (v3 — 三元 KVI integrated):
+* Relations guide **retrieval routing** (which evidence enters the prompt)
+  AND **layer routing** (which Transformer layers receive KV injection).
+* Subject anchoring is **dual-channel**: KV injection (short anchor,
+  shallow layers 0-3) + prompt-level entity context (detailed description).
+* Triple KV injection uses extremely short Chinese sentences (≤15 tokens)
+  compiled from graph triples, injected at relation-dependent layer ranges.
+  This avoids the token corruption observed with long-blob KV in v1/v2.
+* KV carries **attention structure constraints** (short, focused);
+  Prompt carries **detailed content** (evidence text, entity descriptions).
+  The two channels are complementary, never duplicated.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Scheme C — Graph Retriever (runtime).
+Scheme C — Graph Retriever (runtime, v3: 三元 KVI).
 
 Given a user query, this module:
 1. **Entity Recognition** — identifies entities in the query that match
@@ -11,12 +11,10 @@ Given a user query, this module:
 4. **Evidence Collection** — collects provenance sentences from the
    traversed triples for inclusion in the RAG prompt.
 5. **Entity Context** — builds a prompt-level entity context sentence
-   (replaces KV injection for subject anchoring).
+   (complementary to KV injection subject anchoring).
 
-This module is the Scheme C replacement for:
-- ``semantic_type_specs.json`` + ``soft_filter``
-- ``annotate_sentences_semantic_tags.py``
-- Entity priming KV injection (prompt-level anchoring instead)
+v3: Entity context in the prompt works **alongside** triple KV injection
+(short KV for attention structure) rather than *replacing* it.
 """
 
 from __future__ import annotations
@@ -284,9 +282,10 @@ class GraphRetriever:
         """
         Build a prompt-level entity context sentence.
 
-        This replaces KV injection for subject anchoring: instead of injecting
-        entity definition into KV cache (which causes token corruption),
-        we prepend a concise entity context to the prompt.
+        v3: This is the *prompt channel* of subject anchoring.  It works
+        alongside the KV channel (triple_kv_compiler's subject anchor KV)
+        to provide complementary information — detailed description in
+        prompt, short anchor signal in KV.
         """
         parts: List[str] = []
         for m in matches:

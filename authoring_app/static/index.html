@@ -144,7 +144,7 @@
               <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
             </label>
             <div class="help-content">实体别名表，用于图谱构建时合并同一实体的不同名称。每行一条 JSON：<br/><code>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒"]}</code><br/>Build Graph 时自动发送到服务器。</div>
-            <textarea id="graph_aliases" rows="5" placeholder='{"canonical": "SFTSV", "aliases": ["SFTSV病毒"]}'>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒", "严重发热伴血小板减少综合征"], "entity_type": "pathogen", "description": "发热伴血小板减少综合征病毒，属于新型布尼亚病毒属，主要通过蜱虫叮咬传播"}
+            <textarea id="graph_aliases" rows="5" placeholder='{"canonical": "SFTSV", "aliases": ["SFTSV病毒"]}'>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒", "严重发热伴血小板减少综合征"], "entity_type": "pathogen", "description": "发热伴血小板减少综合征病毒（SFTSV），属于新型布尼亚病毒属"}
 {"canonical": "流感样症状", "aliases": ["急性发热", "发热"]}
 {"canonical": "山东", "aliases": [], "entity_type": "epidemiology"}
 {"canonical": "安徽", "aliases": [], "entity_type": "epidemiology"}
@@ -296,6 +296,10 @@
           <div class="field">
             <label>Base LLM Output (no evidence)</label>
             <div class="pre" id="out_graph_base_llm">Waiting...</div>
+          </div>
+          <div class="field">
+            <label>Triple KV Injection (三元 KVI)</label>
+            <div class="pre" id="out_graph_kv_injection">Waiting...</div>
           </div>
           <div class="field">
             <label>Entity Context (prompt-level anchoring)</label>

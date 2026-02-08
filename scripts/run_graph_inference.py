@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Scheme C — Graph Inference CLI.
+Scheme C — Graph Inference CLI (v3: 三元 KVI).
 
-Lightweight runtime: graph-based retrieval + LLM generation.
-Replaces Mode A's tag routing with entity-anchored graph traversal.
+Runtime: graph-based retrieval + **triple KV injection** + LLM generation.
+
+v3 integrates the "三元 KVI" architecture:
+- Subject Anchoring KV (entity description, shallow layers 0-3)
+- Triple KV (short s-r-o sentences, relation-dependent layer ranges)
+- Prompt-level entity context + evidence (complementary, never duplicated)
 
 Usage::
 
@@ -11,6 +15,7 @@ Usage::
         --model /path/to/base_llm \\
         --prompt "SFTSV的临床症状有哪些？" \\
         --graph_index /path/to/graph_index.json \\
+        [--triple_kvbank_dir /path/to/triple_kvbank] \\
         [--use_chat_template] [--local_files_only]
 
 Output (JSON to stdout):
@@ -18,7 +23,8 @@ Output (JSON to stdout):
         "diagnosis_result": "...",
         "base_llm_result": "...",
         "graph_debug": {...},
-        "grounding_report": {...}
+        "grounding_report": {...},
+        "kv_injection_debug": {...}
     }
 """
 
@@ -78,11 +84,23 @@ def _tokenize_chinese(text: str) -> set[str]:
     return tokens
 
 
-def _simple_grounding(output_text: str, evidence_texts: list[str]) -> dict:
-    """Simple grounding check based on token overlap with evidence."""
+def _simple_grounding(
+    output_text: str,
+    evidence_texts: list[str],
+    entity_context: str = "",
+    kv_texts: list[str] | None = None,
+) -> dict:
+    """Simple grounding check based on token overlap with evidence + entity context + KV texts."""
     evidence_tokens: set[str] = set()
     for et in evidence_texts:
         evidence_tokens |= _tokenize_chinese(et)
+    # Entity context is also a valid grounding source
+    if entity_context:
+        evidence_tokens |= _tokenize_chinese(entity_context)
+    # Triple KV texts are also valid grounding sources
+    if kv_texts:
+        for kt in kv_texts:
+            evidence_tokens |= _tokenize_chinese(kt)
 
     sents = re.split(r"[。！？\n]+", output_text)
     sents = [s.strip() for s in sents if s.strip()]
@@ -117,10 +135,11 @@ def main() -> None:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-    p = argparse.ArgumentParser(description="Graph-based inference (Scheme C)")
+    p = argparse.ArgumentParser(description="Graph-based inference (Scheme C + 三元 KVI)")
     p.add_argument("--model", required=True, help="Base LLM model path")
     p.add_argument("--prompt", required=True, help="User query")
     p.add_argument("--graph_index", required=True, help="graph_index.json path")
+    p.add_argument("--triple_kvbank_dir", default="", help="Triple KV bank directory (compiled by triple_kv_compiler)")
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument("--local_files_only", action="store_true")
     p.add_argument("--max_new_tokens", type=int, default=128)
@@ -178,10 +197,40 @@ def main() -> None:
                 "total_sentences": 0, "grounded": 0,
                 "dropped_or_tagged": 0, "details": [],
             },
+            "kv_injection_debug": {"enabled": False, "reason": "no_evidence"},
         }, ensure_ascii=False))
         sys.exit(0)
 
-    # ---- 4. Load LLM ----
+    # ---- 4. Load Triple KV Bank (if available) ----
+    kv_injection_debug: dict = {"enabled": False}
+    triple_kv_manifest = None
+    triple_kv_cache_dict = None
+    triple_kvbank_dir = Path(args.triple_kvbank_dir) if args.triple_kvbank_dir else None
+
+    if triple_kvbank_dir and triple_kvbank_dir.exists():
+        try:
+            from src.graph.triple_kv_compiler import (
+                load_triple_kvbank,
+                assemble_kv_for_entities,
+            )
+            triple_kv_manifest, triple_kv_cache_dict = load_triple_kvbank(triple_kvbank_dir)
+            kv_injection_debug["enabled"] = True
+            kv_injection_debug["kvbank_dir"] = str(triple_kvbank_dir)
+            kv_injection_debug["num_items"] = len(triple_kv_manifest.items)
+            kv_injection_debug["num_entities"] = len(triple_kv_manifest.entity_items)
+            print(
+                f"[graphC] Triple KV bank loaded: {len(triple_kv_manifest.items)} items "
+                f"for {len(triple_kv_manifest.entity_items)} entities",
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(f"[graphC] WARNING: Failed to load triple KV bank: {e}", file=sys.stderr)
+            kv_injection_debug["error"] = str(e)
+    else:
+        kv_injection_debug["reason"] = "no_kvbank_dir" if not triple_kvbank_dir else "dir_not_found"
+        print(f"[graphC] Triple KV injection disabled ({kv_injection_debug['reason']})", file=sys.stderr)
+
+    # ---- 5. Load LLM ----
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -209,7 +258,60 @@ def main() -> None:
     model.to(device).eval()
     print("[graphC] Model loaded", file=sys.stderr)
 
-    # ---- 5. Build prompt ----
+    # ---- 6. Assemble Triple KV for matched entities ----
+    assembled_kv = None
+    if triple_kv_manifest and triple_kv_cache_dict:
+        matched_names = [m["entity_name"] for m in gr.matched_entities]
+        # Get related triples from walk results for relation filtering
+        walk_results_for_kv = []
+        for ev in gr.evidence_sentences:
+            if ev.get("relation"):
+                walk_results_for_kv.append({"relation": ev["relation"]})
+
+        try:
+            assembled_kv = assemble_kv_for_entities(
+                matched_entity_names=matched_names,
+                related_triples=walk_results_for_kv if walk_results_for_kv else None,
+                manifest=triple_kv_manifest,
+                kv_cache_dict=triple_kv_cache_dict,
+                device=device,
+                dtype=dtype,
+            )
+            if assembled_kv is not None:
+                # Count active KV items
+                active_items = []
+                for ename in matched_names:
+                    for iid in triple_kv_manifest.entity_items.get(ename, []):
+                        meta = triple_kv_manifest.items.get(iid)
+                        if meta:
+                            active_items.append({
+                                "item_id": iid,
+                                "type": meta.item_type,
+                                "text": meta.text,
+                                "relation": meta.relation,
+                                "layers": f"{meta.layer_start}-{meta.layer_end}",
+                                "tokens": meta.token_count,
+                            })
+                kv_injection_debug["active_items"] = active_items
+                kv_injection_debug["total_kv_tokens"] = sum(
+                    it.get("tokens", 0) for it in active_items
+                )
+                kv_seq_len = assembled_kv[0][0].shape[2] if assembled_kv[0] is not None else 0
+                kv_injection_debug["assembled_seq_len"] = int(kv_seq_len)
+                print(
+                    f"[graphC] KV assembled: {len(active_items)} items, "
+                    f"seq_len={kv_seq_len}",
+                    file=sys.stderr,
+                )
+            else:
+                kv_injection_debug["assembled"] = False
+                kv_injection_debug["reason"] = "no_matching_items"
+        except Exception as e:
+            print(f"[graphC] WARNING: KV assembly failed: {e}", file=sys.stderr)
+            kv_injection_debug["assembly_error"] = str(e)
+            assembled_kv = None
+
+    # ---- 7. Build prompt ----
     evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(evidence_texts))
 
     prompt_parts: list[str] = []
@@ -224,7 +326,7 @@ def main() -> None:
     )
     full_prompt = "\n\n".join(prompt_parts)
 
-    # ---- 6. Generate (graph + evidence) ----
+    # ---- 8. Generate (graph + evidence + KV injection) ----
     def _build_input(messages: list[dict]) -> str:
         if args.use_chat_template:
             apply_fn = getattr(tokenizer, "apply_chat_template", None)
@@ -242,19 +344,27 @@ def main() -> None:
     text_input = _build_input(main_messages)
     inputs = tokenizer(text_input, return_tensors="pt").to(device)
 
+    generate_kwargs: dict = {
+        "max_new_tokens": args.max_new_tokens,
+        "do_sample": False,
+        "no_repeat_ngram_size": 6,
+        "repetition_penalty": 1.15,
+    }
+
+    # Inject triple KV as past_key_values if available
+    if assembled_kv is not None:
+        generate_kwargs["past_key_values"] = assembled_kv
+        print("[graphC] Generating with triple KV injection", file=sys.stderr)
+    else:
+        print("[graphC] Generating without KV injection", file=sys.stderr)
+
     with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            no_repeat_ngram_size=6,
-            repetition_penalty=1.15,
-        )
+        output_ids = model.generate(**inputs, **generate_kwargs)
     new_ids = output_ids[0][inputs["input_ids"].shape[1] :]
     answer = tokenizer.decode(new_ids, skip_special_tokens=True).strip()
     print(f"[graphC] Generated answer ({len(answer)} chars)", file=sys.stderr)
 
-    # ---- 7. Generate baseline (no evidence) ----
+    # ---- 9. Generate baseline (no evidence, no KV) ----
     base_messages = [
         {"role": "system", "content": "你是一个医学专业助手。"},
         {"role": "user", "content": args.prompt},
@@ -273,14 +383,26 @@ def main() -> None:
     base_new = base_ids[0][base_inputs["input_ids"].shape[1] :]
     base_answer = tokenizer.decode(base_new, skip_special_tokens=True).strip()
 
-    # ---- 8. Grounding filter ----
-    grounding = _simple_grounding(answer, evidence_texts)
+    # ---- 10. Grounding filter ----
+    # Include triple KV texts as additional grounding sources
+    kv_grounding_texts: list[str] = []
+    if kv_injection_debug.get("active_items"):
+        for it in kv_injection_debug["active_items"]:
+            if it.get("text"):
+                kv_grounding_texts.append(it["text"])
+
+    grounding = _simple_grounding(
+        answer,
+        evidence_texts,
+        entity_context=entity_context,
+        kv_texts=kv_grounding_texts,
+    )
 
     # Assemble grounded output (only include grounded sentences)
     grounded_sents = [d["sentence"] for d in grounding["details"] if d["grounded"]]
     grounded_text = "。".join(grounded_sents) + "。" if grounded_sents else answer
 
-    # ---- 9. Output ----
+    # ---- 11. Output ----
     result_json = {
         "diagnosis_result": grounded_text,
         "diagnosis_result_raw": answer,
@@ -290,6 +412,7 @@ def main() -> None:
         "entity_context": entity_context,
         "intent": intent,
         "grounding_report": grounding,
+        "kv_injection_debug": kv_injection_debug,
     }
     print(json.dumps(result_json, ensure_ascii=False))
 

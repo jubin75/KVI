@@ -1445,6 +1445,41 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "build_knowledge_graph", "logs": graph_logs})
                 return
 
+            # Step 3: Compile Triple KV Bank (三元 KVI)
+            triple_kvbank_dir = out_dir / "triple_kvbank"
+            cmd_triple_kv = [
+                sys.executable,
+                str(PROJECT_ROOT / "src" / "graph" / "triple_kv_compiler.py"),
+                "--graph_index", str(graph_index_json),
+                "--model", base_llm,
+                "--out_dir", str(triple_kvbank_dir),
+            ]
+            if device:
+                cmd_triple_kv.extend(["--device", device])
+            try:
+                r_triple_kv = subprocess.run(
+                    cmd_triple_kv, cwd=str(PROJECT_ROOT),
+                    capture_output=True, text=True, check=False, timeout=timeout_s,
+                )
+            except subprocess.TimeoutExpired:
+                r_triple_kv = None
+            if r_triple_kv is not None:
+                graph_logs.append({
+                    "step": "compile_triple_kvbank",
+                    "cmd": " ".join(cmd_triple_kv),
+                    "returncode": int(r_triple_kv.returncode),
+                    "stdout": (r_triple_kv.stdout or "")[-4000:],
+                    "stderr": (r_triple_kv.stderr or "")[-4000:],
+                })
+                # Non-fatal: triple KV is optional enhancement
+                if r_triple_kv.returncode != 0:
+                    print(f"[compile_graph] triple_kv compilation failed (non-fatal)", flush=True)
+            else:
+                graph_logs.append({
+                    "step": "compile_triple_kvbank",
+                    "error": "timeout",
+                })
+
             # Summary
             graph_summary: Dict[str, Any] = {}
             if graph_index_json.exists():
@@ -1455,6 +1490,19 @@ class KVIHandler(BaseHTTPRequestHandler):
                         "num_nodes": meta.get("num_nodes", 0),
                         "num_triples": meta.get("num_triples", 0),
                         "num_entity_index_entries": meta.get("num_entity_index_entries", 0),
+                    }
+                except Exception:
+                    pass
+
+            triple_kv_summary: Dict[str, Any] = {}
+            triple_kv_manifest_path = triple_kvbank_dir / "manifest.json"
+            if triple_kv_manifest_path.exists():
+                try:
+                    tkv = json.loads(triple_kv_manifest_path.read_text(encoding="utf-8"))
+                    triple_kv_summary = {
+                        "num_items": len(tkv.get("items") or {}),
+                        "num_entities": len(tkv.get("entity_items") or {}),
+                        "num_layers": tkv.get("num_layers", 0),
                     }
                 except Exception:
                     pass
@@ -1470,6 +1518,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "triples_jsonl": str(triples_jsonl),
                     "sentences_source": str(sentences_src),
                     "graph_summary": graph_summary,
+                    "triple_kvbank_dir": str(triple_kvbank_dir),
+                    "triple_kv_summary": triple_kv_summary,
                     "logs": graph_logs,
                 },
             )
@@ -1931,6 +1981,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"graph_index.json not found: {graph_index_json}. Click Build Graph first."})
                 return
             timeout_s = int(obj.get("timeout_s") or 180)
+            triple_kvbank_dir = out_dir / "triple_kvbank"
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_graph_inference.py"),
@@ -1940,6 +1991,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--use_chat_template",
                 "--local_files_only",
             ]
+            if triple_kvbank_dir.exists():
+                cmd.extend(["--triple_kvbank_dir", str(triple_kvbank_dir)])
             try:
                 r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
             except subprocess.TimeoutExpired:

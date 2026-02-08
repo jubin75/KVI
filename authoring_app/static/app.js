@@ -296,7 +296,7 @@ async function runDebug() {
     "out_cli", "out_modeA", "out_modeA_rag", "out_modeB", "out_route",
     "out_debug_log", "out_base_llm",
     "out_graph", "out_graph_raw", "out_graph_rag", "out_graph_base_llm",
-    "out_graph_entity_ctx", "out_graph_evidence",
+    "out_graph_entity_ctx", "out_graph_evidence", "out_graph_kv_injection",
   ];
   for (const f of allFields) { const el = $(f); if (el) el.textContent = "Running..."; }
   const allStatus = [
@@ -341,6 +341,7 @@ async function runDebug() {
     const debugObj = {};
     if (mode === "graphC") {
       if (r.graph_debug) debugObj.graph_debug = r.graph_debug;
+      if (r.kv_injection_debug) debugObj.kv_injection_debug = r.kv_injection_debug;
       if (r.grounding_report) debugObj.graph_grounding = r.grounding_report;
       if (r.intent) debugObj.graph_intent = r.intent;
       if (resp && resp.stderr_tail) debugObj.graph_stderr = resp.stderr_tail;
@@ -373,6 +374,19 @@ async function runDebug() {
     $("out_graph_base_llm").textContent = r.base_llm_result || "";
     $("out_graph_entity_ctx").textContent = r.entity_context || "(none)";
     $("out_graph_evidence").textContent = (r.evidence_texts || []).map((t, i) => `${i+1}. ${t}`).join("\n") || "(none)";
+    // KV Injection info
+    const kvDbg = r.kv_injection_debug || {};
+    if (kvDbg.enabled && kvDbg.active_items) {
+      const lines = kvDbg.active_items.map(it =>
+        `[${it.type}] ${it.text} (${it.relation || 'anchor'}, layers ${it.layers}, ${it.tokens} tok)`
+      );
+      lines.push(`--- total KV tokens: ${kvDbg.total_kv_tokens || 0}, seq_len: ${kvDbg.assembled_seq_len || 0}`);
+      $("out_graph_kv_injection").textContent = lines.join("\n");
+    } else {
+      $("out_graph_kv_injection").textContent = kvDbg.enabled === false
+        ? `KV injection disabled (${kvDbg.reason || 'no triple_kvbank'})`
+        : "(no KV items matched)";
+    }
     const rr = respRag && respRag.result ? respRag.result : {};
     $("out_graph_rag").textContent = rr.diagnosis_result || "";
     $("out_graph_rag_status").textContent = rr.diagnosis_result ? "status: OK" : "";
