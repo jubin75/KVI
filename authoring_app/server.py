@@ -892,10 +892,17 @@ class KVIHandler(BaseHTTPRequestHandler):
             build = _topic_build_cfg(topic)
             work_dir = Path(str(build.get("work_dir") or "")).expanduser()
 
-            # Primary: docs.meta.jsonl. Fallback: derive doc list from blocks.evidence.jsonl.
+            # Primary: docs.meta.jsonl. Fallback: blocks files (evidence > enriched > jsonl).
             docs_meta = work_dir / "docs.meta.jsonl"
-            blocks_path = work_dir / "blocks.evidence.jsonl"
             approvals = _load_doc_approvals(work_dir)
+
+            # Find the best available blocks file
+            blocks_path = None
+            for bname in ["blocks.evidence.jsonl", "blocks.enriched.jsonl", "blocks.jsonl"]:
+                bp = work_dir / bname
+                if bp.exists():
+                    blocks_path = bp
+                    break
 
             if docs_meta.exists():
                 docs = _read_jsonl(docs_meta)
@@ -914,8 +921,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                         "approved": bool(approvals.get(did, False)),
                         "block_count": 0,
                     })
-                # Enrich with block counts from blocks.evidence.jsonl
-                if blocks_path.exists():
+                # Enrich with block counts
+                if blocks_path:
                     block_counts: Dict[str, int] = {}
                     for b in _read_jsonl(blocks_path):
                         did_b = str(b.get("doc_id") or "").strip()
@@ -926,13 +933,13 @@ class KVIHandler(BaseHTTPRequestHandler):
                 _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "source": "docs.meta.jsonl"})
                 return
 
-            # Fallback: derive doc list directly from blocks.evidence.jsonl
-            if not blocks_path.exists():
+            # Fallback: derive doc list from blocks file
+            if not blocks_path:
                 _json_response(self, HTTPStatus.NOT_FOUND, {
                     "error": "not_found",
-                    "message": f"Neither docs.meta.jsonl nor blocks.evidence.jsonl found in work_dir={work_dir}. "
-                               f"Checked: {docs_meta}, {blocks_path}. "
-                               f"Run PDF ingestion first (build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py).",
+                    "message": f"No docs.meta.jsonl or blocks files found in work_dir={work_dir}. "
+                               f"Checked: blocks.evidence.jsonl, blocks.enriched.jsonl, blocks.jsonl. "
+                               f"Run PDF ingestion first.",
                 })
                 return
 
@@ -961,7 +968,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "approved": bool(approvals.get(did, False)),
                     "block_count": len(blks),
                 })
-            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items_fb, "count": len(items_fb), "source": "blocks.evidence.jsonl"})
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items_fb, "count": len(items_fb), "source": str(blocks_path.name)})
             return
 
         if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/blocks"):
@@ -1609,31 +1616,42 @@ class KVIHandler(BaseHTTPRequestHandler):
             timeout_s = int(obj.get("timeout_s") or 600)
 
             # ---- Step 1: Compile sentences ----
-            # Primary: evidence sets. Fallback: blocks.evidence.jsonl directly.
-            recs, rec_stats = _collect_enabled_sentence_records(topic, enabled_only=True)
-            sentence_source = "evidence_sets"
-            if not recs:
-                # Fallback: read blocks.evidence.jsonl directly
-                blocks_path = out_dir / "blocks.evidence.jsonl"
-                if blocks_path.exists():
-                    blocks = _read_jsonl(blocks_path)
-                    recs = []
+            # Priority: blocks.evidence.jsonl > blocks.enriched.jsonl > blocks.jsonl > evidence sets
+            recs: List[Dict[str, Any]] = []
+            sentence_source = ""
+            blocks_candidates = [
+                "blocks.evidence.jsonl",
+                "blocks.enriched.jsonl",
+                "blocks.jsonl",
+            ]
+            for bname in blocks_candidates:
+                bpath = out_dir / bname
+                if bpath.exists():
+                    blocks = _read_jsonl(bpath)
                     for b in blocks:
-                        text = str(b.get("text") or "").strip()
+                        text = str(b.get("text") or b.get("claim") or "").strip()
                         if text:
                             recs.append({
-                                "id": str(b.get("block_id") or ""),
+                                "id": str(b.get("block_id") or b.get("id") or ""),
                                 "claim": text,
-                                "source_id": str(b.get("doc_id") or ""),
+                                "source_id": str(b.get("doc_id") or b.get("source_id") or ""),
                                 "source_ref": {"doi": None, "title": None},
                                 "author": None,
                                 "tags": [],
                             })
-                    sentence_source = "blocks.evidence.jsonl"
+                    if recs:
+                        sentence_source = f"{bname} ({len(recs)} blocks)"
+                        break
+                    # File existed but had no usable text — try next candidate
+            if not recs:
+                # Fallback: evidence sets
+                recs, rec_stats = _collect_enabled_sentence_records(topic, enabled_only=True)
+                sentence_source = f"evidence_sets ({len(recs)} records)"
             if not recs:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {
                     "error": "bad_request",
-                    "message": "No evidence found. Need either evidence sets or blocks.evidence.jsonl in work_dir.",
+                    "message": f"No evidence found in work_dir={out_dir}. "
+                               f"Checked: {', '.join(blocks_candidates)} and evidence sets.",
                 })
                 return
 

@@ -19,7 +19,7 @@
       <div class="nav-item" id="tab_docs"><span class="nav-icon">L</span> Literature Import</div>
       <div class="nav-item" id="tab_debug"><span class="nav-icon">D</span> Inference Debug</div>
 
-      <div class="nav-section">Topic <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:12px;color:var(--text-muted)">?</span></div>
+      <div class="nav-section">Topic <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:12px;color:var(--text-muted)">?</span></div>
       <div class="help-content">例如，建立关于 SFTSV（发热伴血小板减少综合征）的专题知识库。</div>
       <div class="field" style="min-width:0">
         <select id="topic_select"></select>
@@ -81,7 +81,7 @@
           <div class="field">
             <label>
               Evidence Compilation Rules
-              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
             <div class="help-content">
               每一条进入 KV space 的 Evidence，必须满足：<br/>
@@ -121,7 +121,7 @@
           <div class="field">
             <label>
               Entity Aliases (Graph Build)
-              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
             <div class="help-content">实体别名表，用于图谱构建时合并同一实体的不同名称。每行一条 JSON：<br/><code>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒"]}</code><br/>Build Graph 时自动发送到服务器。</div>
             <textarea id="graph_aliases" rows="5" placeholder='{"canonical": "SFTSV", "aliases": ["SFTSV病毒"]}'>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒", "严重发热伴血小板减少综合征"], "entity_type": "pathogen", "description": "发热伴血小板减少综合征病毒（SFTSV），属于新型布尼亚病毒属"}
@@ -151,7 +151,7 @@
           <div class="field">
             <label>
               Claim
-              <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
             <div class="help-content">支持多条输入：每条知识以 ### 作为结束标记分隔。</div>
             <textarea id="sent_claim" placeholder="Enter evidence claims, use ### as delimiter"></textarea>
@@ -181,23 +181,18 @@
       <!-- ==================== TAB: Literature Import ==================== -->
       <div id="view_docs" style="display:none">
         <div class="panel">
-          <div class="row">
-            <div class="field">
-              <label>Topic</label>
+          <div class="row" style="align-items:center">
+            <div class="field" style="flex:0 0 auto;min-width:120px">
               <select id="topic_select_docs"></select>
             </div>
-            <div class="field">
-              <div class="btns">
-                <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff">Build Graph</button>
-                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')" style="cursor:pointer;margin-left:8px;font-size:13px;color:var(--text-muted)">?</span>
-              </div>
-              <div class="help-content">
-                选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
-                点击文档查看 raw sentences。<br/>
-                点击 <b>Build Graph</b> 一键编译三元 KV：<br/>
-                Sentences → Triples → graph_index.json → triple_kvbank/
-              </div>
-            </div>
+            <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff;white-space:nowrap">Build Graph</button>
+            <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:13px;color:var(--text-muted);margin-left:4px">?</span>
+          </div>
+          <div class="help-content">
+            选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
+            点击文档查看 raw sentences。<br/>
+            点击 <b>Build Graph</b> 一键编译三元 KV：<br/>
+            Sentences → Triples → graph_index.json → triple_kvbank/
           </div>
         </div>
         <div class="panel" id="docs_list_view">

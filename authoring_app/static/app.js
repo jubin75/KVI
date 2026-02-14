@@ -147,6 +147,7 @@ function formatPipelineResult(resp) {
   const lines = [
     `=== Build Pipeline Complete ===`,
     `Topic: ${resp.topic}`,
+    `Source: ${ps.sentence_source || "(unknown)"}`,
     ``,
     `Sentences compiled: ${ps.sentences_compiled || 0}`,
     `Sentences tagged: ${ps.sentences_tagged ? "OK" : "skipped"}`,

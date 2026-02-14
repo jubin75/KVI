@@ -86,6 +86,60 @@ export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
 - **results_jsonl 默认是追加写**：方便保留历史记录。若你想每次重跑都得到“干净的一份结果”，在 config 的 `doc_filter` 里加：
   - `"overwrite_results": true`
 
+### 1.1.3（UI 工作流前置）PDF → raw_chunks → blocks.evidence.jsonl（Literature Import 数据准备）
+
+> 目标：为 KVI Console UI 的 **Literature Import → Build Graph** 功能准备数据。
+> Build Graph 需要 `blocks.evidence.jsonl` 才能编译完整的三元 KV Bank。
+> 如果 work_dir 下没有该文件，需要先跑以下两步。
+
+**Step 1: PDF → raw_chunks.jsonl**
+
+> 注意：`pdf_to_raw_context_chunks.py` 是库模块（无 CLI 入口），必须用 `python -c` 调用。
+
+```bash
+cd /home/jb/KVI
+
+python -c "
+from pathlib import Path
+from src.pipelines.pdf_to_raw_context_chunks import build_raw_context_chunks_from_pdf_dir, RawChunkConfig
+cfg = RawChunkConfig(tokenizer_name_or_path='Qwen/Qwen2.5-7B-Instruct', chunk_tokens=4096)
+n = build_raw_context_chunks_from_pdf_dir(
+    pdf_dir=Path('/home/jb/topics/SFTSV/pdfs'),
+    out_jsonl=Path('/home/jb/topics/SFTSV/work/raw_chunks.jsonl'),
+    cfg=cfg,
+)
+print(f'Done: {n} chunks written')
+"
+
+# 验证
+wc -l /home/jb/topics/SFTSV/work/raw_chunks.jsonl
+```
+
+**Step 2: raw_chunks → blocks.evidence.jsonl（DeepSeek 抽取，约 5-15 分钟）**
+
+```bash
+cd /home/jb/KVI
+
+python scripts/build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py \
+  --raw_chunks_jsonl /home/jb/topics/SFTSV/work/raw_chunks.jsonl \
+  --out_jsonl /home/jb/topics/SFTSV/work/blocks.evidence.jsonl \
+  --out_docs_meta_jsonl /home/jb/topics/SFTSV/work/docs.meta.jsonl \
+  --kb_id SFTSV \
+  --topic_goal "建立关于SFTSV（发热伴血小板减少综合征）的专题知识库：传播途径、宿主媒介、流行病学、临床症状、发病机制、诊断要点、治疗与预防"
+
+# 验证
+wc -l /home/jb/topics/SFTSV/work/blocks.evidence.jsonl
+wc -l /home/jb/topics/SFTSV/work/docs.meta.jsonl
+```
+
+完成后：
+- `blocks.evidence.jsonl`：PDF 抽取的完整 evidence（预计数百条）
+- `docs.meta.jsonl`：文档级元数据（标题、DOI、年份等）
+- UI Literature Import 页面可显示文档列表
+- Build Graph 将从完整 evidence 编译三元 KV Bank
+
+**其他 Topic 替换参数**：修改 `--pdf_dir` / `--out_jsonl` / `--topic_goal` 中的路径和目标描述即可。
+
 ### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常
 
 如果这一步失败，说明是 PDF 抽取/OCR/依赖问题（不是 block 切分问题）。
