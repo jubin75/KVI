@@ -112,21 +112,7 @@
           <div class="btns">
             <button class="primary" id="btn_create_set">New Set</button>
             <button id="btn_reload_sets">Refresh</button>
-            <button class="ok" id="btn_compile">Compile KVBank</button>
             <button class="ok" id="btn_compile_graph" style="background:#5cb585;color:#fff">Build Graph</button>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>
-                LLM Intent Tagging
-                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
-              </label>
-              <div class="help-content">编译时用 base LLM 为每条 sentence 标注语义意图（symptom/drug/location/mechanism）。可选，会增加编译时间。</div>
-              <select id="compile_use_llm_intent">
-                <option value="false" selected>false</option>
-                <option value="true">true</option>
-              </select>
-            </div>
           </div>
           <div class="note" id="set_stats">No set selected</div>
         </div>
@@ -203,12 +189,14 @@
             <div class="field">
               <div class="btns">
                 <button class="primary" id="btn_load_docs_topic">Load Documents</button>
+                <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff">Build Graph</button>
               </div>
               <div class="note">
-                Mark documents as approved, then import blocks into evidence sets.
+                1. Load Documents → Approve → Import blocks to evidence.
+                2. Build Graph → 三元 KV 编译（Sentences → Triples → Graph → KV Bank）。
                 <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
               </div>
-              <div class="help-content">来源：该 topic 的 work_dir 下 docs.meta.jsonl + blocks.evidence.jsonl。先标记 approved，再导入 blocks 到知识文件。</div>
+              <div class="help-content">来源：该 topic 的 work_dir 下 docs.meta.jsonl + blocks.evidence.jsonl。先 Import 到 evidence set，再 Build Graph 编译三元 KV。</div>
             </div>
           </div>
         </div>
@@ -226,6 +214,16 @@
           <div class="field">
             <label>Document Blocks</label>
             <div class="pre" id="doc_detail">Loading...</div>
+          </div>
+        </div>
+        <div class="panel" id="pipeline_result_view" style="display:none">
+          <div class="field">
+            <label>Build Graph Result — 三元 KV 编译结果</label>
+            <div class="pre" id="pipeline_summary">Waiting...</div>
+          </div>
+          <div class="field">
+            <label>Triple KV Items (编译后三元 KV 列表)</label>
+            <div class="pre" id="pipeline_kv_items" style="max-height:600px">Waiting...</div>
           </div>
         </div>
       </div>

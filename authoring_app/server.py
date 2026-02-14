@@ -1530,6 +1530,237 @@ class KVIHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # ==================== Full Pipeline: Sentences → Triples → Graph → KV ====================
+        if path.startswith("/api/kvi/topic/") and path.endswith("/build_full_pipeline"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/build_full_pipeline")].strip("/"))
+            topic_cfg = _load_topic_config(topic)
+            build = _topic_build_cfg(topic)
+            base_llm = str(build.get("base_llm") or "").strip()
+            encoder = str(build.get("retrieval_encoder_model") or "").strip()
+            topic_dir = _topic_dir(topic)
+            work_dir_raw = str(build.get("work_dir") or "").strip()
+            out_dir = Path(work_dir_raw).expanduser() if work_dir_raw else topic_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            # DeepSeek config
+            ds_base_url = str(topic_cfg.get("deepseek_base_url") or "https://api.deepseek.com").strip()
+            ds_model = str(topic_cfg.get("deepseek_model") or "deepseek-chat").strip()
+            ds_api_key_env = str(topic_cfg.get("deepseek_api_key_env") or "DEEPSEEK_API_KEY").strip()
+            use_deepseek = bool(ds_model and ds_api_key_env)
+
+            if not use_deepseek and not base_llm:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing DeepSeek config or build.base_llm in topic config.json"})
+                return
+            if not encoder:
+                # Encoder is optional for tagging; skip tagging if missing
+                encoder = ""
+
+            obj, _ = _read_body_json(self)
+            obj = obj if isinstance(obj, dict) else {}
+            device = str(obj.get("device") or "").strip()
+            timeout_s = int(obj.get("timeout_s") or 600)
+
+            # ---- Step 1: Compile sentences from evidence sets ----
+            recs, rec_stats = _collect_enabled_sentence_records(topic, enabled_only=True)
+            if not recs:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {
+                    "error": "bad_request",
+                    "message": "No claims in enabled evidence sets. Import PDF blocks and create evidence first.",
+                })
+                return
+
+            sentences_jsonl = out_dir / "sentences.jsonl"
+            seen_ids: set = set()
+            written = 0
+            with sentences_jsonl.open("w", encoding="utf-8") as f:
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    claim = str(r.get("claim") or "").strip()
+                    if not claim:
+                        continue
+                    src = str(r.get("source_id") or "").strip()
+                    sid = str(r.get("id") or "").strip() or _stable_sentence_id(topic=topic, claim=claim, source_id=src)
+                    bid = f"sent_{sid}"
+                    if bid in seen_ids:
+                        continue
+                    seen_ids.add(bid)
+                    meta = {
+                        "kind": "sentence",
+                        "topic": topic,
+                        "source_ref": r.get("source_ref") if isinstance(r.get("source_ref"), dict) else {"doi": None, "title": None},
+                        "author": r.get("author"),
+                        "tags": r.get("tags") if isinstance(r.get("tags"), list) else [],
+                        "evidence_id": sid,
+                    }
+                    f.write(json.dumps({"block_id": bid, "text": claim, "source_id": (src if src else None), "doc_id": (src if src else None), "metadata": meta}, ensure_ascii=False) + "\n")
+                    written += 1
+
+            pipeline_status: Dict[str, Any] = {"sentences_compiled": written}
+
+            # ---- Step 2: Tag sentences (semantic intent) ----
+            sentences_tagged = out_dir / "sentences.tagged.jsonl"
+            sentences_src = sentences_jsonl  # default input for triples
+            if encoder:
+                specs_path = out_dir / "semantic_type_specs.json"
+                if not specs_path.exists():
+                    specs_path.write_text(json.dumps(_DEFAULT_SEMANTIC_TYPE_SPECS, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                cmd_tag = [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "annotate_sentences_semantic_tags.py"),
+                    "--in_jsonl", str(sentences_jsonl),
+                    "--out_jsonl", str(sentences_tagged),
+                    "--domain_encoder_model", encoder,
+                    "--semantic_type_specs", str(specs_path),
+                ]
+                r_tag = subprocess.run(cmd_tag, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=120)
+                if r_tag.returncode == 0 and sentences_tagged.exists():
+                    sentences_src = sentences_tagged
+                    pipeline_status["sentences_tagged"] = True
+                else:
+                    pipeline_status["sentences_tagged"] = False
+                    pipeline_status["tag_error"] = (r_tag.stderr or "")[-500:]
+            else:
+                pipeline_status["sentences_tagged"] = False
+                pipeline_status["tag_note"] = "no encoder configured; skipping tagging"
+
+            # ---- Step 3: Write aliases.jsonl (if provided) ----
+            aliases_jsonl = out_dir / "aliases.jsonl"
+            aliases_data = obj.get("aliases")
+            if isinstance(aliases_data, list) and aliases_data:
+                with aliases_jsonl.open("w", encoding="utf-8") as af:
+                    for alias_rec in aliases_data:
+                        if isinstance(alias_rec, dict):
+                            af.write(json.dumps(alias_rec, ensure_ascii=False) + "\n")
+
+            # ---- Step 4: Extract triples ----
+            triples_jsonl = out_dir / "triples.jsonl"
+            cmd_extract = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "extract_triples.py"),
+                "--sentences_jsonl", str(sentences_src),
+                "--out_triples", str(triples_jsonl),
+                "--batch_size", "1",
+            ]
+            if use_deepseek:
+                cmd_extract.extend([
+                    "--use_deepseek",
+                    "--deepseek_base_url", ds_base_url,
+                    "--deepseek_model", ds_model,
+                    "--deepseek_api_key_env", ds_api_key_env,
+                ])
+            else:
+                cmd_extract.extend(["--model", base_llm])
+                if device:
+                    cmd_extract.extend(["--device", device])
+
+            try:
+                r_extract = subprocess.run(cmd_extract, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "timeout", "message": f"Triple extraction timed out after {timeout_s}s."})
+                return
+            if r_extract.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "extract_triples", "error": (r_extract.stderr or "")[-2000:]})
+                return
+
+            # Count triples
+            triple_count = 0
+            if triples_jsonl.exists():
+                for ln in triples_jsonl.read_text(encoding="utf-8").splitlines():
+                    if ln.strip():
+                        triple_count += 1
+            pipeline_status["triples_extracted"] = triple_count
+
+            # ---- Step 5: Build knowledge graph ----
+            graph_index_json = out_dir / "graph_index.json"
+            cmd_build = [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "build_knowledge_graph.py"),
+                "--triples_jsonl", str(triples_jsonl),
+                "--out_graph", str(graph_index_json),
+            ]
+            if aliases_jsonl.exists():
+                cmd_build.extend(["--aliases_jsonl", str(aliases_jsonl)])
+            r_build = subprocess.run(cmd_build, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=120)
+            if r_build.returncode != 0:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "build_knowledge_graph", "error": (r_build.stderr or "")[-2000:]})
+                return
+
+            # Parse graph summary
+            graph_summary: Dict[str, Any] = {}
+            if graph_index_json.exists():
+                try:
+                    gi = json.loads(graph_index_json.read_text(encoding="utf-8"))
+                    meta = gi.get("meta") or {}
+                    graph_summary = {
+                        "num_nodes": meta.get("num_nodes", 0),
+                        "num_triples": meta.get("num_triples", 0),
+                        "num_entity_index_entries": meta.get("num_entity_index_entries", 0),
+                    }
+                except Exception:
+                    pass
+            pipeline_status["graph"] = graph_summary
+
+            # ---- Step 6: Compile Triple KV Bank ----
+            triple_kvbank_dir = out_dir / "triple_kvbank"
+            triple_kv_summary: Dict[str, Any] = {}
+            triple_kv_items: List[Dict[str, Any]] = []
+            if base_llm:
+                cmd_kv = [
+                    sys.executable,
+                    str(PROJECT_ROOT / "src" / "graph" / "triple_kv_compiler.py"),
+                    "--graph_index", str(graph_index_json),
+                    "--model", base_llm,
+                    "--out_dir", str(triple_kvbank_dir),
+                ]
+                if device:
+                    cmd_kv.extend(["--device", device])
+                try:
+                    r_kv = subprocess.run(cmd_kv, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
+                    if r_kv.returncode != 0:
+                        pipeline_status["triple_kv_error"] = (r_kv.stderr or "")[-1000:]
+                except subprocess.TimeoutExpired:
+                    pipeline_status["triple_kv_error"] = "timeout"
+
+                # Read manifest for results
+                manifest_path = triple_kvbank_dir / "manifest.json"
+                if manifest_path.exists():
+                    try:
+                        tkv = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        items_dict = tkv.get("items") or {}
+                        entity_items = tkv.get("entity_items") or {}
+                        triple_kv_summary = {
+                            "num_items": len(items_dict),
+                            "num_entities": len(entity_items),
+                            "num_layers": tkv.get("num_layers", 0),
+                        }
+                        # Build displayable item list
+                        for iid, it in items_dict.items():
+                            triple_kv_items.append({
+                                "item_id": iid,
+                                "type": it.get("item_type", ""),
+                                "entity": it.get("entity_name", ""),
+                                "text": it.get("text", ""),
+                                "relation": it.get("relation", ""),
+                                "object": it.get("object_name", ""),
+                                "layers": f"{it.get('layer_start', '?')}-{it.get('layer_end', '?')}",
+                                "tokens": it.get("token_count", 0),
+                            })
+                    except Exception:
+                        pass
+            else:
+                pipeline_status["triple_kv_note"] = "no base_llm; skipping KV compilation"
+
+            pipeline_status["triple_kv"] = triple_kv_summary
+
+            _json_response(self, HTTPStatus.OK, {
+                "ok": True,
+                "topic": topic,
+                "pipeline_status": pipeline_status,
+                "triple_kv_items": triple_kv_items,
+            })
+            return
+
         if path.startswith("/api/kvi/topic/") and path.endswith("/run_simple"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/run_simple")].strip("/"))
             obj, err = _read_body_json(self)

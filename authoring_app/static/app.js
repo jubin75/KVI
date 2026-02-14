@@ -118,36 +118,94 @@ function toJsonl(records) {
   return (records || []).map(r => { try { return JSON.stringify(r); } catch { return ""; } }).filter(x => x).join("\n") + "\n";
 }
 
-async function compileSimple() {
-  const maxSentenceTokens = Number(($("sent_token_budget").value || "128").trim());
-  $("compile_log").textContent = "Compiling...";
-  const useLlmIntent = ($("compile_use_llm_intent").value || "false") === "true";
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_simple`, {
-    max_sentence_tokens: Number.isFinite(maxSentenceTokens) ? maxSentenceTokens : 128,
-    use_llm_intent: useLlmIntent,
+async function buildFullPipelineImpl(outputEl) {
+  // Parse aliases from textarea (if available)
+  const aliasesRaw = (($("graph_aliases") || {}).value || "").trim();
+  const aliases = [];
+  if (aliasesRaw) {
+    for (const ln of aliasesRaw.split(/\r?\n/)) {
+      const s = ln.trim();
+      if (!s) continue;
+      try { aliases.push(JSON.parse(s)); } catch {}
+    }
+  }
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline`, {
+    aliases: aliases.length > 0 ? aliases : undefined,
   });
-  $("compile_log").textContent = (resp.ok ? "OK\n\n" : "FAILED\n\n") + pretty(resp);
+  return resp;
+}
+
+function formatPipelineResult(resp) {
+  if (!resp || !resp.ok) return (resp && resp.message) ? resp.message : "Pipeline FAILED";
+  const ps = resp.pipeline_status || {};
+  const g = ps.graph || {};
+  const kv = ps.triple_kv || {};
+  const lines = [
+    `=== Build Pipeline Complete ===`,
+    `Topic: ${resp.topic}`,
+    ``,
+    `Sentences compiled: ${ps.sentences_compiled || 0}`,
+    `Sentences tagged: ${ps.sentences_tagged ? "OK" : "skipped"}`,
+    `Triples extracted: ${ps.triples_extracted || 0}`,
+    ``,
+    `=== Knowledge Graph ===`,
+    `  Nodes (entities): ${g.num_nodes || 0}`,
+    `  Triples (edges): ${g.num_triples || 0}`,
+    `  Entity index: ${g.num_entity_index_entries || 0}`,
+    ``,
+    `=== Triple KV Bank ===`,
+    `  KV items: ${kv.num_items || 0}`,
+    `  Entities: ${kv.num_entities || 0}`,
+    `  Layers: ${kv.num_layers || 0}`,
+  ];
+  if (ps.triple_kv_error) lines.push(`  Error: ${ps.triple_kv_error}`);
+  return lines.join("\n");
+}
+
+function formatKvItems(items) {
+  if (!items || items.length === 0) return "(no KV items)";
+  // Group by entity
+  const byEntity = {};
+  for (const it of items) {
+    const e = it.entity || "(unknown)";
+    if (!byEntity[e]) byEntity[e] = [];
+    byEntity[e].push(it);
+  }
+  const lines = [];
+  for (const [entity, its] of Object.entries(byEntity)) {
+    lines.push(`── ${entity} ──`);
+    for (const it of its) {
+      const tag = it.type === "subject_anchor" ? "[anchor]" : `[${it.relation || "triple"}]`;
+      lines.push(`  ${tag} ${it.text} (layers ${it.layers}, ${it.tokens} tok)`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
 }
 
 async function compileGraph() {
-  $("compile_log").textContent = "Building Knowledge Graph (Mode A)...\nUsing DeepSeek for triple extraction. This may take 1-2 minutes.";
+  $("compile_log").textContent = "Building full pipeline (Sentences → Triples → Graph → KV)...\nThis may take 1-2 minutes.";
   try {
-    // Parse aliases from textarea
-    const aliasesRaw = ($("graph_aliases").value || "").trim();
-    const aliases = [];
-    if (aliasesRaw) {
-      for (const ln of aliasesRaw.split(/\r?\n/)) {
-        const s = ln.trim();
-        if (!s) continue;
-        try { aliases.push(JSON.parse(s)); } catch {}
-      }
-    }
-    const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/compile_graph`, {
-      aliases: aliases.length > 0 ? aliases : undefined,
-    });
-    $("compile_log").textContent = (resp.ok ? "Graph Build OK\n\n" : "Graph Build FAILED\n\n") + pretty(resp);
+    const resp = await buildFullPipelineImpl($("compile_log"));
+    $("compile_log").textContent = formatPipelineResult(resp) + "\n\n" + formatKvItems(resp.triple_kv_items || []);
   } catch (err) {
-    $("compile_log").textContent = "Graph Build FAILED\n\n" + String(err.message || err);
+    $("compile_log").textContent = "Pipeline FAILED\n\n" + String(err.message || err);
+  }
+}
+
+async function buildPipelineFromDocs() {
+  const summaryEl = $("pipeline_summary");
+  const itemsEl = $("pipeline_kv_items");
+  $("pipeline_result_view").style.display = "block";
+  summaryEl.textContent = "Building full pipeline (Sentences → Triples → Graph → KV)...\nThis may take 1-2 minutes.";
+  itemsEl.textContent = "Waiting...";
+  try {
+    const resp = await buildFullPipelineImpl(summaryEl);
+    summaryEl.textContent = formatPipelineResult(resp);
+    itemsEl.textContent = formatKvItems(resp.triple_kv_items || []);
+  } catch (err) {
+    summaryEl.textContent = "Pipeline FAILED\n\n" + String(err.message || err);
+    itemsEl.textContent = "";
   }
 }
 
@@ -404,8 +462,8 @@ function wire() {
   $("topic_select_docs").onchange = async (e) => { await onTopicChange(e.target.value); await loadDocsList(); };
   $("topic_select_debug").onchange = async (e) => await onTopicChange(e.target.value);
 
-  $("btn_compile").onclick = () => compileSimple().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_compile_graph").onclick = () => compileGraph().catch(err => { $("compile_log").textContent = String(err.message || err); });
+  $("btn_build_pipeline").onclick = () => buildPipelineFromDocs().catch(err => { const el = $("pipeline_summary"); if (el) el.textContent = String(err.message || err); });
   $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_delete_topic").onclick = () => deleteTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_reload_sets").onclick = () => loadEvidenceSets().catch(err => { $("compile_log").textContent = String(err.message || err); });
