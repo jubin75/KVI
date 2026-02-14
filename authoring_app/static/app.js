@@ -283,22 +283,14 @@ async function runDebug() {
   const rerankNoAnn = ($("route_rerank_without_ann").value || "false") === "true";
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
 
-  // Toggle panel visibility based on mode
-  const panelGraph = $("panel_graph");
-  if (panelGraph) panelGraph.style.display = (mode === "graphC") ? "block" : "none";
-
   // Clear all output fields
   const allFields = [
-    "out_cli", "out_modeB", "out_route",
-    "out_debug_log",
+    "out_cli", "out_debug_log",
     "out_graph", "out_graph_raw", "out_graph_rag", "out_graph_base_llm",
     "out_graph_entity_ctx", "out_graph_evidence", "out_graph_kv_injection",
   ];
   for (const f of allFields) { const el = $(f); if (el) el.textContent = "Running..."; }
-  const allStatus = [
-    "out_modeB_status",
-    "out_route_status", "out_graph_status", "out_graph_rag_status",
-  ];
+  const allStatus = ["out_graph_status", "out_graph_rag_status"];
   for (const s of allStatus) { const el = $(s); if (el) el.textContent = ""; }
 
   const params = {
@@ -313,18 +305,12 @@ async function runDebug() {
 
   let resp = null, respRag = null;
 
-  if (mode === "graphC") {
-    // --- Mode A (KVI+RAG) ---
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_graph`, params);
-    // Also get RAG-only for comparison
-    try {
-      respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, params);
-    } catch (e) { /* RAG comparison is optional */ }
-  } else if (mode === "modeB") {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, params);
-  } else if (mode === "route") {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
-  }
+  // --- Mode A (KVI+RAG) ---
+  resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_graph`, params);
+  // Also get RAG-only for comparison
+  try {
+    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, params);
+  } catch (e) { /* RAG comparison is optional */ }
 
   const r = resp && resp.result ? resp.result : {};
   $("out_cli").textContent = (resp && resp.cmd) ? resp.cmd : "(no cmd)";
@@ -332,75 +318,65 @@ async function runDebug() {
   // --- Build debug log ---
   try {
     const debugObj = {};
-    if (mode === "graphC") {
-      if (r.graph_debug) debugObj.graph_debug = r.graph_debug;
-      if (r.kv_injection_debug) debugObj.kv_injection_debug = r.kv_injection_debug;
-      if (r.grounding_report) debugObj.graph_grounding = r.grounding_report;
-      if (r.intent) debugObj.graph_intent = r.intent;
-      if (resp && resp.stderr_tail) debugObj.graph_stderr = resp.stderr_tail;
-      if (respRag && respRag.result) {
-        if (respRag.result.routing_debug) debugObj.rag_routing_debug = respRag.result.routing_debug;
-        if (respRag.result.grounding_report) debugObj.rag_grounding = respRag.result.grounding_report;
-      }
-    } else {
-      const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
-      debugObj.route = routeResp.result || {};
+    if (r.graph_debug) debugObj.graph_debug = r.graph_debug;
+    if (r.kv_injection_debug) debugObj.kv_injection_debug = r.kv_injection_debug;
+    if (r.grounding_report) debugObj.graph_grounding = r.grounding_report;
+    if (r.intent) debugObj.graph_intent = r.intent;
+    if (resp && resp.stderr_tail) debugObj.graph_stderr = resp.stderr_tail;
+    if (respRag && respRag.result) {
+      if (respRag.result.routing_debug) debugObj.rag_routing_debug = respRag.result.routing_debug;
+      if (respRag.result.grounding_report) debugObj.rag_grounding = respRag.result.grounding_report;
     }
     $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) { $("out_debug_log").textContent = String(e && e.message ? e.message : e); }
 
   // --- Render outputs ---
-  if (mode === "graphC") {
-    $("out_graph").textContent = r.diagnosis_result || "";
-    $("out_graph_status").textContent = r.diagnosis_result ? "status: OK" : "status: EMPTY";
-    $("out_graph_raw").textContent = r.diagnosis_result_raw || "";
-    $("out_graph_base_llm").textContent = r.base_llm_result || "";
-    $("out_graph_entity_ctx").textContent = r.entity_context || "(none)";
-    $("out_graph_evidence").textContent = (r.evidence_texts || []).map((t, i) => `${i+1}. ${t}`).join("\n") || "(none)";
-    // KV Injection info (with DRM scores)
-    const kvDbg = r.kv_injection_debug || {};
-    if (kvDbg.enabled) {
-      const lines = [];
-      // DRM scoring summary
-      const drmScores = kvDbg.drm_scores || [];
-      if (drmScores.length > 0) {
-        lines.push(`=== DRM Scoring (${drmScores.length} walk triples) ===`);
-        for (const ds of drmScores) {
-          const marker = ds.drm_score >= (kvDbg.drm_threshold || 0.05) ? '✓' : '✗';
-          lines.push(`  ${marker} [${ds.relation}] ${ds.subject}→${ds.object} drm=${ds.drm_score}`);
-        }
-        lines.push(`--- threshold=${kvDbg.drm_threshold}, passed=${kvDbg.drm_passed}, gated=${kvDbg.gated_count}, budget=${kvDbg.budget_selected}`);
-        lines.push('');
+  $("out_graph").textContent = r.diagnosis_result || "";
+  $("out_graph_status").textContent = r.diagnosis_result ? "status: OK" : "status: EMPTY";
+  $("out_graph_raw").textContent = r.diagnosis_result_raw || "";
+  $("out_graph_base_llm").textContent = r.base_llm_result || "";
+  $("out_graph_entity_ctx").textContent = r.entity_context || "(none)";
+  const evTexts = r.evidence_texts || [];
+  const evSrc = r.evidence_source || [];
+  $("out_graph_evidence").textContent = evTexts.map((t, i) => {
+    const src = evSrc[i] || "graph";
+    const tag = src.startsWith("text_search") ? " [text]" : "";
+    return `${i+1}. ${t}${tag}`;
+  }).join("\n") || "(none)";
+  // KV Injection info (with DRM scores)
+  const kvDbg = r.kv_injection_debug || {};
+  if (kvDbg.enabled) {
+    const lines = [];
+    // DRM scoring summary
+    const drmScores = kvDbg.drm_scores || [];
+    if (drmScores.length > 0) {
+      lines.push(`=== DRM Scoring (${drmScores.length} walk triples) ===`);
+      for (const ds of drmScores) {
+        const marker = ds.drm_score >= (kvDbg.drm_threshold || 0.05) ? '✓' : '✗';
+        lines.push(`  ${marker} [${ds.relation}] ${ds.subject}→${ds.object} drm=${ds.drm_score}`);
       }
-      // Active KV items
-      if (kvDbg.active_items && kvDbg.active_items.length > 0) {
-        lines.push(`=== Injected KV Items (${kvDbg.active_items.length}) ===`);
-        for (const it of kvDbg.active_items) {
-          lines.push(`[${it.type}] ${it.text} (${it.relation || 'anchor'}, layers ${it.layers}, ${it.tokens} tok)`);
-        }
-        lines.push(`--- total KV tokens: ${kvDbg.total_kv_tokens || 0}, seq_len: ${kvDbg.assembled_seq_len || 0}`);
-      } else {
-        lines.push('(no KV items injected after DRM filtering)');
-      }
-      $("out_graph_kv_injection").textContent = lines.join("\n");
-    } else {
-      $("out_graph_kv_injection").textContent = kvDbg.enabled === false
-        ? `KV injection disabled (${kvDbg.reason || 'no triple_kvbank'})`
-        : "(no KV items matched)";
+      lines.push(`--- threshold=${kvDbg.drm_threshold}, passed=${kvDbg.drm_passed}, gated=${kvDbg.gated_count}, budget=${kvDbg.budget_selected}`);
+      lines.push('');
     }
-    const rr = respRag && respRag.result ? respRag.result : {};
-    $("out_graph_rag").textContent = rr.diagnosis_result || "";
-    $("out_graph_rag_status").textContent = rr.diagnosis_result ? "status: OK" : "";
-    $("out_modeB").textContent = ""; $("out_route").textContent = "";
-  } else if (mode === "modeB") {
-    $("out_modeB").textContent = pretty(r);
-    $("out_modeB_status").textContent = r.mode ? `mode: ${r.mode}` : "";
-    $("out_route").textContent = "";
-  } else if (mode === "route") {
-    $("out_route").textContent = pretty(r);
-    $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
-    $("out_modeB").textContent = "";
+    // Active KV items
+    if (kvDbg.active_items && kvDbg.active_items.length > 0) {
+      lines.push(`=== Injected KV Items (${kvDbg.active_items.length}) ===`);
+      for (const it of kvDbg.active_items) {
+        lines.push(`[${it.type}] ${it.text} (${it.relation || 'anchor'}, layers ${it.layers}, ${it.tokens} tok)`);
+      }
+      lines.push(`--- total KV tokens: ${kvDbg.total_kv_tokens || 0}, seq_len: ${kvDbg.assembled_seq_len || 0}`);
+    } else {
+      lines.push('(no KV items injected after DRM filtering)');
+    }
+    $("out_graph_kv_injection").textContent = lines.join("\n");
+  } else {
+    $("out_graph_kv_injection").textContent = kvDbg.enabled === false
+      ? `KV injection disabled (${kvDbg.reason || 'no triple_kvbank'})`
+      : "(no KV items matched)";
   }
+  const rr = respRag && respRag.result ? respRag.result : {};
+  $("out_graph_rag").textContent = rr.diagnosis_result || "";
+  $("out_graph_rag_status").textContent = rr.diagnosis_result ? "status: OK" : "";
 }
 
 /* ==================== Wiring ==================== */

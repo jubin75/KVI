@@ -1987,6 +1987,10 @@ class KVIHandler(BaseHTTPRequestHandler):
             timeout_s = int(obj.get("timeout_s") or 180)
             triple_kvbank_dir = out_dir / "triple_kvbank"
             enable_kvi = bool(obj.get("enable_kvi", False))
+            # Locate sentences file for text search fallback (hybrid retrieval)
+            sentences_jsonl = out_dir / "sentences.tagged.jsonl"
+            if not sentences_jsonl.exists():
+                sentences_jsonl = out_dir / "sentences.jsonl"
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_graph_inference.py"),
@@ -1996,6 +2000,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "--use_chat_template",
                 "--local_files_only",
             ]
+            if sentences_jsonl.exists():
+                cmd.extend(["--sentences_jsonl", str(sentences_jsonl)])
             # KVI is off by default (pure RAG); only enable when explicitly requested
             if enable_kvi and triple_kvbank_dir.exists():
                 max_kv_triples = int(obj.get("max_kv_triples") or 3)

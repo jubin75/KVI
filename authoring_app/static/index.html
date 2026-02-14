@@ -33,14 +33,9 @@
       <!-- Sidebar params (for debug tab) -->
       <div class="sidebar-params" id="sidebar_debug_params" style="display:none">
         <div class="nav-section">Parameters</div>
-        <div class="field">
-          <label>Mode</label>
-          <select id="debug_mode">
-            <option value="graphC" selected>Mode A (KVI+RAG)</option>
-            <option value="modeB">Mode B (Projection)</option>
-            <option value="route">Route Only</option>
-          </select>
-        </div>
+        <select id="debug_mode" style="display:none">
+          <option value="graphC" selected>Mode A (KVI+RAG)</option>
+        </select>
         <div class="field">
           <label>Top-K: <span class="mono" id="debug_topk_n">2</span></label>
           <input id="debug_topk_slider" type="range" min="1" max="8" step="1" value="2" />
@@ -237,13 +232,8 @@
 
       <!-- ==================== TAB: Inference Debug ==================== -->
       <div id="view_debug" style="display:none">
+        <select id="topic_select_debug" style="display:none"></select>
         <div class="panel">
-          <div class="row">
-            <div class="field">
-              <label>Topic</label>
-              <select id="topic_select_debug"></select>
-            </div>
-          </div>
           <div class="field">
             <label>Prompt</label>
             <textarea id="debug_prompt" placeholder="e.g. SFTSV的主要临床症状有哪些？"></textarea>
@@ -290,19 +280,6 @@
           <div class="field">
             <label>Retrieved Evidence (graph walk)</label>
             <div class="pre" id="out_graph_evidence">Waiting...</div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="field">
-            <label>Mode B Output</label>
-            <div class="note" id="out_modeB_status"></div>
-            <div class="pre" id="out_modeB">Waiting...</div>
-          </div>
-          <div class="field">
-            <label>Route Output</label>
-            <div class="note" id="out_route_status"></div>
-            <div class="pre" id="out_route">Waiting...</div>
           </div>
         </div>
 

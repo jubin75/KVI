@@ -48,6 +48,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,60 @@ def _relation_gating(
 
 
 # ---------------------------------------------------------------------------
+# Text search fallback (hybrid retrieval)
+# ---------------------------------------------------------------------------
+
+def _text_search(
+    query: str,
+    sentences_jsonl: Path,
+    max_results: int = 10,
+    min_score: float = 0.05,
+) -> list[dict]:
+    """
+    Keyword-based text search over raw evidence sentences (sentences.jsonl).
+
+    Complements graph retrieval: catches evidence that was never extracted
+    as triples (URLs, references, opinions, etc.).
+
+    Returns a list of dicts:
+        [{"text": "...", "block_id": "...", "score": 0.25}, ...]
+    sorted by score descending.
+    """
+    if not sentences_jsonl.exists():
+        return []
+    q_tokens = _tokenize_chinese(query)
+    if not q_tokens:
+        return []
+    results: list[dict] = []
+    try:
+        for line in sentences_jsonl.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            text = str(rec.get("text") or "").strip()
+            if not text:
+                continue
+            t_tokens = _tokenize_chinese(text)
+            if not t_tokens:
+                continue
+            overlap = len(q_tokens & t_tokens) / len(q_tokens)
+            if overlap >= min_score:
+                results.append({
+                    "text": text,
+                    "block_id": str(rec.get("block_id") or ""),
+                    "score": round(overlap, 4),
+                })
+    except Exception:
+        return []
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:max_results]
+
+
+# ---------------------------------------------------------------------------
 # Simple grounding filter (token-overlap based)
 # ---------------------------------------------------------------------------
 
@@ -193,7 +248,7 @@ def _simple_grounding(
             details.append({"sentence": s, "overlap": 0, "grounded": False})
             continue
         overlap = len(s_tokens & evidence_tokens) / len(s_tokens) if s_tokens else 0
-        is_grounded = overlap >= 0.15
+        is_grounded = overlap >= 0.10
         if is_grounded:
             grounded += 1
         details.append({"sentence": s, "overlap": round(overlap, 4), "grounded": is_grounded})
@@ -230,6 +285,9 @@ def main() -> None:
                    help="Min DRM score for a triple to be considered for KV injection")
     p.add_argument("--top_k_relations", type=int, default=2,
                    help="Max relation groups to keep after Relation Gating")
+    # Hybrid retrieval: text search fallback over raw evidence sentences
+    p.add_argument("--sentences_jsonl", default="",
+                   help="Path to sentences.tagged.jsonl (or sentences.jsonl) for text search fallback")
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument("--local_files_only", action="store_true")
     p.add_argument("--max_new_tokens", type=int, default=256)
@@ -267,17 +325,64 @@ def main() -> None:
     )
     gr = retriever.retrieve(args.prompt, intent=intent)
 
-    evidence_texts = [e["text"] for e in gr.evidence_sentences]
+    graph_evidence_texts = [e["text"] for e in gr.evidence_sentences]
     entity_context = gr.entity_context
     print(
         f"[graphC] entities matched={len(gr.matched_entities)} "
-        f"evidence={len(evidence_texts)}",
+        f"graph_evidence={len(graph_evidence_texts)}",
+        file=sys.stderr,
+    )
+
+    # ---- 3b. Text search fallback (hybrid retrieval) ----
+    # Always run text search alongside graph retrieval, then merge.
+    # Graph evidence is primary; text search fills coverage gaps
+    # (e.g., URLs, references, sentences not extracted as triples).
+    text_search_results: list[dict] = []
+    sentences_jsonl_path = Path(args.sentences_jsonl) if args.sentences_jsonl else None
+    if sentences_jsonl_path and sentences_jsonl_path.exists():
+        text_search_results = _text_search(
+            args.prompt, sentences_jsonl_path,
+            max_results=args.max_evidence,
+        )
+        print(
+            f"[graphC] text_search: {len(text_search_results)} hits from {sentences_jsonl_path.name}",
+            file=sys.stderr,
+        )
+    else:
+        print("[graphC] text_search: skipped (no --sentences_jsonl)", file=sys.stderr)
+
+    # Merge: graph evidence first, text search supplements (dedup by text)
+    seen_texts: set[str] = set()
+    evidence_texts: list[str] = []
+    evidence_source: list[str] = []  # track provenance for debug
+    for et in graph_evidence_texts:
+        norm = et.strip()
+        if norm and norm not in seen_texts:
+            seen_texts.add(norm)
+            evidence_texts.append(norm)
+            evidence_source.append("graph")
+    for ts in text_search_results:
+        norm = ts["text"].strip()
+        if norm and norm not in seen_texts:
+            seen_texts.add(norm)
+            evidence_texts.append(norm)
+            evidence_source.append(f"text_search(score={ts['score']})")
+
+    gr.debug["graph_evidence_count"] = len(graph_evidence_texts)
+    gr.debug["text_search_count"] = len(text_search_results)
+    gr.debug["text_search_added"] = sum(1 for s in evidence_source if s.startswith("text_search"))
+    gr.debug["merged_evidence_count"] = len(evidence_texts)
+
+    print(
+        f"[graphC] merged evidence: {len(evidence_texts)} "
+        f"(graph={len(graph_evidence_texts)}, "
+        f"text_search_added={gr.debug['text_search_added']})",
         file=sys.stderr,
     )
 
     if not evidence_texts:
         print(json.dumps({
-            "diagnosis_result": "现有知识图谱中未找到相关证据。",
+            "diagnosis_result": "现有知识图谱和文本检索均未找到相关证据。",
             "base_llm_result": "",
             "graph_debug": gr.debug,
             "evidence_texts": [],
@@ -570,6 +675,7 @@ def main() -> None:
         "base_llm_result": base_answer,
         "graph_debug": gr.debug,
         "evidence_texts": evidence_texts,
+        "evidence_source": evidence_source,
         "entity_context": entity_context,
         "intent": intent,
         "grounding_report": grounding,
