@@ -216,6 +216,18 @@ def _text_search(
 
 
 # ---------------------------------------------------------------------------
+# URL / verbatim detection
+# ---------------------------------------------------------------------------
+
+_URL_PATTERN = re.compile(r'https?://\S+', re.IGNORECASE)
+
+
+def _has_url(text: str) -> bool:
+    """Return True if *text* contains an HTTP(S) URL."""
+    return bool(_URL_PATTERN.search(text))
+
+
+# ---------------------------------------------------------------------------
 # Simple grounding filter (token-overlap based)
 # ---------------------------------------------------------------------------
 
@@ -373,10 +385,26 @@ def main() -> None:
     gr.debug["text_search_added"] = sum(1 for s in evidence_source if s.startswith("text_search"))
     gr.debug["merged_evidence_count"] = len(evidence_texts)
 
+    # ---- 3c. Separate verbatim evidence (URLs, etc.) from regular evidence ----
+    # Evidence containing URLs is passed verbatim to the output — never through
+    # the LLM — to avoid hallucinated/mangled URLs.
+    verbatim_evidence: list[str] = []
+    regular_evidence_texts: list[str] = []
+    regular_evidence_source: list[str] = []
+    for i, et in enumerate(evidence_texts):
+        if _has_url(et):
+            verbatim_evidence.append(et)
+        else:
+            regular_evidence_texts.append(et)
+            regular_evidence_source.append(evidence_source[i])
+    gr.debug["verbatim_evidence_count"] = len(verbatim_evidence)
+    gr.debug["regular_evidence_count"] = len(regular_evidence_texts)
+
     print(
         f"[graphC] merged evidence: {len(evidence_texts)} "
         f"(graph={len(graph_evidence_texts)}, "
-        f"text_search_added={gr.debug['text_search_added']})",
+        f"text_search_added={gr.debug['text_search_added']}, "
+        f"verbatim={len(verbatim_evidence)})",
         file=sys.stderr,
     )
 
@@ -563,9 +591,10 @@ def main() -> None:
             assembled_kv = None
 
     # ---- 7. Build prompt (rank evidence by DRM score, relaxed RAG) ----
-    # Rank evidence sentences by DRM relevance to the query (highest first)
+    # Only *regular* evidence (no URLs) goes into the LLM prompt.
+    # URL-containing evidence is appended verbatim after grounding (step 10).
     evidence_with_scores = []
-    for et in evidence_texts:
+    for et in regular_evidence_texts:
         score = _score_triple_relevance(args.prompt, et)
         evidence_with_scores.append((et, score))
     evidence_with_scores.sort(key=lambda x: x[1], reverse=True)
@@ -657,7 +686,7 @@ def main() -> None:
 
     grounding = _simple_grounding(
         answer,
-        evidence_texts,
+        evidence_texts,   # grounding checks against ALL evidence (incl. URL-based)
         entity_context=entity_context,
         kv_texts=kv_grounding_texts,
     )
@@ -667,6 +696,13 @@ def main() -> None:
         d["sentence"] for d in grounding["details"] if d["grounded"]
     ]
     grounded_text = "\n".join(grounded_sentences) if grounded_sentences else answer
+
+    # ---- 10b. Append verbatim evidence (URLs, references) ----
+    # These were kept out of the LLM prompt to prevent hallucination;
+    # now we attach them as-is so the user gets exact original content.
+    if verbatim_evidence:
+        ref_lines = "\n".join(f"- {v}" for v in verbatim_evidence)
+        grounded_text += f"\n\n### 参考文献\n{ref_lines}"
 
     # ---- 11. Output ----
     result_json = {
@@ -680,6 +716,7 @@ def main() -> None:
         "intent": intent,
         "grounding_report": grounding,
         "kv_injection_debug": kv_injection_debug,
+        "verbatim_evidence": verbatim_evidence,
     }
     print(json.dumps(result_json, ensure_ascii=False))
 

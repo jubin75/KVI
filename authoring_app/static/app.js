@@ -96,7 +96,12 @@ async function onTopicChange(topic) {
   }
   const t = topicByName(topic);
   $("topic_goal").textContent = t && t.goal ? String(t.goal) : "";
-  await loadEvidenceSets();
+  try {
+    await loadEvidenceSets();
+  } catch (err) {
+    console.error("loadEvidenceSets failed:", err);
+    $("set_stats").textContent = "Error loading evidence sets: " + String(err.message || err);
+  }
 }
 
 function parseJsonl(text) {
@@ -171,13 +176,20 @@ async function loadEvidenceSets() {
 }
 
 async function loadEvidenceSet(name) {
-  const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_set/${encodeURIComponent(name)}`);
-  currentSet = resp;
-  $("set_select").value = name;
-  $("set_enabled").value = resp.enabled ? "true" : "false";
-  $("set_stats").textContent = `${name}  |  records: ${resp.count || 0}  |  enabled: ${resp.enabled}`;
-  $("set_raw").value = toJsonl(resp.records || []);
-  $("doc_group_view").textContent = pretty(resp.by_source || {});
+  try {
+    const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/evidence_set/${encodeURIComponent(name)}`);
+    currentSet = resp;
+    $("set_select").value = name;
+    $("set_enabled").value = resp.enabled ? "true" : "false";
+    $("set_stats").textContent = `${name}  |  records: ${resp.count || 0}  |  enabled: ${resp.enabled}`;
+    $("set_raw").value = toJsonl(resp.records || []);
+    $("doc_group_view").textContent = pretty(resp.by_source || {});
+  } catch (err) {
+    console.error("loadEvidenceSet failed:", name, err);
+    $("set_stats").textContent = "Error loading set: " + String(err.message || err);
+    $("set_raw").value = "";
+    $("doc_group_view").textContent = "Error: " + String(err.message || err);
+  }
 }
 
 async function saveCurrentSet() {
@@ -338,9 +350,11 @@ async function runDebug() {
   $("out_graph_entity_ctx").textContent = r.entity_context || "(none)";
   const evTexts = r.evidence_texts || [];
   const evSrc = r.evidence_source || [];
+  const verbatimSet = new Set((r.verbatim_evidence || []).map(v => v.trim()));
   $("out_graph_evidence").textContent = evTexts.map((t, i) => {
     const src = evSrc[i] || "graph";
-    const tag = src.startsWith("text_search") ? " [text]" : "";
+    let tag = src.startsWith("text_search") ? " [text]" : "";
+    if (verbatimSet.has(t.trim())) tag += " [verbatim→直出]";
     return `${i+1}. ${t}${tag}`;
   }).join("\n") || "(none)";
   // KV Injection info (with DRM scores)
@@ -382,7 +396,7 @@ async function runDebug() {
 /* ==================== Wiring ==================== */
 
 function wire() {
-  $("tab_simple").onclick = () => setTab("simple");
+  $("tab_simple").onclick = () => { setTab("simple"); loadEvidenceSets().catch(err => console.warn("tab reload evidence:", err)); };
   $("tab_docs").onclick = () => setTab("docs");
   $("tab_debug").onclick = () => setTab("debug");
 
