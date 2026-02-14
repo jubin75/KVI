@@ -698,9 +698,10 @@ def main() -> None:
     grounded_text = "\n".join(grounded_sentences) if grounded_sentences else answer
 
     # ---- 10b. Append verbatim evidence (URLs, references) ----
-    # These were kept out of the LLM prompt to prevent hallucination;
-    # now we attach them as-is so the user gets exact original content.
-    if verbatim_evidence:
+    # Only when the user is actually asking about references / literature.
+    _REF_KEYWORDS = {"参考文献", "文献", "综述", "链接", "reference", "literature", "推荐文献", "论文"}
+    query_wants_refs = any(kw in args.prompt for kw in _REF_KEYWORDS)
+    if verbatim_evidence and query_wants_refs:
         ref_lines = "\n".join(f"- {v}" for v in verbatim_evidence)
         grounded_text += f"\n\n### 参考文献\n{ref_lines}"
 
