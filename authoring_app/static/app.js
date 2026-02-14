@@ -438,9 +438,14 @@ function wire() {
 
 async function init() {
   wire();
-  await loadTopics();
-  $("topic_select_docs").value = selectedTopic;
-  $("topic_select_debug").value = selectedTopic;
+  try {
+    await loadTopics();
+    $("topic_select_docs").value = selectedTopic;
+    $("topic_select_debug").value = selectedTopic;
+  } catch (err) {
+    console.error("init: loadTopics failed:", err);
+    // UI navigation should still work even if topic loading fails
+  }
 }
 
-window.addEventListener("DOMContentLoaded", () => init().catch(err => console.error(err)));
+window.addEventListener("DOMContentLoaded", () => init().catch(err => console.error("init fatal:", err)));

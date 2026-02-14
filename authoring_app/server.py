@@ -669,6 +669,8 @@ def _text_response(handler: BaseHTTPRequestHandler, code: int, body: str, *, con
     handler.send_response(int(code))
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(data)))
+    # Prevent browser caching of static/HTML files during development
+    handler.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
     handler.end_headers()
     handler.wfile.write(data)
 
@@ -713,6 +715,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.end_headers()
             return
 
@@ -736,6 +739,7 @@ class KVIHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.end_headers()
             return
 
