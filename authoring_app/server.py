@@ -930,7 +930,9 @@ class KVIHandler(BaseHTTPRequestHandler):
             if not blocks_path.exists():
                 _json_response(self, HTTPStatus.NOT_FOUND, {
                     "error": "not_found",
-                    "message": f"Neither docs.meta.jsonl nor blocks.evidence.jsonl found in {work_dir}",
+                    "message": f"Neither docs.meta.jsonl nor blocks.evidence.jsonl found in work_dir={work_dir}. "
+                               f"Checked: {docs_meta}, {blocks_path}. "
+                               f"Run PDF ingestion first (build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py).",
                 })
                 return
 

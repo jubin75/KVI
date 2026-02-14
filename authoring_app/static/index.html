@@ -12,14 +12,15 @@
     <!-- ==================== LEFT SIDEBAR ==================== -->
     <div class="sidebar">
       <div class="logo">KVI Console</div>
-      <div class="logo-sub">Knowledge Value Injection<br/>大模型幻觉定点消除与长期记忆外挂</div>
+      <div class="logo-sub">Knowledge Value Injection<br/>注入大模型的知识记忆体，无需改变大模型参数，能适配主流大模型</div>
 
       <div class="nav-section">Workspace</div>
       <div class="nav-item active" id="tab_simple"><span class="nav-icon">K</span> Knowledge Authoring</div>
       <div class="nav-item" id="tab_docs"><span class="nav-icon">L</span> Literature Import</div>
       <div class="nav-item" id="tab_debug"><span class="nav-icon">D</span> Inference Debug</div>
 
-      <div class="nav-section">Topic</div>
+      <div class="nav-section">Topic <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:12px;color:var(--text-muted)">?</span></div>
+      <div class="help-content">例如，建立关于 SFTSV（发热伴血小板减少综合征）的专题知识库。</div>
       <div class="field" style="min-width:0">
         <select id="topic_select"></select>
       </div>
@@ -28,7 +29,6 @@
         <button class="primary" id="btn_create_topic" style="padding:5px 8px;font-size:11px">+</button>
         <button class="danger" id="btn_delete_topic" style="padding:5px 8px;font-size:11px">x</button>
       </div>
-      <div class="note" id="topic_goal" style="padding:0 2px"></div>
 
       <!-- Sidebar params (for debug tab) -->
       <div class="sidebar-params" id="sidebar_debug_params" style="display:none">
@@ -189,12 +189,14 @@
             <div class="field">
               <div class="btns">
                 <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff">Build Graph</button>
+                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')" style="cursor:pointer;margin-left:8px;font-size:13px;color:var(--text-muted)">?</span>
               </div>
-              <div class="note">
-                选择 Topic 后自动加载 PDF 文档列表。点击文档查看 raw sentences，点击 Build Graph 一键编译三元 KV。
-                <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
+              <div class="help-content">
+                选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
+                点击文档查看 raw sentences。<br/>
+                点击 <b>Build Graph</b> 一键编译三元 KV：<br/>
+                Sentences → Triples → graph_index.json → triple_kvbank/
               </div>
-              <div class="help-content">来源：{work_dir}/blocks.evidence.jsonl。Build Graph 流程：Sentences → Triples → graph_index.json → triple_kvbank/</div>
             </div>
           </div>
         </div>

@@ -1,6 +1,10 @@
 async function apiGet(path) {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`GET ${path} ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); detail = j.message || j.error || JSON.stringify(j); } catch { try { detail = await res.text(); } catch {} }
+    throw new Error(`GET ${path} ${res.status}: ${detail}`);
+  }
   return await res.json();
 }
 
@@ -95,7 +99,7 @@ async function onTopicChange(topic) {
     if (el) el.value = topic;
   }
   const t = topicByName(topic);
-  $("topic_goal").textContent = t && t.goal ? String(t.goal) : "";
+  const goalEl = $("topic_goal"); if (goalEl) goalEl.textContent = t && t.goal ? String(t.goal) : "";
   try {
     await loadEvidenceSets();
   } catch (err) {
