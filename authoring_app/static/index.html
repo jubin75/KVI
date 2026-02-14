@@ -36,8 +36,7 @@
         <div class="field">
           <label>Mode</label>
           <select id="debug_mode">
-            <option value="modeA" selected>Mode A (RAG+KV)</option>
-            <option value="graphC">Graph (Scheme C)</option>
+            <option value="graphC" selected>Mode A (KVI+RAG)</option>
             <option value="modeB">Mode B (Projection)</option>
             <option value="route">Route Only</option>
           </select>
@@ -261,26 +260,9 @@
           </div>
         </div>
 
-        <div class="panel" id="panel_modeA">
+        <div class="panel" id="panel_graph">
           <div class="field">
-            <label>Mode A Output (RAG + KV Injection)</label>
-            <div class="note" id="out_modeA_status"></div>
-            <div class="pre" id="out_modeA">Waiting...</div>
-          </div>
-          <div class="field" id="field_modeA_rag" style="display:none">
-            <label>RAG-Only Output (comparison)</label>
-            <div class="note" id="out_modeA_rag_status"></div>
-            <div class="pre" id="out_modeA_rag">Waiting...</div>
-          </div>
-          <div class="field">
-            <label>Base LLM Output (no evidence)</label>
-            <div class="pre" id="out_base_llm">Waiting...</div>
-          </div>
-        </div>
-
-        <div class="panel" id="panel_graph" style="display:none">
-          <div class="field">
-            <label>Graph (Scheme C) Output</label>
+            <label>Mode A (KVI+RAG) Output</label>
             <div class="note" id="out_graph_status"></div>
             <div class="pre" id="out_graph">Waiting...</div>
           </div>

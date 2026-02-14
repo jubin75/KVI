@@ -220,7 +220,10 @@ def main() -> None:
     p.add_argument("--prompt", required=True, help="User query")
     p.add_argument("--graph_index", required=True, help="graph_index.json path")
     p.add_argument("--triple_kvbank_dir", default="", help="Triple KV bank directory (compiled by triple_kv_compiler)")
-    # DRM + Relation Gating parameters
+    # KVI is OFF by default — pure RAG mode.  Use --enable_kvi to turn it on.
+    p.add_argument("--enable_kvi", action="store_true",
+                   help="Enable triple KV injection (default: OFF, pure RAG mode)")
+    # DRM + Relation Gating parameters (only used when --enable_kvi is set)
     p.add_argument("--max_kv_triples", type=int, default=3,
                    help="Max triple KVs to inject after DRM scoring (budget control)")
     p.add_argument("--drm_threshold", type=float, default=0.05,
@@ -229,7 +232,7 @@ def main() -> None:
                    help="Max relation groups to keep after Relation Gating")
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument("--local_files_only", action="store_true")
-    p.add_argument("--max_new_tokens", type=int, default=128)
+    p.add_argument("--max_new_tokens", type=int, default=256)
     p.add_argument("--max_evidence", type=int, default=10)
     p.add_argument("--max_hops", type=int, default=2)
     p.add_argument("--device", default="auto")
@@ -288,13 +291,16 @@ def main() -> None:
         }, ensure_ascii=False))
         sys.exit(0)
 
-    # ---- 4. Load Triple KV Bank (if available) ----
+    # ---- 4. Load Triple KV Bank (only if --enable_kvi) ----
     kv_injection_debug: dict = {"enabled": False}
     triple_kv_manifest = None
     triple_kv_cache_dict = None
     triple_kvbank_dir = Path(args.triple_kvbank_dir) if args.triple_kvbank_dir else None
 
-    if triple_kvbank_dir and triple_kvbank_dir.exists():
+    if not args.enable_kvi:
+        kv_injection_debug["reason"] = "kvi_disabled_by_default"
+        print("[graphC] KVI disabled (pure RAG mode). Use --enable_kvi to turn on.", file=sys.stderr)
+    elif triple_kvbank_dir and triple_kvbank_dir.exists():
         try:
             from src.graph.triple_kv_compiler import (
                 load_triple_kvbank,
@@ -451,7 +457,7 @@ def main() -> None:
             kv_injection_debug["assembly_error"] = str(e)
             assembled_kv = None
 
-    # ---- 7. Build prompt (rank evidence by DRM score) ----
+    # ---- 7. Build prompt (rank evidence by DRM score, relaxed RAG) ----
     # Rank evidence sentences by DRM relevance to the query (highest first)
     evidence_with_scores = []
     for et in evidence_texts:
@@ -466,10 +472,13 @@ def main() -> None:
         prompt_parts.append(entity_context)
     prompt_parts.append(f"### 参考证据\n{evidence_block}")
     prompt_parts.append(f"### 问题\n{args.prompt}")
+    # Relaxed instruction: evidence + entity context as primary, allow model
+    # to supplement with background medical knowledge when evidence is sparse.
     prompt_parts.append(
         "### 要求\n"
-        "请仅根据上述参考证据回答问题。使用中文简洁作答，不引入外部知识。"
-        "如果证据不足以完整回答，请如实说明。"
+        "请根据上述实体背景和参考证据回答问题。"
+        "以参考证据为主，必要时可结合医学常识补充。"
+        "使用中文简洁作答。"
     )
     full_prompt = "\n\n".join(prompt_parts)
 
@@ -485,7 +494,7 @@ def main() -> None:
         return messages[-1]["content"]
 
     main_messages = [
-        {"role": "system", "content": "你是一个医学专业助手，根据提供的参考证据回答问题。"},
+        {"role": "system", "content": "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"},
         {"role": "user", "content": full_prompt},
     ]
     text_input = _build_input(main_messages)
@@ -530,8 +539,11 @@ def main() -> None:
     base_new = base_ids[0][base_inputs["input_ids"].shape[1] :]
     base_answer = tokenizer.decode(base_new, skip_special_tokens=True).strip()
 
-    # ---- 10. Grounding filter ----
-    # Include triple KV texts as additional grounding sources
+    # ---- 10. Grounding check (filter: keep only grounded sentences) ----
+    # Grounding catches hallucinated content (e.g., "气促或呼吸困难" that
+    # doesn't appear in any evidence or entity context).  With the improved
+    # topic-scoped retrieval, the model should receive enough evidence to
+    # generate well-grounded answers.
     kv_grounding_texts: list[str] = []
     if kv_injection_debug.get("active_items"):
         for it in kv_injection_debug["active_items"]:
@@ -545,9 +557,11 @@ def main() -> None:
         kv_texts=kv_grounding_texts,
     )
 
-    # Assemble grounded output (only include grounded sentences)
-    grounded_sents = [d["sentence"] for d in grounding["details"] if d["grounded"]]
-    grounded_text = "。".join(grounded_sents) + "。" if grounded_sents else answer
+    # Build grounded text: keep only sentences that overlap with evidence
+    grounded_sentences = [
+        d["sentence"] for d in grounding["details"] if d["grounded"]
+    ]
+    grounded_text = "\n".join(grounded_sentences) if grounded_sentences else answer
 
     # ---- 11. Output ----
     result_json = {

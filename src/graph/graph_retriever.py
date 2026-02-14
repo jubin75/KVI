@@ -241,6 +241,31 @@ class GraphRetriever:
                 )
                 walk_results.extend(walked_broad)
 
+        # -- Topic-scoped relation scan --
+        # Problem: In a topic-scoped graph, relevant triples may be attached
+        # to proxy subjects (e.g., "患者", "重症病例") rather than the
+        # matched entity ("SFTSV").  Graph walk from SFTSV along
+        # manifests_as reaches nothing because there's no edge
+        # SFTSV→患者.  Since every triple in this graph belongs to the
+        # same topic, scanning ALL triples with the target relation types
+        # is safe and catches these otherwise-unreachable triples.
+        if target_relations:
+            existing_tids = {wr.get("triple_id") for wr in walk_results}
+            scan_added = 0
+            for tid, triple in self.graph.triples.items():
+                if tid in existing_tids:
+                    continue
+                if triple.predicate in target_relations:
+                    walk_results.append({
+                        "node_id": "",  # from relation scan, not walk
+                        "relation": triple.predicate,
+                        "triple_id": tid,
+                        "hop": 0,
+                    })
+                    scan_added += 1
+            if scan_added > 0:
+                debug["relation_scan_added"] = scan_added
+
         debug["walk_results_count"] = len(walk_results)
 
         # 3b. Collect all triple_ids from walk (for KV injection filtering)

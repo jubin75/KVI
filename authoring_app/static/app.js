@@ -125,7 +125,7 @@ async function compileSimple() {
 }
 
 async function compileGraph() {
-  $("compile_log").textContent = "Building Knowledge Graph (Scheme C)...\nUsing DeepSeek for triple extraction. This may take 1-2 minutes.";
+  $("compile_log").textContent = "Building Knowledge Graph (Mode A)...\nUsing DeepSeek for triple extraction. This may take 1-2 minutes.";
   try {
     // Parse aliases from textarea
     const aliasesRaw = ($("graph_aliases").value || "").trim();
@@ -276,7 +276,7 @@ async function runDebug() {
   const prompt = ($("debug_prompt").value || "").trim();
   if (!prompt) throw new Error("Prompt required.");
   const topK = Number(($("debug_top_k").value || "2").trim());
-  const mode = ($("debug_mode").value || "modeA").trim();
+  const mode = ($("debug_mode").value || "graphC").trim();
   const wAnn = Number(($("route_w_ann").value || "1.0").trim());
   const wIntent = Number(($("route_w_intent").value || "0.6").trim());
   const wQuality = Number(($("route_w_quality").value || "0.2").trim());
@@ -284,23 +284,19 @@ async function runDebug() {
   const modeAUseLlmIntent = ($("modeA_use_llm_intent").value || "false") === "true";
 
   // Toggle panel visibility based on mode
-  const ragField = $("field_modeA_rag");
-  if (ragField) ragField.style.display = (mode === "modeA") ? "block" : "none";
-  const panelModeA = $("panel_modeA");
   const panelGraph = $("panel_graph");
-  if (panelModeA) panelModeA.style.display = (mode === "graphC") ? "none" : "block";
   if (panelGraph) panelGraph.style.display = (mode === "graphC") ? "block" : "none";
 
   // Clear all output fields
   const allFields = [
-    "out_cli", "out_modeA", "out_modeA_rag", "out_modeB", "out_route",
-    "out_debug_log", "out_base_llm",
+    "out_cli", "out_modeB", "out_route",
+    "out_debug_log",
     "out_graph", "out_graph_raw", "out_graph_rag", "out_graph_base_llm",
     "out_graph_entity_ctx", "out_graph_evidence", "out_graph_kv_injection",
   ];
   for (const f of allFields) { const el = $(f); if (el) el.textContent = "Running..."; }
   const allStatus = [
-    "out_modeA_status", "out_modeA_rag_status", "out_modeB_status",
+    "out_modeB_status",
     "out_route_status", "out_graph_status", "out_graph_rag_status",
   ];
   for (const s of allStatus) { const el = $(s); if (el) el.textContent = ""; }
@@ -318,7 +314,7 @@ async function runDebug() {
   let resp = null, respRag = null;
 
   if (mode === "graphC") {
-    // --- Graph (Scheme C) mode ---
+    // --- Mode A (KVI+RAG) ---
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_graph`, params);
     // Also get RAG-only for comparison
     try {
@@ -328,9 +324,6 @@ async function runDebug() {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeB`, params);
   } else if (mode === "route") {
     resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
-  } else {
-    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA`, params);
-    respRag = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/modeA_rag`, params);
   }
 
   const r = resp && resp.result ? resp.result : {};
@@ -352,16 +345,6 @@ async function runDebug() {
     } else {
       const routeResp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/route`, params);
       debugObj.route = routeResp.result || {};
-      if (mode === "modeA") {
-        if (r.routing_debug) debugObj.modeA_routing_debug = r.routing_debug;
-        if (r.injection_debug) debugObj.modeA_injection_debug = r.injection_debug;
-        if (r.grounding_report) debugObj.modeA_grounding = r.grounding_report;
-        if (resp && resp.stderr_tail) debugObj.modeA_stderr = resp.stderr_tail;
-        if (respRag && respRag.result) {
-          if (respRag.result.routing_debug) debugObj.rag_routing_debug = respRag.result.routing_debug;
-          if (respRag.result.grounding_report) debugObj.rag_grounding = respRag.result.grounding_report;
-        }
-      }
     }
     $("out_debug_log").textContent = pretty(debugObj);
   } catch (e) { $("out_debug_log").textContent = String(e && e.message ? e.message : e); }
@@ -408,25 +391,15 @@ async function runDebug() {
     const rr = respRag && respRag.result ? respRag.result : {};
     $("out_graph_rag").textContent = rr.diagnosis_result || "";
     $("out_graph_rag_status").textContent = rr.diagnosis_result ? "status: OK" : "";
-    // Clear modeA panels
-    $("out_modeA").textContent = ""; $("out_modeA_rag").textContent = ""; $("out_base_llm").textContent = "";
     $("out_modeB").textContent = ""; $("out_route").textContent = "";
   } else if (mode === "modeB") {
     $("out_modeB").textContent = pretty(r);
     $("out_modeB_status").textContent = r.mode ? `mode: ${r.mode}` : "";
-    $("out_modeA").textContent = ""; $("out_modeA_rag").textContent = ""; $("out_route").textContent = ""; $("out_base_llm").textContent = "";
+    $("out_route").textContent = "";
   } else if (mode === "route") {
     $("out_route").textContent = pretty(r);
     $("out_route_status").textContent = r.status ? `status: ${r.status}` : "";
-    $("out_modeA").textContent = ""; $("out_modeA_rag").textContent = ""; $("out_modeB").textContent = ""; $("out_base_llm").textContent = "";
-  } else {
-    $("out_modeA").textContent = r.diagnosis_result || "";
-    $("out_modeA_status").textContent = "status: OK";
-    $("out_base_llm").textContent = r.base_llm_result || "";
-    $("out_modeB").textContent = ""; $("out_route").textContent = "";
-    const rr = respRag && respRag.result ? respRag.result : {};
-    $("out_modeA_rag").textContent = rr.diagnosis_result || "";
-    $("out_modeA_rag_status").textContent = "status: OK";
+    $("out_modeB").textContent = "";
   }
 }
 
