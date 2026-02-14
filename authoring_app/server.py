@@ -891,19 +891,20 @@ class KVIHandler(BaseHTTPRequestHandler):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/docs")].strip("/"))
             build = _topic_build_cfg(topic)
             work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+
+            # Primary: docs.meta.jsonl. Fallback: derive doc list from blocks.evidence.jsonl.
             docs_meta = work_dir / "docs.meta.jsonl"
-            if not docs_meta.exists():
-                _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found", "message": f"docs.meta.jsonl not found: {docs_meta}"})
-                return
+            blocks_path = work_dir / "blocks.evidence.jsonl"
             approvals = _load_doc_approvals(work_dir)
-            docs = _read_jsonl(docs_meta)
-            items: List[Dict[str, Any]] = []
-            for d in docs:
-                did = str(d.get("doc_id") or "").strip()
-                meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
-                title = (meta.get("title") if isinstance(meta, dict) else None) or did
-                items.append(
-                    {
+
+            if docs_meta.exists():
+                docs = _read_jsonl(docs_meta)
+                items: List[Dict[str, Any]] = []
+                for d in docs:
+                    did = str(d.get("doc_id") or "").strip()
+                    meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
+                    title = (meta.get("title") if isinstance(meta, dict) else None) or did
+                    items.append({
                         "doc_id": did,
                         "pdf_name": str(d.get("source_uri") or "").split("/")[-1],
                         "source_uri": d.get("source_uri"),
@@ -911,9 +912,54 @@ class KVIHandler(BaseHTTPRequestHandler):
                         "doi": meta.get("doi") if isinstance(meta, dict) else None,
                         "publication_year": meta.get("publication_year") if isinstance(meta, dict) else None,
                         "approved": bool(approvals.get(did, False)),
-                    }
-                )
-            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "docs_meta_jsonl": str(docs_meta)})
+                        "block_count": 0,
+                    })
+                # Enrich with block counts from blocks.evidence.jsonl
+                if blocks_path.exists():
+                    block_counts: Dict[str, int] = {}
+                    for b in _read_jsonl(blocks_path):
+                        did_b = str(b.get("doc_id") or "").strip()
+                        if did_b:
+                            block_counts[did_b] = block_counts.get(did_b, 0) + 1
+                    for it in items:
+                        it["block_count"] = block_counts.get(it["doc_id"], 0)
+                _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "source": "docs.meta.jsonl"})
+                return
+
+            # Fallback: derive doc list directly from blocks.evidence.jsonl
+            if not blocks_path.exists():
+                _json_response(self, HTTPStatus.NOT_FOUND, {
+                    "error": "not_found",
+                    "message": f"Neither docs.meta.jsonl nor blocks.evidence.jsonl found in {work_dir}",
+                })
+                return
+
+            # Group blocks by doc_id
+            doc_blocks: Dict[str, List[Dict[str, Any]]] = {}
+            for b in _read_jsonl(blocks_path):
+                did = str(b.get("doc_id") or "").strip()
+                if not did:
+                    did = "(unknown)"
+                if did not in doc_blocks:
+                    doc_blocks[did] = []
+                doc_blocks[did].append(b)
+
+            items_fb: List[Dict[str, Any]] = []
+            for did, blks in doc_blocks.items():
+                first = blks[0]
+                source_uri = str(first.get("source_uri") or "")
+                pdf_name = source_uri.split("/")[-1] if source_uri else did
+                items_fb.append({
+                    "doc_id": did,
+                    "pdf_name": pdf_name,
+                    "source_uri": source_uri or None,
+                    "title": pdf_name,
+                    "doi": None,
+                    "publication_year": None,
+                    "approved": bool(approvals.get(did, False)),
+                    "block_count": len(blks),
+                })
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items_fb, "count": len(items_fb), "source": "blocks.evidence.jsonl"})
             return
 
         if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/blocks"):
@@ -1560,12 +1606,32 @@ class KVIHandler(BaseHTTPRequestHandler):
             device = str(obj.get("device") or "").strip()
             timeout_s = int(obj.get("timeout_s") or 600)
 
-            # ---- Step 1: Compile sentences from evidence sets ----
+            # ---- Step 1: Compile sentences ----
+            # Primary: evidence sets. Fallback: blocks.evidence.jsonl directly.
             recs, rec_stats = _collect_enabled_sentence_records(topic, enabled_only=True)
+            sentence_source = "evidence_sets"
+            if not recs:
+                # Fallback: read blocks.evidence.jsonl directly
+                blocks_path = out_dir / "blocks.evidence.jsonl"
+                if blocks_path.exists():
+                    blocks = _read_jsonl(blocks_path)
+                    recs = []
+                    for b in blocks:
+                        text = str(b.get("text") or "").strip()
+                        if text:
+                            recs.append({
+                                "id": str(b.get("block_id") or ""),
+                                "claim": text,
+                                "source_id": str(b.get("doc_id") or ""),
+                                "source_ref": {"doi": None, "title": None},
+                                "author": None,
+                                "tags": [],
+                            })
+                    sentence_source = "blocks.evidence.jsonl"
             if not recs:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {
                     "error": "bad_request",
-                    "message": "No claims in enabled evidence sets. Import PDF blocks and create evidence first.",
+                    "message": "No evidence found. Need either evidence sets or blocks.evidence.jsonl in work_dir.",
                 })
                 return
 
@@ -1596,7 +1662,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     f.write(json.dumps({"block_id": bid, "text": claim, "source_id": (src if src else None), "doc_id": (src if src else None), "metadata": meta}, ensure_ascii=False) + "\n")
                     written += 1
 
-            pipeline_status: Dict[str, Any] = {"sentences_compiled": written}
+            pipeline_status: Dict[str, Any] = {"sentences_compiled": written, "sentence_source": sentence_source}
 
             # ---- Step 2: Tag sentences (semantic intent) ----
             sentences_tagged = out_dir / "sentences.tagged.jsonl"

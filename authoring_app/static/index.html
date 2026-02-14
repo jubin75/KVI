@@ -188,15 +188,13 @@
             </div>
             <div class="field">
               <div class="btns">
-                <button class="primary" id="btn_load_docs_topic">Load Documents</button>
                 <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff">Build Graph</button>
               </div>
               <div class="note">
-                1. Load Documents → Approve → Import blocks to evidence.
-                2. Build Graph → 三元 KV 编译（Sentences → Triples → Graph → KV Bank）。
+                选择 Topic 后自动加载 PDF 文档列表。点击文档查看 raw sentences，点击 Build Graph 一键编译三元 KV。
                 <span class="help-toggle" onclick="this.nextElementSibling.classList.toggle('open')">?</span>
               </div>
-              <div class="help-content">来源：该 topic 的 work_dir 下 docs.meta.jsonl + blocks.evidence.jsonl。先 Import 到 evidence set，再 Build Graph 编译三元 KV。</div>
+              <div class="help-content">来源：{work_dir}/blocks.evidence.jsonl。Build Graph 流程：Sentences → Triples → graph_index.json → triple_kvbank/</div>
             </div>
           </div>
         </div>

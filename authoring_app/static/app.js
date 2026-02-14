@@ -298,28 +298,37 @@ async function addSentenceToSet() {
 }
 
 async function loadDocsList() {
-  const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/docs`);
-  const el = $("docs_list");
-  el.innerHTML = "";
-  selectedDoc = null;
-  $("btn_import_doc_blocks").disabled = true;
-  $("docs_list_view").style.display = "block";
-  $("doc_detail_view").style.display = "none";
-  for (const d of resp.items || []) {
-    const card = document.createElement("div"); card.className = "card";
-    const top = document.createElement("div"); top.className = "top";
-    const left = document.createElement("div"); left.className = "mono"; left.textContent = d.pdf_name || d.doc_id;
-    const badge = document.createElement("span"); badge.className = "badge " + (d.approved ? "ok" : "warn"); badge.textContent = d.approved ? "approved" : "pending";
-    top.appendChild(left); top.appendChild(badge);
-    const meta = document.createElement("div"); meta.className = "note"; meta.textContent = `doc_id=${d.doc_id}  year=${d.publication_year || ""}  doi=${d.doi || ""}`;
-    const btns = document.createElement("div"); btns.className = "btns";
-    const toggle = document.createElement("button"); toggle.className = d.approved ? "bad" : "ok"; toggle.textContent = d.approved ? "Revoke" : "Approve";
-    toggle.onclick = async (ev) => { ev.stopPropagation(); await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(d.doc_id)}/set_approved`, { approved: !d.approved }); await loadDocsList(); };
-    btns.appendChild(toggle);
-    const open = document.createElement("button"); open.className = "primary"; open.textContent = "Open";
-    open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocBlocks(d.doc_id); };
-    btns.appendChild(open);
-    card.appendChild(top); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
+  if (!selectedTopic) return;
+  try {
+    const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/docs`);
+    const el = $("docs_list");
+    el.innerHTML = "";
+    selectedDoc = null;
+    $("btn_import_doc_blocks").disabled = true;
+    $("docs_list_view").style.display = "block";
+    $("doc_detail_view").style.display = "none";
+    const source = resp.source || "";
+    for (const d of resp.items || []) {
+      const card = document.createElement("div"); card.className = "card";
+      const top = document.createElement("div"); top.className = "top";
+      const label = d.pdf_name || d.title || d.doc_id;
+      const left = document.createElement("div"); left.className = "mono"; left.textContent = label;
+      const badge = document.createElement("span"); badge.className = "badge ok";
+      badge.textContent = `${d.block_count || 0} blocks`;
+      top.appendChild(left); top.appendChild(badge);
+      const meta = document.createElement("div"); meta.className = "note";
+      meta.textContent = `doc_id=${d.doc_id}` + (d.doi ? `  doi=${d.doi}` : "") + (d.publication_year ? `  year=${d.publication_year}` : "");
+      const btns = document.createElement("div"); btns.className = "btns";
+      const open = document.createElement("button"); open.className = "primary"; open.textContent = "View Sentences";
+      open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocBlocks(d.doc_id); };
+      btns.appendChild(open);
+      card.appendChild(top); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
+    }
+    if ((resp.items || []).length === 0) {
+      el.innerHTML = '<div class="note">No documents found. Run PDF ingestion first to create blocks.evidence.jsonl.</div>';
+    }
+  } catch (err) {
+    $("docs_list").innerHTML = '<div class="note">Error loading documents: ' + String(err.message || err) + '</div>';
   }
 }
 
@@ -455,7 +464,7 @@ async function runDebug() {
 
 function wire() {
   $("tab_simple").onclick = () => { setTab("simple"); loadEvidenceSets().catch(err => console.warn("tab reload evidence:", err)); };
-  $("tab_docs").onclick = () => setTab("docs");
+  $("tab_docs").onclick = () => { setTab("docs"); loadDocsList().catch(err => console.warn("tab reload docs:", err)); };
   $("tab_debug").onclick = () => setTab("debug");
 
   $("topic_select").onchange = async (e) => await onTopicChange(e.target.value);
@@ -471,7 +480,7 @@ function wire() {
   $("btn_save_set").onclick = () => saveCurrentSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_create_set").onclick = () => createEvidenceSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_add_sentence").onclick = () => addSentenceToSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_load_docs_topic").onclick = () => loadDocsList().catch(err => { $("doc_detail").textContent = String(err.message || err); });
+  // btn_load_docs_topic removed — docs auto-load on tab switch
   $("btn_import_doc_blocks").onclick = () => importDocBlocks().catch(err => { $("doc_detail").textContent = String(err.message || err); });
   $("btn_back_to_docs").onclick = () => { selectedDoc = null; $("docs_list_view").style.display = "block"; $("doc_detail_view").style.display = "none"; };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { const el = $("out_debug_log"); if (el) el.textContent = String(err.message || err); });
