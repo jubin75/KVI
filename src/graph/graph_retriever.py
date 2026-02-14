@@ -227,17 +227,19 @@ class GraphRetriever:
                 )
                 walk_results.extend(walked_in)
 
-        # If still empty and intent was specific, try without relation filter
+        # If still empty and intent was specific, try broader walk (1 hop, no
+        # relation filter).  This is conservative: DRM scoring in the inference
+        # script will filter out irrelevant triples before KV injection.
         if not walk_results and target_relations:
-            debug["fallback"] = "walk_without_relation_filter"
+            debug["fallback"] = "broad_walk_1hop"
             for m in matches:
-                walked_all = self.graph.walk(
+                walked_broad = self.graph.walk(
                     m["node_id"],
                     relation_types=[],  # no filter
                     direction="outgoing",
-                    max_hops=self.max_hops,
+                    max_hops=1,  # conservative: 1 hop only (was: max_hops)
                 )
-                walk_results.extend(walked_all)
+                walk_results.extend(walked_broad)
 
         debug["walk_results_count"] = len(walk_results)
 

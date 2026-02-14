@@ -447,22 +447,23 @@ def assemble_kv_for_entities(
     """
     Assemble per-layer KV prefix from matched entities' KV items.
 
-    For each matched entity:
-    - **Always** include its subject anchor (if exists)
-    - **Only** include triple KVs whose ``graph_triple_id`` is in
-      ``walk_triple_ids`` (i.e., triples the graph walk actually returned).
-      If ``walk_triple_ids`` is None, include all triples (fallback).
+    v4 contract (DRM pre-filtering):
+    - The caller (``run_graph_inference.py``) MUST apply DRM scoring and
+      relation gating **before** calling this function.
+    - ``walk_triple_ids`` should be the DRM-filtered, budget-limited list
+      of triple_ids.  Only those triples' KVs will be included.
+    - Subject anchors are **always** included for matched entities.
+    - If ``walk_triple_ids`` is an empty list ``[]``, no triple KVs are
+      injected (only subject anchors).
+    - ``walk_triple_ids=None`` is treated as "include no triples" (safe
+      default).  The old fallback behaviour (include ALL triples when
+      None) has been removed to prevent injection of irrelevant KVs.
 
     Returns:
         (past_key_values, selected_item_ids):
         - past_key_values: tuple of (key, value) per layer, HF-compatible
         - selected_item_ids: list of item_ids that were actually assembled
         Returns (None, []) if no KV to inject.
-
-    Implementation:
-        For layers within an item's [layer_start, layer_end] range,
-        the item's KV is included.  For layers outside the range,
-        the item contributes nothing (per-layer masking).
     """
     import torch
 
@@ -471,9 +472,9 @@ def assemble_kv_for_entities(
         return None, []
 
     # Build set of allowed item_ids from walk triple_ids
-    allowed_triple_item_ids: Optional[set] = None
-    if walk_triple_ids is not None:
-        allowed_triple_item_ids = set()
+    # v4: None is treated as empty (no triples), NOT as "include all"
+    allowed_triple_item_ids: set = set()
+    if walk_triple_ids:
         for tid in walk_triple_ids:
             iid = manifest.triple_id_index.get(tid)
             if iid:
@@ -491,12 +492,8 @@ def assemble_kv_for_entities(
                 # Subject anchors are always included
                 relevant_items.append(iid)
             elif meta.item_type == "triple":
-                if allowed_triple_item_ids is not None:
-                    # Precise filtering: only include triples from the walk
-                    if iid in allowed_triple_item_ids:
-                        relevant_items.append(iid)
-                else:
-                    # Fallback: include all triples (no walk info)
+                # Only include triples explicitly allowed by DRM filtering
+                if iid in allowed_triple_item_ids:
                     relevant_items.append(iid)
 
     if not relevant_items:

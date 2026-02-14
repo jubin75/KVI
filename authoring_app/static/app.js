@@ -374,13 +374,31 @@ async function runDebug() {
     $("out_graph_base_llm").textContent = r.base_llm_result || "";
     $("out_graph_entity_ctx").textContent = r.entity_context || "(none)";
     $("out_graph_evidence").textContent = (r.evidence_texts || []).map((t, i) => `${i+1}. ${t}`).join("\n") || "(none)";
-    // KV Injection info
+    // KV Injection info (with DRM scores)
     const kvDbg = r.kv_injection_debug || {};
-    if (kvDbg.enabled && kvDbg.active_items) {
-      const lines = kvDbg.active_items.map(it =>
-        `[${it.type}] ${it.text} (${it.relation || 'anchor'}, layers ${it.layers}, ${it.tokens} tok)`
-      );
-      lines.push(`--- total KV tokens: ${kvDbg.total_kv_tokens || 0}, seq_len: ${kvDbg.assembled_seq_len || 0}`);
+    if (kvDbg.enabled) {
+      const lines = [];
+      // DRM scoring summary
+      const drmScores = kvDbg.drm_scores || [];
+      if (drmScores.length > 0) {
+        lines.push(`=== DRM Scoring (${drmScores.length} walk triples) ===`);
+        for (const ds of drmScores) {
+          const marker = ds.drm_score >= (kvDbg.drm_threshold || 0.05) ? '✓' : '✗';
+          lines.push(`  ${marker} [${ds.relation}] ${ds.subject}→${ds.object} drm=${ds.drm_score}`);
+        }
+        lines.push(`--- threshold=${kvDbg.drm_threshold}, passed=${kvDbg.drm_passed}, gated=${kvDbg.gated_count}, budget=${kvDbg.budget_selected}`);
+        lines.push('');
+      }
+      // Active KV items
+      if (kvDbg.active_items && kvDbg.active_items.length > 0) {
+        lines.push(`=== Injected KV Items (${kvDbg.active_items.length}) ===`);
+        for (const it of kvDbg.active_items) {
+          lines.push(`[${it.type}] ${it.text} (${it.relation || 'anchor'}, layers ${it.layers}, ${it.tokens} tok)`);
+        }
+        lines.push(`--- total KV tokens: ${kvDbg.total_kv_tokens || 0}, seq_len: ${kvDbg.assembled_seq_len || 0}`);
+      } else {
+        lines.push('(no KV items injected after DRM filtering)');
+      }
       $("out_graph_kv_injection").textContent = lines.join("\n");
     } else {
       $("out_graph_kv_injection").textContent = kvDbg.enabled === false

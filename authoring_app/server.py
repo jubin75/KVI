@@ -1982,12 +1982,19 @@ class KVIHandler(BaseHTTPRequestHandler):
                 return
             timeout_s = int(obj.get("timeout_s") or 180)
             triple_kvbank_dir = out_dir / "triple_kvbank"
+            # DRM + Relation Gating parameters (from request or defaults)
+            max_kv_triples = int(obj.get("max_kv_triples") or 3)
+            drm_threshold = float(obj.get("drm_threshold") or 0.05)
+            top_k_relations = int(obj.get("top_k_relations") or 2)
             cmd = [
                 sys.executable,
                 str(PROJECT_ROOT / "scripts" / "run_graph_inference.py"),
                 "--model", base_llm,
                 "--prompt", prompt,
                 "--graph_index", str(graph_index_json),
+                "--max_kv_triples", str(max_kv_triples),
+                "--drm_threshold", str(drm_threshold),
+                "--top_k_relations", str(top_k_relations),
                 "--use_chat_template",
                 "--local_files_only",
             ]

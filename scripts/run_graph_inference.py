@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """
-Scheme C — Graph Inference CLI (v3: 三元 KVI).
+Scheme C — Graph Inference CLI (v4: DRM + Relation Gating + 三元 KVI).
 
-Runtime: graph-based retrieval + **triple KV injection** + LLM generation.
+Runtime: graph-based retrieval + **DRM scoring** + **relation gating**
++ triple KV injection + LLM generation.
 
-v3 integrates the "三元 KVI" architecture:
-- Subject Anchoring KV (entity description, shallow layers 0-3)
-- Triple KV (short s-r-o sentences, relation-dependent layer ranges)
-- Prompt-level entity context + evidence (complementary, never duplicated)
+v4 key change (fixing the "injecting irrelevant triples" problem):
+
+    Graph Walk → DRM Score → Relation Gating → KV Budget → KV Assembly
+
+1. **DRM (Document Relevance Model)**: Score every walk triple's provenance
+   sentence against the query using lightweight bigram overlap.
+2. **Relation Gating**: Group scored triples by relation type, compute
+   aggregate scores, keep only top-k relation groups.
+3. **KV Budget**: From selected groups, take at most ``--max_kv_triples``
+   triples (sorted by DRM score) for KV injection.
+4. **Evidence Ranking**: Evidence sentences are also ranked by DRM score;
+   highest-scoring evidence appears first in the prompt.
+
+Design follows 15_架构调整.md + ToG-2's DRM → Relation Prune pattern:
+  "DRM 过滤必须在 KVI 之前"
 
 Usage::
 
@@ -16,6 +28,7 @@ Usage::
         --prompt "SFTSV的临床症状有哪些？" \\
         --graph_index /path/to/graph_index.json \\
         [--triple_kvbank_dir /path/to/triple_kvbank] \\
+        [--max_kv_triples 3] [--drm_threshold 0.05] \\
         [--use_chat_template] [--local_files_only]
 
 Output (JSON to stdout):
@@ -84,6 +97,73 @@ def _tokenize_chinese(text: str) -> set[str]:
     return tokens
 
 
+# ---------------------------------------------------------------------------
+# DRM (Document Relevance Model) — lightweight scoring
+# ---------------------------------------------------------------------------
+
+def _score_triple_relevance(query: str, evidence_text: str) -> float:
+    """
+    Lightweight DRM scoring: bigram overlap between *query* and *evidence_text*.
+
+    Adapted from ToG-2's DRM concept and 15_架构调整.md §2:
+      "DRM 过滤必须在 KVI 之前"
+
+    Returns a score in [0, 1] representing the fraction of query tokens
+    that appear in the evidence text.  Higher = more relevant.
+    """
+    q_tokens = _tokenize_chinese(query)
+    e_tokens = _tokenize_chinese(evidence_text)
+    if not q_tokens or not e_tokens:
+        return 0.0
+    overlap = len(q_tokens & e_tokens)
+    return overlap / len(q_tokens)
+
+
+def _relation_gating(
+    scored_triples: list[dict],
+    top_k_relations: int = 2,
+) -> list[dict]:
+    """
+    Relation Gating Engine — 15_架构调整.md §3 / ToG-2 Relation Prune.
+
+    1. Group scored triples by relation type.
+    2. Compute aggregate score per group (sum of member DRM scores).
+    3. Return only triples from the top-k highest-scoring groups.
+
+    This prevents relation types with low aggregate relevance from
+    contributing KV items (e.g., ``located_in`` triples when query is
+    about symptoms).
+    """
+    if not scored_triples:
+        return []
+
+    # Group by relation type
+    groups: dict[str, list[dict]] = {}
+    for t in scored_triples:
+        rel = t.get("relation", "unknown")
+        groups.setdefault(rel, []).append(t)
+
+    # Score each group
+    group_ranking: list[tuple[str, float, list[dict]]] = []
+    for rel, members in groups.items():
+        total_score = sum(m["drm_score"] for m in members)
+        group_ranking.append((rel, total_score, members))
+
+    # Sort by aggregate score, select top-k
+    group_ranking.sort(key=lambda x: x[1], reverse=True)
+    selected = group_ranking[:top_k_relations]
+
+    # Flatten selected groups
+    result: list[dict] = []
+    for _rel, _score, members in selected:
+        result.extend(members)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Simple grounding filter (token-overlap based)
+# ---------------------------------------------------------------------------
+
 def _simple_grounding(
     output_text: str,
     evidence_texts: list[str],
@@ -140,6 +220,13 @@ def main() -> None:
     p.add_argument("--prompt", required=True, help="User query")
     p.add_argument("--graph_index", required=True, help="graph_index.json path")
     p.add_argument("--triple_kvbank_dir", default="", help="Triple KV bank directory (compiled by triple_kv_compiler)")
+    # DRM + Relation Gating parameters
+    p.add_argument("--max_kv_triples", type=int, default=3,
+                   help="Max triple KVs to inject after DRM scoring (budget control)")
+    p.add_argument("--drm_threshold", type=float, default=0.05,
+                   help="Min DRM score for a triple to be considered for KV injection")
+    p.add_argument("--top_k_relations", type=int, default=2,
+                   help="Max relation groups to keep after Relation Gating")
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument("--local_files_only", action="store_true")
     p.add_argument("--max_new_tokens", type=int, default=128)
@@ -258,17 +345,73 @@ def main() -> None:
     model.to(device).eval()
     print("[graphC] Model loaded", file=sys.stderr)
 
-    # ---- 6. Assemble Triple KV for matched entities ----
+    # ---- 6. DRM Scoring → Relation Gating → KV Budget → Assembly ----
+    #
+    # Core fix for "injecting irrelevant triples" (15_架构调整.md §2,8):
+    #   DRM → Relation Aggregation → Layer Gating → KVI Injection
+    #
     assembled_kv = None
     if triple_kv_manifest and triple_kv_cache_dict:
         matched_names = [m["entity_name"] for m in gr.matched_entities]
-        # Use walk_triple_ids from graph retrieval for precise KV filtering
-        walk_triple_ids = gr.walk_triple_ids
 
+        # 6a. DRM: Score each walk triple against the query
+        scored_walk_triples: list[dict] = []
+        for tid in gr.walk_triple_ids:
+            triple = graph.triples.get(tid)
+            if not triple:
+                continue
+            prov_text = str(triple.provenance.get("sentence_text") or "")
+            drm_score = _score_triple_relevance(args.prompt, prov_text)
+            scored_walk_triples.append({
+                "triple_id": tid,
+                "relation": triple.predicate,
+                "subject": triple.subject,
+                "object": triple.object,
+                "drm_score": round(drm_score, 4),
+                "provenance": prov_text[:100],
+            })
+
+        # Sort by DRM score (highest first) for debug display
+        scored_walk_triples.sort(key=lambda x: x["drm_score"], reverse=True)
+        kv_injection_debug["drm_scores"] = scored_walk_triples
+        kv_injection_debug["drm_threshold"] = args.drm_threshold
+
+        # 6b. Filter by DRM threshold
+        above_threshold = [
+            t for t in scored_walk_triples
+            if t["drm_score"] >= args.drm_threshold
+        ]
+        kv_injection_debug["drm_passed"] = len(above_threshold)
+
+        # 6c. Relation Gating: select top-k relation groups
+        gated = _relation_gating(above_threshold, top_k_relations=args.top_k_relations)
+        kv_injection_debug["gated_count"] = len(gated)
+
+        # 6d. Budget: take top-N triples by DRM score
+        gated.sort(key=lambda x: x["drm_score"], reverse=True)
+        budget_selected = gated[:args.max_kv_triples]
+        kv_triple_ids = [t["triple_id"] for t in budget_selected]
+        kv_injection_debug["budget_selected"] = len(kv_triple_ids)
+        kv_injection_debug["selected_triples"] = [
+            {"triple_id": t["triple_id"], "relation": t["relation"],
+             "subject": t["subject"], "object": t["object"],
+             "drm_score": t["drm_score"]}
+            for t in budget_selected
+        ]
+
+        print(
+            f"[graphC] DRM: {len(scored_walk_triples)} walk triples → "
+            f"{len(above_threshold)} above threshold ({args.drm_threshold}) → "
+            f"{len(gated)} after gating (top-{args.top_k_relations} rels) → "
+            f"{len(kv_triple_ids)} selected for KV (budget={args.max_kv_triples})",
+            file=sys.stderr,
+        )
+
+        # 6e. Assemble KV — always pass a list (never None)
         try:
             assembled_kv, selected_item_ids = assemble_kv_for_entities(
                 matched_entity_names=matched_names,
-                walk_triple_ids=walk_triple_ids if walk_triple_ids else None,
+                walk_triple_ids=kv_triple_ids,  # DRM-filtered list, ALWAYS a list
                 manifest=triple_kv_manifest,
                 kv_cache_dict=triple_kv_cache_dict,
                 device=device,
@@ -293,7 +436,6 @@ def main() -> None:
                 kv_injection_debug["total_kv_tokens"] = sum(
                     it.get("tokens", 0) for it in active_items
                 )
-                kv_injection_debug["walk_triple_ids"] = walk_triple_ids
                 kv_seq_len = assembled_kv[0][0].shape[2] if assembled_kv[0] is not None else 0
                 kv_injection_debug["assembled_seq_len"] = int(kv_seq_len)
                 print(
@@ -303,15 +445,21 @@ def main() -> None:
                 )
             else:
                 kv_injection_debug["assembled"] = False
-                kv_injection_debug["reason"] = "no_matching_items"
-                kv_injection_debug["walk_triple_ids"] = walk_triple_ids
+                kv_injection_debug["reason"] = "no_matching_items_after_drm"
         except Exception as e:
             print(f"[graphC] WARNING: KV assembly failed: {e}", file=sys.stderr)
             kv_injection_debug["assembly_error"] = str(e)
             assembled_kv = None
 
-    # ---- 7. Build prompt ----
-    evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(evidence_texts))
+    # ---- 7. Build prompt (rank evidence by DRM score) ----
+    # Rank evidence sentences by DRM relevance to the query (highest first)
+    evidence_with_scores = []
+    for et in evidence_texts:
+        score = _score_triple_relevance(args.prompt, et)
+        evidence_with_scores.append((et, score))
+    evidence_with_scores.sort(key=lambda x: x[1], reverse=True)
+    ranked_evidence_texts = [et for et, _s in evidence_with_scores]
+    evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
 
     prompt_parts: list[str] = []
     if entity_context:
