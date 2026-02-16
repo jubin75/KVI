@@ -99,14 +99,14 @@ Do NOT hallucinate; only extract from the provided text snippet.
 USER_TEMPLATE = """Extract document-level metadata from the following PDF snippet.
 
 Return JSON schema:
-{
+{{
   "title": "string|null",
   "journal": "string|null",
   "doi": "string|null",
   "publication_year": 2024|null,
   "published_at": "YYYY-MM-DD|null",
   "authors": ["..."]
-}
+}}
 
 doc_id: {doc_id}
 source_uri: {source_uri}
