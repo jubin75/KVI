@@ -35,6 +35,17 @@ _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)\b")
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
 
+_NOISE_LINE_RE = re.compile(
+    r"^(\s*\d+\s*$"                              # page numbers
+    r"|.*\b(vol\.?|issue|pages?|proceedings)\b"   # journal meta
+    r"|.*\b(received|accepted|published|copyright)\b"  # publication dates
+    r"|.*@.*\.(com|edu|org|cn)"                   # emails
+    r"|\s*https?://\S+\s*$"                       # bare URLs
+    r")",
+    re.IGNORECASE,
+)
+
+
 def _heuristic_meta(text: str, *, source_uri: str, doc_id: str) -> Dict[str, Any]:
     t = str(text or "")
     doi = None
@@ -45,11 +56,30 @@ def _heuristic_meta(text: str, *, source_uri: str, doc_id: str) -> Dict[str, Any
     my = _YEAR_RE.search(t[:4000])
     if my:
         year = int(my.group(1))
-    # fallback title: prefer PDF basename (without suffix), then doc_id
-    basename = str(source_uri).split("/")[-1] if str(source_uri or "").strip() else ""
-    if basename.lower().endswith(".pdf"):
-        basename = basename[:-4]
-    title = basename.strip() or str(doc_id or "").strip()
+
+    # --- Title extraction: try first meaningful line from text snippet ---
+    title = ""
+    if t.strip():
+        for raw_line in t.split("\n"):
+            line = raw_line.strip()
+            if not line or len(line) < 10:
+                continue
+            if _DOI_RE.search(line):
+                continue
+            if _NOISE_LINE_RE.match(line):
+                continue
+            # Title is typically 10-300 chars, not all-uppercase single word
+            if 10 <= len(line) <= 300:
+                title = line
+                break
+
+    # fallback: PDF basename (without suffix), then doc_id
+    if not title:
+        basename = str(source_uri).split("/")[-1] if str(source_uri or "").strip() else ""
+        if basename.lower().endswith(".pdf"):
+            basename = basename[:-4]
+        title = basename.strip() or str(doc_id or "").strip()
+
     return {
         "title": title,
         "journal": None,

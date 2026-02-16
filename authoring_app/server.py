@@ -907,12 +907,58 @@ class KVIHandler(BaseHTTPRequestHandler):
             if docs_meta.exists():
                 docs = _read_jsonl(docs_meta)
                 items: List[Dict[str, Any]] = []
+                # Pre-read blocks for counts
+                block_counts: Dict[str, int] = {}
+                if blocks_path:
+                    for b in _read_jsonl(blocks_path):
+                        did_b = str(b.get("doc_id") or "").strip()
+                        if did_b:
+                            block_counts[did_b] = block_counts.get(did_b, 0) + 1
+
+                # Pre-read raw_chunks for title enrichment (original PDF text, not evidence blocks)
+                _DOI_LIKE_RE = re.compile(r"^10\.\d{4,}")
+                _NOISE_LINE_RE = re.compile(
+                    r"^(\s*\d+\s*$|.*\b(vol\.?|issue|pages?|proceedings)\b"
+                    r"|.*\b(received|accepted|published|copyright)\b"
+                    r"|.*@.*\.(com|edu|org|cn)|\s*https?://\S+\s*$)",
+                    re.IGNORECASE,
+                )
+                raw_chunks_path = work_dir / "raw_chunks.jsonl"
+                first_pdf_title: Dict[str, str] = {}
+                if raw_chunks_path.exists():
+                    for rc in _read_jsonl(raw_chunks_path):
+                        rc_did = str(rc.get("doc_id") or "").strip()
+                        if rc_did and rc_did not in first_pdf_title:
+                            # Extract first meaningful line from original PDF text as title
+                            raw_text = str(rc.get("text") or "")
+                            candidate = ""
+                            for raw_line in raw_text.split("\n"):
+                                ln = raw_line.strip()
+                                if not ln or len(ln) < 10:
+                                    continue
+                                if re.search(r"\b10\.\d{4,9}/\S+", ln):
+                                    continue
+                                if _NOISE_LINE_RE.match(ln):
+                                    continue
+                                if 10 <= len(ln) <= 300:
+                                    candidate = ln
+                                    break
+                            if candidate:
+                                first_pdf_title[rc_did] = candidate
+
                 for d in docs:
                     did = str(d.get("doc_id") or "").strip()
                     meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
                     pdf_name = str(d.get("source_uri") or "").split("/")[-1]
                     fallback_title = pdf_name[:-4] if pdf_name.lower().endswith(".pdf") else pdf_name
                     title = (meta.get("title") if isinstance(meta, dict) else None) or fallback_title or did
+
+                    # Enrich: if title looks like a DOI/filename, use first line from raw PDF text
+                    if _DOI_LIKE_RE.match(title) or title == did or title == fallback_title:
+                        pdf_title = first_pdf_title.get(did, "")
+                        if pdf_title:
+                            title = pdf_title
+
                     items.append({
                         "doc_id": did,
                         "pdf_name": pdf_name,
@@ -921,17 +967,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                         "doi": meta.get("doi") if isinstance(meta, dict) else None,
                         "publication_year": meta.get("publication_year") if isinstance(meta, dict) else None,
                         "approved": bool(approvals.get(did, False)),
-                        "block_count": 0,
+                        "block_count": block_counts.get(did, 0),
                     })
-                # Enrich with block counts
-                if blocks_path:
-                    block_counts: Dict[str, int] = {}
-                    for b in _read_jsonl(blocks_path):
-                        did_b = str(b.get("doc_id") or "").strip()
-                        if did_b:
-                            block_counts[did_b] = block_counts.get(did_b, 0) + 1
-                    for it in items:
-                        it["block_count"] = block_counts.get(it["doc_id"], 0)
                 _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items, "count": len(items), "source": "docs.meta.jsonl"})
                 return
 
