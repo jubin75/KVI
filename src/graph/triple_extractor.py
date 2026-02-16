@@ -276,6 +276,7 @@ class TripleExtractor:
                 "sentence_id": str(s.get("id") or s.get("sentence_id") or s.get("block_id") or ""),
                 "sentence_text": str(s.get("text") or ""),
                 "source_block_id": str(s.get("source_block_id") or s.get("block_id") or ""),
+                "source_doc_id": str(s.get("doc_id") or s.get("source_id") or ""),
             }
 
         triples: List[Triple] = []
@@ -326,6 +327,7 @@ class TripleExtractor:
                             "sentence_id": str(s.get("id") or s.get("sentence_id") or s.get("block_id") or ""),
                             "sentence_text": str(s.get("text") or ""),
                             "source_block_id": str(s.get("source_block_id") or s.get("block_id") or ""),
+                            "source_doc_id": str(s.get("doc_id") or s.get("source_id") or ""),
                         }
                 except (ValueError, TypeError):
                     pass
@@ -337,6 +339,7 @@ class TripleExtractor:
                         "sentence_id": str(best_match.get("id") or best_match.get("sentence_id") or best_match.get("block_id") or ""),
                         "sentence_text": str(best_match.get("text") or ""),
                         "source_block_id": str(best_match.get("source_block_id") or best_match.get("block_id") or ""),
+                        "source_doc_id": str(best_match.get("doc_id") or best_match.get("source_id") or ""),
                     }
 
             tid = _make_triple_id(subj, pred, obj, prov.get("sentence_id", ""))

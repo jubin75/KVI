@@ -290,11 +290,16 @@ class GraphRetriever:
             sent_text = str(prov.get("sentence_text") or "")
             if not sent_text or sent_id in seen_sentences:
                 continue
+            sent_rec = self.graph.sentence_index.get(sent_id) if hasattr(self.graph, "sentence_index") else None
             seen_sentences.add(sent_id)
             evidence.append({
                 "sentence_id": sent_id,
                 "text": sent_text,
                 "source_block_id": str(prov.get("source_block_id") or ""),
+                "source_doc_id": str(
+                    (prov.get("source_doc_id") or "")
+                    or ((sent_rec or {}).get("source_doc_id") if isinstance(sent_rec, dict) else "")
+                ),
                 "relation": wr.get("relation", ""),
                 "triple_id": tid,
                 "hop": wr.get("hop", 1),

@@ -43,6 +43,7 @@ You MUST ONLY copy exact substrings from the provided raw_block_text into the 'q
 
 USER_TEMPLATE = """topic_goal: {topic_goal}
 task: Extract up to {max_sentences} COMPLETE evidence sentences for the topic_goal (HIGH RECALL).
+section_hint: {section_hint}
 
 Rules (MUST follow):
 1) Output JSON only. No markdown, no explanation.
@@ -86,6 +87,42 @@ class ExtractiveEvidenceConfig:
     max_sentences: int = 1
     # Allow a bit more context to increase recall (still bounded to avoid overly long requests).
     max_chars: int = 9000
+    # When true, aggressively drop bibliography/header-like noise sentences.
+    strict_noise_filter: bool = True
+
+
+_CITATION_RE = re.compile(r"\b[A-Z][A-Za-z\-']+\s+et al\.?,?\s*\(?\d{4}\)?")
+_YEAR_PAREN_RE = re.compile(r"\(\d{4}\)")
+_DOI_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.IGNORECASE)
+_JOURNALISH_RE = re.compile(
+    r"\b(vol\.?|issue|pages?|doi|journal|proceedings|copyright)\b",
+    re.IGNORECASE,
+)
+_REF_PREFIX_RE = re.compile(r"^\s*(references?|bibliography)\s*[:：]?\s*$", re.IGNORECASE)
+
+
+def _is_low_value_noise_sentence(text: str) -> bool:
+    t = str(text or "").strip()
+    if not t:
+        return True
+    if _REF_PREFIX_RE.match(t):
+        return True
+    # Strong bibliography patterns
+    if _DOI_RE.search(t):
+        return True
+    if _CITATION_RE.search(t):
+        return True
+    if _JOURNALISH_RE.search(t):
+        return True
+    # Citation-heavy lines are usually references/noise for graph extraction.
+    years = len(_YEAR_PAREN_RE.findall(t))
+    if years >= 3:
+        return True
+    # Author list style: many commas but little clinical predicate signal.
+    comma_count = t.count(",") + t.count("，")
+    if comma_count >= 6 and len(t) < 280:
+        return True
+    return False
 
 
 class DeepSeekExtractiveEvidence:
@@ -99,12 +136,13 @@ class DeepSeekExtractiveEvidence:
             )
         )
 
-    def extract(self, *, topic_goal: str, raw_block_text: str) -> Dict[str, Any]:
+    def extract(self, *, topic_goal: str, raw_block_text: str, section_hint: str = "") -> Dict[str, Any]:
         raw_block_text = str(raw_block_text or "")
         clipped = raw_block_text[: int(self.cfg.max_chars)]
         user = USER_TEMPLATE.format(
             topic_goal=str(topic_goal),
             max_sentences=int(self.cfg.max_sentences),
+            section_hint=str(section_hint or "unknown"),
             raw_block_text=clipped,
         )
         out = self.client.chat(system=SYSTEM_PROMPT, user=user, temperature=0.0)
@@ -124,6 +162,8 @@ class DeepSeekExtractiveEvidence:
                 continue
             quote = str(it.get("quote") or "").strip()
             if not quote:
+                continue
+            if self.cfg.strict_noise_filter and _is_low_value_noise_sentence(quote):
                 continue
             # Enforce "sentence-like" shape to avoid fragmentary evidence blocks.
             if len(quote) < 20:

@@ -910,10 +910,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                 for d in docs:
                     did = str(d.get("doc_id") or "").strip()
                     meta = d.get("meta") if isinstance(d.get("meta"), dict) else {}
-                    title = (meta.get("title") if isinstance(meta, dict) else None) or did
+                    pdf_name = str(d.get("source_uri") or "").split("/")[-1]
+                    fallback_title = pdf_name[:-4] if pdf_name.lower().endswith(".pdf") else pdf_name
+                    title = (meta.get("title") if isinstance(meta, dict) else None) or fallback_title or did
                     items.append({
                         "doc_id": did,
-                        "pdf_name": str(d.get("source_uri") or "").split("/")[-1],
+                        "pdf_name": pdf_name,
                         "source_uri": d.get("source_uri"),
                         "title": title,
                         "doi": meta.get("doi") if isinstance(meta, dict) else None,

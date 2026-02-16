@@ -144,10 +144,31 @@ class KnowledgeGraphBuilder:
             node.incoming = _dedup_edges(node.incoming)
 
         # 5. Build metadata
+        sentence_index: Dict[str, Dict[str, Any]] = {}
+        triple_sentence_index: Dict[str, List[str]] = {}
+        for tid, triple in self._triples.items():
+            prov = triple.provenance or {}
+            sid = str(prov.get("sentence_id") or "").strip()
+            if not sid:
+                continue
+            triple_sentence_index[tid] = [sid]
+            if sid not in sentence_index:
+                sentence_index[sid] = {
+                    "text": str(prov.get("sentence_text") or ""),
+                    "source_block_id": str(prov.get("source_block_id") or ""),
+                    "source_doc_id": str(prov.get("source_doc_id") or ""),
+                    "triple_ids": [],
+                }
+            sentence_index[sid]["triple_ids"].append(tid)
+
+        for sid, rec in sentence_index.items():
+            rec["triple_ids"] = sorted(set(rec.get("triple_ids") or []))
+
         meta = {
             "num_nodes": len(nodes),
             "num_triples": len(self._triples),
             "num_entity_index_entries": len(entity_index),
+            "num_sentences_indexed": len(sentence_index),
             "relation_types": sorted(self.relation_types.keys()),
             "entity_types": sorted(self.entity_types.keys()),
         }
@@ -156,6 +177,8 @@ class KnowledgeGraphBuilder:
             nodes=nodes,
             triples=self._triples,
             entity_index=entity_index,
+            sentence_index=sentence_index,
+            triple_sentence_index=triple_sentence_index,
             meta=meta,
         )
 

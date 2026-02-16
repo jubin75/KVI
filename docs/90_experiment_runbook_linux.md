@@ -117,6 +117,19 @@ wc -l /home/jb/topics/SFTSV/work/raw_chunks.jsonl
 
 **Step 2: raw_chunks → blocks.evidence.jsonl（DeepSeek 抽取，约 5-15 分钟）**
 
+> **`--topic_goal` 参数说明**：该文本会直接嵌入发给 DeepSeek 的 prompt（见 `src/llm_filter/extractive_evidence.py` 的 `USER_TEMPLATE`），
+> 作为抽取指引：DeepSeek 读每个 PDF 段落时，根据 topic_goal 判断是否保留（`keep=true/false`）以及抽取哪些证据句。
+>
+> 冒号后的中文关键词**决定了 evidence 的覆盖面**：
+> - `传播途径` → 保留蜱叮咬、血液接触等相关句
+> - `临床症状` → 保留发热、血小板减少等描述
+> - `发病机制` → 保留免疫应答、细胞因子风暴等
+> - `治疗与预防` → 保留法维拉韦、对症治疗等
+> - 与所有关键词都无关的段落 → `keep=false`，跳过不抽取
+>
+> **关键词越全面，DeepSeek 抽取的 evidence 覆盖面越广。**
+> 如果只写 `"SFTSV专题"`，可能会漏掉流行病学或治疗相关的 evidence。
+
 ```bash
 cd /home/jb/KVI
 

@@ -18,8 +18,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+
+
+_CITATION_RE = re.compile(r"\b[A-Z][A-Za-z\-']+\s+et al\.?,?\s*\(?\d{4}\)?")
+_DOI_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.IGNORECASE)
+_YEAR_PAREN_RE = re.compile(r"\(\d{4}\)")
+
+
+def _is_sentence_noise(text: str) -> bool:
+    t = str(text or "").strip()
+    if not t:
+        return True
+    if _DOI_RE.search(t):
+        return True
+    if _CITATION_RE.search(t):
+        return True
+    if len(_YEAR_PAREN_RE.findall(t)) >= 3:
+        return True
+    return False
 
 
 def main() -> None:
@@ -59,6 +78,9 @@ def main() -> None:
             try:
                 rec = json.loads(s)
                 if isinstance(rec, dict) and rec.get("text"):
+                    text = str(rec.get("text") or "").strip()
+                    if _is_sentence_noise(text):
+                        continue
                     sentences.append(rec)
             except Exception:
                 continue

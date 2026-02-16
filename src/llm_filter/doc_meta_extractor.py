@@ -45,8 +45,11 @@ def _heuristic_meta(text: str, *, source_uri: str, doc_id: str) -> Dict[str, Any
     my = _YEAR_RE.search(t[:4000])
     if my:
         year = int(my.group(1))
-    # fallback title: doc_id or file basename
-    title = str(doc_id or "").strip() or str(source_uri).split("/")[-1]
+    # fallback title: prefer PDF basename (without suffix), then doc_id
+    basename = str(source_uri).split("/")[-1] if str(source_uri or "").strip() else ""
+    if basename.lower().endswith(".pdf"):
+        basename = basename[:-4]
+    title = basename.strip() or str(doc_id or "").strip()
     return {
         "title": title,
         "journal": None,

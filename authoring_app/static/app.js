@@ -316,18 +316,21 @@ async function loadDocsList() {
     for (const d of resp.items || []) {
       const card = document.createElement("div"); card.className = "card";
       const top = document.createElement("div"); top.className = "top";
-      const label = d.pdf_name || d.title || d.doc_id;
+      const label = d.title || d.pdf_name || d.doc_id;
       const left = document.createElement("div"); left.className = "mono"; left.textContent = label;
       const badge = document.createElement("span"); badge.className = "badge ok";
       badge.textContent = `${d.block_count || 0} blocks`;
       top.appendChild(left); top.appendChild(badge);
       const meta = document.createElement("div"); meta.className = "note";
       meta.textContent = `doc_id=${d.doc_id}` + (d.doi ? `  doi=${d.doi}` : "") + (d.publication_year ? `  year=${d.publication_year}` : "");
+      const fileLine = document.createElement("div"); fileLine.className = "note";
+      fileLine.style.color = "var(--text-muted)";
+      fileLine.textContent = d.pdf_name ? `file: ${d.pdf_name}` : "";
       const btns = document.createElement("div"); btns.className = "btns";
       const open = document.createElement("button"); open.className = "primary"; open.textContent = "View Sentences";
       open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocBlocks(d.doc_id); };
       btns.appendChild(open);
-      card.appendChild(top); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
+      card.appendChild(top); card.appendChild(fileLine); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
     }
     if ((resp.items || []).length === 0) {
       el.innerHTML = '<div class="note">No documents found. Run PDF ingestion first to create blocks.evidence.jsonl.</div>';

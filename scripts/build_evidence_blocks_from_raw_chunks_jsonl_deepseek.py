@@ -87,6 +87,31 @@ def _approx_token_count(text: str) -> int:
     return int(len(units))
 
 
+_REF_PREFIX_RE = re.compile(r"^\s*(references?|bibliography)\s*[:：]?\s*$", re.IGNORECASE)
+_CITATION_RE = re.compile(r"\b[A-Z][A-Za-z\-']+\s+et al\.?,?\s*\(?\d{4}\)?")
+_YEAR_PAREN_RE = re.compile(r"\(\d{4}\)")
+_DOI_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.IGNORECASE)
+_JOURNALISH_RE = re.compile(r"\b(vol\.?|issue|pages?|doi|journal|proceedings)\b", re.IGNORECASE)
+
+
+def _is_low_value_paragraph(para: str) -> bool:
+    p = str(para or "").strip()
+    if not p:
+        return True
+    if _REF_PREFIX_RE.match(p):
+        return True
+    if _DOI_RE.search(p):
+        return True
+    if _CITATION_RE.search(p):
+        return True
+    years = len(_YEAR_PAREN_RE.findall(p))
+    if years >= 4:
+        return True
+    if _JOURNALISH_RE.search(p):
+        return True
+    return False
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--raw_chunks_jsonl", required=True, help="Input raw_chunks.jsonl")
@@ -96,6 +121,16 @@ def main() -> None:
     p.add_argument("--topic_goal", required=True, help="Topic goal text (used to guide extraction)")
     p.add_argument("--max_sentences_per_paragraph", type=int, default=3)
     p.add_argument("--max_paragraphs", type=int, default=0, help="If >0, only process first N paragraphs (debug)")
+    p.add_argument(
+        "--allowed_paragraph_types",
+        default="abstract,results,conclusion",
+        help="Comma-separated allowlist of paragraph_type from raw_chunks metadata",
+    )
+    p.add_argument(
+        "--drop_figure_captions",
+        action="store_true",
+        help="Drop figure caption paragraphs instead of keeping them as evidence",
+    )
     p.add_argument("--deepseek_base_url", type=str, default="https://api.deepseek.com")
     p.add_argument("--deepseek_model", type=str, default="deepseek-chat")
     p.add_argument("--deepseek_api_key_env", type=str, default="DEEPSEEK_API_KEY")
@@ -111,6 +146,7 @@ def main() -> None:
             deepseek_model=str(args.deepseek_model),
             api_key_env=str(args.deepseek_api_key_env),
             max_sentences=int(args.max_sentences_per_paragraph),
+            strict_noise_filter=True,
         )
     )
 
@@ -134,6 +170,11 @@ def main() -> None:
 
     # Figure caption heuristic: keep as its own evidence block (no DS) when detected.
     _FIG_CAP_RE = re.compile(r"^(Figure|Fig\.)\s*\d+[\s:：\-]", flags=re.IGNORECASE)
+    allowed_para_types = {
+        x.strip().lower()
+        for x in str(args.allowed_paragraph_types or "").split(",")
+        if x.strip()
+    }
 
     with out_path.open("w", encoding="utf-8") as fout:
         for rec in _read_jsonl(in_path):
@@ -152,7 +193,8 @@ def main() -> None:
                 try:
                     doc_meta = meta_extractor.extract(doc_id=doc_id, source_uri=str(source_uri or ""), pdf_snippet=snippet)
                 except Exception:
-                    doc_meta = {"title": doc_id, "journal": None, "doi": None, "publication_year": None, "published_at": None, "authors": []}
+                    fallback_title = Path(str(source_uri or "")).stem or doc_id
+                    doc_meta = {"title": fallback_title, "journal": None, "doi": None, "publication_year": None, "published_at": None, "authors": []}
                 docs_meta_f.write(
                     json.dumps(
                         {
@@ -172,8 +214,14 @@ def main() -> None:
                 total_paras += 1
                 if int(args.max_paragraphs) > 0 and total_paras > int(args.max_paragraphs):
                     break
+                if allowed_para_types and para_type and para_type not in allowed_para_types:
+                    continue
+                if _is_low_value_paragraph(para):
+                    continue
                 # If paragraph looks like a figure caption, emit it directly.
                 if _FIG_CAP_RE.match(para.strip()):
+                    if bool(args.drop_figure_captions):
+                        continue
                     ev_block_id = f"{chunk_id}_p{p_idx}::cap"
                     out_rec = {
                         "block_id": ev_block_id,
@@ -191,7 +239,11 @@ def main() -> None:
                     kept_paras += 1
                     continue
 
-                res = extractor.extract(topic_goal=str(args.topic_goal), raw_block_text=para)
+                res = extractor.extract(
+                    topic_goal=str(args.topic_goal),
+                    raw_block_text=para,
+                    section_hint=para_type or "paragraph",
+                )
                 sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
                 if not sents:
                     continue

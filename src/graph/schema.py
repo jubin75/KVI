@@ -269,6 +269,10 @@ class KnowledgeGraphIndex:
     triples: Dict[str, Triple] = field(default_factory=dict)   # triple_id → Triple
     # Fast lookup: normalised entity name/alias → node_id
     entity_index: Dict[str, str] = field(default_factory=dict)
+    # sentence_id → {"text": ..., "source_block_id": ..., "source_doc_id": ..., "triple_ids": [...]}
+    sentence_index: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # triple_id → [sentence_id, ...] (usually one-to-one; list for extensibility)
+    triple_sentence_index: Dict[str, List[str]] = field(default_factory=dict)
     # Metadata
     meta: Dict[str, Any] = field(default_factory=dict)
 
@@ -281,6 +285,8 @@ class KnowledgeGraphIndex:
             "nodes": {nid: n.to_dict() for nid, n in self.nodes.items()},
             "triples": {tid: t.to_dict() for tid, t in self.triples.items()},
             "entity_index": self.entity_index,
+            "sentence_index": self.sentence_index,
+            "triple_sentence_index": self.triple_sentence_index,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -295,6 +301,8 @@ class KnowledgeGraphIndex:
             nodes=nodes,
             triples=triples,
             entity_index=dict(data.get("entity_index") or {}),
+            sentence_index=dict(data.get("sentence_index") or {}),
+            triple_sentence_index=dict(data.get("triple_sentence_index") or {}),
             meta=dict(data.get("meta") or {}),
         )
 
