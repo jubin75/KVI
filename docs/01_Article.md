@@ -244,16 +244,112 @@ KV Assembly: load subject anchor + selected triple KV tensors,
              merge per-layer via concatenation
 ```
 
-### 4.4 Dual-Channel Generation
+### 4.4 双通道生成（Dual-Channel Generation）
 
-| Channel | Content | Token Budget | Role |
-|---------|---------|-------------|------|
-| **KV prefix** (`past_key_values`) | Subject anchor + Triple KV | ~50-100 tokens total | Attention structure constraint: anchor topic, establish concept connections |
-| **Prompt** (text input) | Entity context + Evidence sentences (DRM-ranked) + Query + Instructions | ~200-500 tokens | Detailed factual content: evidence details, generation instructions |
+| 通道 | 内容 | Token 预算 | 作用 |
+|------|------|-----------|------|
+| **KV prefix** (`past_key_values`) | Subject anchor + Triple KV | ~50-100 tokens | 注意力结构约束：锚定主题、建立概念连接 |
+| **Prompt** (文本输入) | Entity context + Evidence sentences (DRM排序) + Query + 生成指令 | ~200-500 tokens | 详细事实内容：证据细节、生成要求 |
 
-**Complementarity rule**: KV provides directional guidance ("SFTSV导致发热"), Prompt provides
-detail ("患者通常以急性发热、乏力、食欲不振等流感样症状起病"). They are semantically related
-but lexically distinct — never duplicated.
+**互补规则**：KV 提供方向性引导（"SFTSV导致发热"），Prompt 提供细节素材
+（"患者通常以急性发热、乏力、食欲不振等流感样症状起病"）。
+两者语义相关但措辞不同——绝不重复。
+
+#### 4.4.1 KV 注入在 Attention 计算中的作用机制
+
+Transformer 每一层的注意力计算为：
+
+```
+Attention(Q, K, V) = softmax(Q · K^T / √d) · V
+```
+
+其中 Q 来自当前正在生成的 token，K 和 V 来自所有"可见"的历史位置。
+
+**传统 RAG 的做法**：将 evidence 文本拼入 prompt → tokenize 后产生一组 K, V 向量 →
+模型通过 self-attention "看到"这些 token。知识以**文本 token** 的身份进入 attention，
+和 query、指令、标点等所有 token 一起竞争 attention 权重。模型需要"理解"文本才能利用知识。
+
+**KVI 的做法**：在编译期，将三元组短句（如"SFTSV导致血小板减少"，仅 8 个 token）通过
+base LLM 做一次前向传播，提取每层的 (K, V) 张量并保存到磁盘：
+
+```
+text → tokenize → model.forward(use_cache=True) → past_key_values
+                                                    ↓
+                                          每层一组 (Key, Value) 张量
+                                          shape: [batch, heads, seq_len, head_dim]
+                                                    ↓
+                                              保存为 .pt 文件
+```
+
+推理时，将预编译的 KV 张量通过 `past_key_values` 参数注入 `model.generate()`。
+此时 attention 的 K, V 空间被扩展：
+
+```
+K = [K_external | K_prompt],  V = [V_external | V_prompt]
+```
+
+模型在生成每个 token 时，Q 会**同时 attend 到**：
+- **外部注入的 KV**（来自预编译三元组）—— 这是预计算的注意力向量，不经过 token 理解
+- **Prompt 文本的 KV**（来自 evidence 原文）—— 这是模型对文本的正常理解
+
+外部 KV 不是文本，而是**已经编码为模型内部 attention 信号格式的向量**，
+直接参与 softmax 权重分配，影响每个生成 token 的概率分布。
+
+**这就是 "first-class citizen"（一等公民）的含义**：
+知识不是被当作"文本提示"让模型自己去理解和可能忽略，
+而是以模型内部计算格式（KV 向量）直接参与 attention 权重计算——
+模型**无法忽略**这些信号，它们和模型自身产生的 KV 在数学上完全等价。
+
+#### 4.4.2 关系类型层段路由（Relation Layer Routing）
+
+KV 注入并非对所有层一视同仁。基于 Transformer 不同层段的语义分工假设：
+- **浅层**（layers 0-7）：负责 token 级特征——"是什么"（定义、分类）
+- **中层**（layers 8-15）：负责语义关系——"为什么"（因果、机制）
+- **中高层**（layers 12-19）：负责行为推理——"怎么办"（治疗、诊断）
+
+系统通过 `RELATION_LAYER_MAP` 将不同关系类型的三元组 KV 路由到对应层段：
+
+```
+三元组 "SFTSV属于布尼亚病毒" (is_a)     → 注入 layers 0-7  → 影响实体识别和定义对齐
+三元组 "SFTSV导致血小板减少" (causes)    → 注入 layers 8-15 → 影响因果推理链构建
+三元组 "法维拉韦治疗SFTSV" (treats)      → 注入 layers 12-19 → 影响治疗行为推理
+```
+
+实现方式：对不在该三元组 `[layer_start, layer_end]` 范围内的层，
+对应位置的 KV 填充为零向量（不产生 attention 信号）。
+HuggingFace 的 `past_key_values` 接口要求所有层具有相同的序列长度，
+因此非活跃层用零张量填充到统一长度——零向量不产生有效 attention 权重，
+相当于该层"看不到"这些知识。
+
+**效果**：不同语义类型的知识信号被隔离到各自的"认知层段"，
+避免在同一层产生 attention 竞争。
+
+#### 4.4.3 互补双通道设计如何消除干扰
+
+**v1 的失败根因**：同一条 evidence（如"患者通常以急性发热、乏力、食欲不振等流感样症状起病"）
+同时出现在两个通道：
+- Prompt 文本 → 产生 K_prompt, V_prompt
+- KV prefix → 产生 K_external, V_external
+
+两组向量指向**相同语义但占据不同位置**。模型的 attention head 在做 softmax 时，
+对同一个概念出现了两个"竞争源"，导致权重分裂 → token 选择不稳定 →
+"血小板" 变成 "血板"，"免疫抑制" 变成 "免疫耐受"。
+
+**当前设计的互补分工**：
+
+| 通道 | 内容示例 | 功能比喻 |
+|------|---------|---------|
+| **KV prefix** | "SFTSV导致发热"（8 tokens） | **潜意识指南针**：在模型的注意力空间中植入方向性信号——"SFTSV 和发热之间存在因果关系" |
+| **Prompt text** | "患者通常以急性发热、乏力、食欲不振等流感样症状起病" | **工作台上的病历**：提供具体措辞素材和事实细节 |
+
+KV 信号让模型在生成时**倾向于**提及发热相关概念（attention weight 向相关语义偏移），
+Prompt 文本提供具体的措辞和事实依据。两者语义相关但措辞不同，
+在 attention 空间中不形成位置冲突——协同而非竞争。
+
+**一句话总结**：KV 将领域知识从"模型可见的文本输入"提升为"直接参与 attention softmax 的
+预编译 KV 向量"，使知识信号绕过 token 级的间接理解，以向量级精度影响每个生成 token 的概率分布。
+双通道设计确保 KV 传递结构性语义约束（三元组方向），Prompt 传递证据细节（原文内容），
+两者在 attention 空间互补而非竞争。
 
 ### 4.5 Hybrid Retrieval
 
@@ -358,26 +454,67 @@ Hybrid Retrieval, and Sentence-indexed Knowledge Graph.
 
 ---
 
-## 8. Key Contributions
+## 8. 核心贡献（Key Contributions）
 
-1. **Attention-space knowledge injection**: External knowledge participates directly in attention
-   computation as KV prefix memory, not merely as textual context — making it a first-class
-   citizen in the reasoning process.
+### 8.1 注意力空间的知识注入（Attention-Space Knowledge Injection）
 
-2. **Complementary dual-channel design**: KV channel carries short, focused attention structure
-   constraints; Prompt channel carries detailed evidence content. This eliminates the dual-channel
-   interference that plagued earlier approaches.
+外部知识以预编译 KV 向量的形式直接参与 attention 的 softmax 权重计算，
+而非仅作为文本上下文拼入 prompt。
 
-3. **Entity-anchored retrieval with relation-layer routing**: Knowledge graph provides structured
-   retrieval (entity recognition → graph walk → relation-typed edges); relation types simultaneously
-   control both retrieval direction and KV injection layer placement.
+**区别于 RAG 的本质差异**：RAG 中，知识以 token 序列的形式进入 prompt，
+模型需要通过自身的语言理解能力去"读懂"并决定是否使用这些文本——模型可以忽略、
+误解、或超越 evidence 进行幻觉。KVI 中，知识已经被编码为与模型内部 KV 数学等价的向量，
+直接参与每个生成 token 的概率决策，模型在计算层面无法忽略这些信号。
 
-4. **DRM-gated injection pipeline**: Document Relevance Model scoring → Relation Gating → KV Budget
-   ensures only query-relevant knowledge enters the attention mechanism.
+这使得外部知识从"可选的文本提示"升级为推理过程中的"一等公民"。
 
-5. **`(S,R,O,I)` knowledge representation**: Triples provide structural semantics for graph
-   traversal; sentence index provides traceable, grounded evidence links — combining the
-   strengths of structured and unstructured knowledge.
+### 8.2 互补双通道设计（Complementary Dual-Channel Design）
 
-6. **Zero parameter modification**: The base LLM remains completely frozen. Domain knowledge is
-   maintained in external KV banks that can be updated, swapped, or extended without retraining.
+KV 通道承载极短的结构性语义约束（三元组方向，如"SFTSV导致发热"），
+Prompt 通道承载详细的证据内容（原文素材，如"患者通常以急性发热、乏力...起病"）。
+
+**消除干扰的机制**：早期方案将相同 evidence 同时注入 KV 和 Prompt，
+导致 attention head 在两个位置看到相同语义 → 权重分裂 → token 选择不稳定
+（实测表现为"血小板"→"血板"等 token 腐蚀现象）。
+当前设计中，两个通道的内容语义相关但措辞不同，在 attention 空间中形成互补而非竞争：
+KV 提供注意力偏移方向（"指南针"），Prompt 提供事实细节素材（"病历"）。
+
+### 8.3 实体锚定检索 + 关系类型层段路由（Entity-Anchored Retrieval + Relation Layer Routing）
+
+知识图谱提供结构化检索路径（实体识别 → 图谱遍历 → 关系类型边），
+关系类型同时控制两个维度：
+- **检索方向**：relation type 决定 graph walk 沿哪些边遍历（如 symptom 查询只沿 causes/manifests_as 边）
+- **注入层段**：relation type 决定三元组 KV 注入 Transformer 的哪些层
+  （定义→浅层，因果→中层，治疗→中高层）
+
+这一设计基于 Transformer 不同层段的语义分工假设，将不同类型的知识信号路由到
+对应的"认知层段"，避免异质信号在同一层竞争 attention 权重。
+
+### 8.4 DRM 门控注入管线（DRM-Gated Injection Pipeline）
+
+文档相关性模型（DRM）评分 → 关系门控（Relation Gating）→ KV 预算控制，
+确保只有与查询相关的知识进入 attention 机制。
+
+**解决的核心问题**：图谱遍历会返回目标实体的所有关联三元组（如查症状时也会遍历到
+located_in、treats 等无关关系），若不经过滤直接注入，无关 KV 信号会干扰生成。
+DRM 三级过滤链（triple 级评分 → relation 组级门控 → 全局预算）逐层收窄，
+将注入的 KV 严格限制在与查询高度相关的少数三元组上。
+
+### 8.5 `(S,R,O,I)` 知识表示（Quadruple Knowledge Representation）
+
+三元组 `(S,R,O)` 提供结构化语义用于图谱遍历；句子索引 `I` 提供可追溯的证据链接
+回到原始文本。
+
+**解决的核心问题**：纯三元组过于精简，无法覆盖原始句子的完整语义（如一条句子可能
+包含多个事实维度），导致三元组"散"而"薄"。加入句子索引后，三元组负责结构化检索路由，
+句子负责承载完整语义——图谱遍历找到三元组后，通过 `triple_sentence_index` 反查原始句子，
+作为 Prompt 通道的 evidence 输入 LLM。两者结合了结构化知识和非结构化知识的优势。
+
+### 8.6 零参数修改（Zero Parameter Modification）
+
+Base LLM 完全冻结，不做任何参数修改。领域知识维护在外部 KV Bank 中，
+可独立更新、替换或扩展，无需重新训练模型。
+
+**实际意义**：同一个 base LLM 可以通过切换不同的 KV Bank 服务于不同的领域
+（如 SFTSV、肿瘤、心血管等），且知识更新只需重新编译 KV Bank（分钟级），
+而非重新微调模型（小时-天级）。
