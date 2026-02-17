@@ -516,14 +516,14 @@ def main() -> None:
                 )
 
             txt = _strip_table_markdown(str(rec.get("text") or ""))
-            # Prepare one fallback abstract sentence per document from raw PDF text.
+            # Prepare one fallback abstract window per document from raw PDF text.
             if doc_id and doc_id not in doc_abstract_seed:
                 abs_window = _extract_abstract_window(txt)
                 if abs_window:
-                    seed = _pick_abstract_seed_sentence(abs_window)
-                    if seed:
+                    window_text = re.sub(r"\s+", " ", abs_window).strip()
+                    if len(window_text) >= 120:
                         doc_abstract_seed[doc_id] = {
-                            "text": seed,
+                            "text": window_text[:2500],
                             "chunk_id": chunk_id,
                             "source_uri": source_uri,
                             "lang": lang,
@@ -591,6 +591,40 @@ def main() -> None:
                 if _is_low_value_paragraph(para_for_extract):
                     filtered_by_noise += 1
                     continue
+
+                # Abstract handling: keep full abstract paragraph/window directly.
+                # Do NOT send abstract to DeepSeek sentence summarization.
+                if effective_type == "abstract":
+                    abs_text = re.sub(r"\s+", " ", para_for_extract).strip()
+                    if len(abs_text) < 80:
+                        continue
+                    ev_block_id = f"{chunk_id}_p{p_idx}::abs"
+                    out_rec = {
+                        "block_id": ev_block_id,
+                        "doc_id": doc_id,
+                        "kb_id": (str(args.kb_id) if str(args.kb_id or "").strip() else None),
+                        "source_uri": source_uri,
+                        "lang": lang,
+                        "block_type": "abstract",
+                        "text": abs_text,
+                        "token_count": int(_approx_token_count(abs_text)),
+                        "metadata": {
+                            "from_raw_chunk_id": chunk_id,
+                            "paragraph_index": int(p_idx),
+                            "span": {"char_start": None, "char_end": None},
+                            "relevance": None,
+                            "claim": None,
+                            "raw_chunk_metadata": meta,
+                            "direct_abstract": True,
+                        },
+                    }
+                    fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+                    out_blocks += 1
+                    kept_paras += 1
+                    if doc_id:
+                        doc_has_abstract_block[doc_id] = True
+                    continue
+
                 # Figure captions: drop by default (low value for knowledge extraction)
                 if _FIG_CAP_RE.match(para_for_extract.strip()):
                     if not bool(args.keep_figure_captions):
