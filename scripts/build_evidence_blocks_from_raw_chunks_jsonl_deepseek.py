@@ -158,51 +158,202 @@ _STANDALONE_HEADING_RE = re.compile(
 )
 
 
-def _detect_section_from_text(text: str) -> str:
-    """Scan *text* (a paragraph or chunk) for a section heading.
-
-    Returns the normalised section type, or '' if none found.
-    Checks: (1) standalone headings, (2) inline headings at line starts.
-    """
-    # Try each line (check first 5 lines only — headings are at the top)
-    lines = text.strip().split("\n")[:5]
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or len(stripped) > 120:
-            continue
-
-        # --- Standalone heading (line IS the heading) ---
+def _match_heading_line(line: str) -> str:
+    """If *line* is or starts with a section heading keyword, return section type; else ''."""
+    stripped = line.strip()
+    if not stripped or len(stripped) > 200:
+        return ""
+    # Standalone heading (line IS the heading, e.g. "Abstract", "3.1 Results")
+    if len(stripped) <= 60:
         m = _STANDALONE_HEADING_RE.match(stripped)
-        if m and len(stripped) <= 60:
-            first_word = m.group(1).split()[0].lower()
-            section = _SECTION_KEYWORDS.get(first_word, "")
-            if section:
-                return section
-
-        # --- Inline heading ("Abstract. This study...") ---
-        m2 = _INLINE_HEADING_RE.match(stripped)
-        if m2:
-            first_word = m2.group(1).lower()
-            section = _SECTION_KEYWORDS.get(first_word, "")
-            if section:
-                return section
-
+        if m:
+            kw = m.group(1).split()[0].lower()
+            sec = _SECTION_KEYWORDS.get(kw, "")
+            if sec:
+                return sec
+    # Inline heading (heading + content, e.g. "Abstract. This study...")
+    m2 = _INLINE_HEADING_RE.match(stripped)
+    if m2:
+        kw = m2.group(1).lower()
+        sec = _SECTION_KEYWORDS.get(kw, "")
+        if sec:
+            return sec
     return ""
 
 
-def _infer_sections_for_paragraphs(paras: list, initial_section: str = "") -> list:
-    """Return a list of inferred section types parallel to *paras*.
+def _build_section_markers(full_text: str) -> list:
+    """Scan ALL lines of *full_text* for section headings.
 
-    Scans paragraphs for section headings and propagates the label forward.
-    *initial_section* inherits from the previous chunk of the same document.
+    Returns list of (char_offset, section_type) sorted by offset.
     """
+    markers: list = []
+    offset = 0
+    for line in full_text.split("\n"):
+        sec = _match_heading_line(line)
+        if sec:
+            markers.append((offset, sec))
+        offset += len(line) + 1   # +1 for \n
+
+    # Fallback for PDFs where heading is inline in one long line, e.g.:
+    # "... Published online ... 2024 Abstract Severe fever with ..."
+    # We only add this fallback for "abstract" to avoid over-triggering on
+    # common words like "results" in body sentences.
+    if not any(sec == "abstract" for _, sec in markers):
+        m_abs = re.search(r"\babstract\b", full_text, flags=re.IGNORECASE)
+        if m_abs:
+            markers.append((int(m_abs.start()), "abstract"))
+
+    markers.sort(key=lambda x: x[0])
+    return markers
+
+
+_INLINE_SECTION_ANYWHERE_RE = re.compile(
+    r"\b(abstract|introduction|background|methods?|results?|discussion|conclusions?)\b[:\s]",
+    flags=re.IGNORECASE,
+)
+
+
+def _section_from_keyword(keyword: str) -> str:
+    k = str(keyword or "").strip().lower()
+    if k in ("abstract", "summary"):
+        return "abstract"
+    if k in ("introduction", "background"):
+        return "introduction"
+    if k in ("method", "methods", "materials", "experimental"):
+        return "methods"
+    if k in ("result", "results", "findings"):
+        return "results"
+    if k in ("discussion",):
+        return "discussion"
+    if k in ("conclusion", "conclusions", "concluding"):
+        return "conclusion"
+    return ""
+
+
+def _inline_section_and_content(para: str) -> tuple:
+    """
+    Detect section heading embedded inside a long paragraph and optionally
+    return content trimmed from that heading onward.
+    """
+    p = str(para or "").strip()
+    if not p:
+        return "", p
+    m = _INLINE_SECTION_ANYWHERE_RE.search(p)
+    if not m:
+        return "", p
+    sec = _section_from_keyword(m.group(1))
+    if not sec:
+        return "", p
+    # If heading appears early, trim preface metadata to improve extraction quality.
+    # Keep original if trim would become too short.
+    if m.start() <= 500:
+        tail = p[m.end():].strip()
+        if len(tail) >= 40:
+            return sec, tail
+    return sec, p
+
+
+_ABSTRACT_END_RE = re.compile(
+    r"\b(keywords?|introduction|background|methods?|materials?\s+and\s+methods?|results?)\b",
+    flags=re.IGNORECASE,
+)
+_METHODISH_SENT_RE = re.compile(
+    r"\b("
+    r"rna\s+was\s+extracted|dna\s+was\s+extracted|rt-?pcr|real-?time\s+pcr|"
+    r"according\s+to\s+the\s+manufacturer|using\s+the\s+\w+\s+kit|"
+    r"incubated|centrifuged|buffer|aliquot|assay|protocol|"
+    r"mice\s+were\s+infected|sample[s]?\s+were\s+collected"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _extract_abstract_window(full_text: str) -> str:
+    """Extract text window starting from the first 'Abstract' keyword.
+
+    Designed for linearized PDF text where heading and body may appear inline:
+    "... Published online ... Abstract Severe fever ... Keywords ..."
+    """
+    t = str(full_text or "")
+    if not t.strip():
+        return ""
+    m = re.search(r"\babstract\b", t, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    start = m.end()
+    tail = t[start:].strip()
+    if len(tail) < 40:
+        return ""
+    # Cut before next major section marker if found.
+    end_m = _ABSTRACT_END_RE.search(tail)
+    if end_m and end_m.start() > 120:
+        tail = tail[: end_m.start()]
+    tail = re.sub(r"\s+", " ", tail).strip()
+    return tail
+
+
+def _split_sentences_simple(text: str) -> list:
+    t = re.sub(r"\s+", " ", str(text or "").strip())
+    if not t:
+        return []
+    parts = re.split(r"(?<=[\.\!\?。！？;；])\s+", t)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _pick_abstract_seed_sentence(window: str) -> str:
+    """Pick one high-value abstract sentence for fallback abstract block."""
+    sents = _split_sentences_simple(window)
+    if not sents:
+        return ""
+    # Prefer non-method, complete, medium-length sentence.
+    for s in sents:
+        if len(s) < 45 or len(s) > 420:
+            continue
+        if _METHODISH_SENT_RE.search(s):
+            continue
+        if not re.search(r'[.!?。！？;；)\]）」\'\"]\s*$', s):
+            continue
+        return s
+    # Fallback: first complete sentence
+    for s in sents:
+        if len(s) >= 40 and re.search(r'[.!?。！？;；)\]）」\'\"]\s*$', s):
+            return s
+    return sents[0][:420].strip()
+
+
+def _infer_sections_for_paragraphs(
+    full_text: str,
+    paras: list,
+    initial_section: str = "",
+) -> list:
+    """Determine the section type for each paragraph by scanning ALL headings
+    in the original chunk text (including short heading lines that were
+    dropped by _split_paragraphs).
+
+    Returns a list of section types parallel to *paras*.
+    """
+    markers = _build_section_markers(full_text)
+
     sections: list = []
-    current = initial_section
     for para in paras:
-        detected = _detect_section_from_text(para)
-        if detected:
-            current = detected
+        # Find paragraph position in full text
+        snippet = para[:min(60, len(para))]
+        pos = full_text.find(snippet)
+
+        # Determine active section at this position
+        current = initial_section
+        if pos >= 0:
+            for mpos, msec in markers:
+                if mpos <= pos:
+                    current = msec
+                else:
+                    break
+        elif markers:
+            # Couldn't locate paragraph; use last known heading
+            current = markers[-1][1]
+
         sections.append(current)
+
     return sections
 
 
@@ -299,6 +450,9 @@ def main() -> None:
 
     # Cross-chunk section tracking: inherit section label across chunks of the same document
     doc_section_state: Dict[str, str] = {}
+    # Abstract quality/coverage tracking
+    doc_has_abstract_block: Dict[str, bool] = {}
+    doc_abstract_seed: Dict[str, Dict[str, Any]] = {}
 
     with out_path.open("w", encoding="utf-8") as fout:
         for rec in _read_jsonl(in_path):
@@ -334,20 +488,36 @@ def main() -> None:
                 )
 
             txt = _strip_table_markdown(str(rec.get("text") or ""))
-
-            # --- Pre-scan full chunk text for section heading (catches headings
-            #     that are lost during paragraph splitting, e.g. short lines) ---
-            chunk_section = _detect_section_from_text(txt)
-            if chunk_section:
-                doc_section_state[doc_id] = chunk_section
-
+            # Prepare one fallback abstract sentence per document from raw PDF text.
+            if doc_id and doc_id not in doc_abstract_seed:
+                abs_window = _extract_abstract_window(txt)
+                if abs_window:
+                    seed = _pick_abstract_seed_sentence(abs_window)
+                    if seed:
+                        doc_abstract_seed[doc_id] = {
+                            "text": seed,
+                            "chunk_id": chunk_id,
+                            "source_uri": source_uri,
+                            "lang": lang,
+                            "meta": meta,
+                        }
             paras = _split_paragraphs(txt)
 
-            # --- Infer section types: inherit from previous chunk of same doc ---
+            # --- Section inference: scan ALL lines of full chunk text ---
+            # This catches short heading lines (e.g. "Abstract") that were
+            # dropped by _split_paragraphs (requires ≥30 chars).
             inherited = doc_section_state.get(doc_id, "")
-            inferred_sections = _infer_sections_for_paragraphs(paras, initial_section=inherited) if not para_type else [para_type] * len(paras)
-            # Update document section state with the last inferred section
-            if inferred_sections:
+            if para_type:
+                inferred_sections = [para_type] * len(paras)
+            else:
+                inferred_sections = _infer_sections_for_paragraphs(
+                    txt, paras, initial_section=inherited,
+                )
+            # Update document section state with the last detected section in this chunk
+            markers = _build_section_markers(txt)
+            if markers:
+                doc_section_state[doc_id] = markers[-1][1]
+            elif inferred_sections:
                 last_sec = inferred_sections[-1]
                 if last_sec:
                     doc_section_state[doc_id] = last_sec
@@ -359,22 +529,31 @@ def main() -> None:
 
                 # Effective section: metadata para_type > inferred from headings
                 effective_type = para_type or inferred_sections[p_idx]
+                para_for_extract = para
 
                 # Skip standalone section heading paragraphs (short, only a heading)
-                if not para_type and len(para.strip()) < 60 and _detect_section_from_text(para):
+                if not para_type and len(para.strip()) < 60 and _match_heading_line(para.strip()):
                     filtered_heading += 1
                     continue
+
+                # Fallback for inline headings in long paragraphs:
+                # "... 2024 Abstract Severe fever ..."
+                inline_sec, para_inline = _inline_section_and_content(para)
+                if inline_sec and not effective_type:
+                    effective_type = inline_sec
+                if para_inline:
+                    para_for_extract = para_inline
 
                 # --- Section filter ---
                 if allowed_para_types and effective_type and effective_type not in allowed_para_types:
                     filtered_by_section += 1
                     continue
 
-                if _is_low_value_paragraph(para):
+                if _is_low_value_paragraph(para_for_extract):
                     filtered_by_noise += 1
                     continue
                 # Figure captions: drop by default (low value for knowledge extraction)
-                if _FIG_CAP_RE.match(para.strip()):
+                if _FIG_CAP_RE.match(para_for_extract.strip()):
                     if not bool(args.keep_figure_captions):
                         continue
                     ev_block_id = f"{chunk_id}_p{p_idx}::cap"
@@ -385,8 +564,8 @@ def main() -> None:
                         "source_uri": source_uri,
                         "lang": lang,
                         "block_type": "figure_caption",
-                        "text": para.strip(),
-                        "token_count": int(_approx_token_count(para.strip())),
+                        "text": para_for_extract.strip(),
+                        "token_count": int(_approx_token_count(para_for_extract.strip())),
                         "metadata": {"from_raw_chunk_id": chunk_id, "paragraph_index": int(p_idx), "raw_chunk_metadata": meta},
                     }
                     fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
@@ -396,7 +575,7 @@ def main() -> None:
 
                 res = extractor.extract(
                     topic_goal=str(args.topic_goal),
-                    raw_block_text=para,
+                    raw_block_text=para_for_extract,
                     section_hint=effective_type or "paragraph",
                 )
                 sents = res.get("evidence_sentences", []) if isinstance(res.get("evidence_sentences"), list) else []
@@ -417,6 +596,10 @@ def main() -> None:
                         block_type = "abstract"
                     elif effective_type in ("results", "conclusion", "discussion", "introduction"):
                         block_type = effective_type
+                    # Keep abstract blocks focused on consensus-level summary:
+                    # method-like sentences are downgraded to paragraph_summary.
+                    if block_type == "abstract" and _METHODISH_SENT_RE.search(quote):
+                        block_type = "paragraph_summary"
                     out_rec = {
                         "block_id": ev_block_id,
                         "doc_id": doc_id,
@@ -437,6 +620,8 @@ def main() -> None:
                     }
                     fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
                     out_blocks += 1
+                    if block_type == "abstract" and doc_id:
+                        doc_has_abstract_block[doc_id] = True
 
                 if total_paras == 1 or total_paras % 200 == 0:
                     print(
@@ -446,6 +631,40 @@ def main() -> None:
                     )
             if int(args.max_paragraphs) > 0 and total_paras >= int(args.max_paragraphs):
                 break
+
+        # Ensure abstract coverage: if a document has an abstract seed but no
+        # extracted abstract block, inject one synthetic abstract block.
+        added_fallback_abstract = 0
+        for did, seed in doc_abstract_seed.items():
+            if doc_has_abstract_block.get(did, False):
+                continue
+            txt_seed = str(seed.get("text") or "").strip()
+            if not txt_seed:
+                continue
+            block_id = f"{seed.get('chunk_id', 'chunk')}_fallback::abs"
+            out_rec = {
+                "block_id": block_id,
+                "doc_id": did,
+                "kb_id": (str(args.kb_id) if str(args.kb_id or "").strip() else None),
+                "source_uri": seed.get("source_uri"),
+                "lang": seed.get("lang"),
+                "block_type": "abstract",
+                "text": txt_seed,
+                "token_count": int(_approx_token_count(txt_seed)),
+                "metadata": {
+                    "from_raw_chunk_id": seed.get("chunk_id"),
+                    "paragraph_index": -1,
+                    "span": {"char_start": None, "char_end": None},
+                    "relevance": None,
+                    "claim": None,
+                    "raw_chunk_metadata": seed.get("meta") if isinstance(seed.get("meta"), dict) else {},
+                    "synthetic_fallback": True,
+                },
+            }
+            fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+            out_blocks += 1
+            added_fallback_abstract += 1
+            doc_has_abstract_block[did] = True
 
     print(
         f"[evidence_from_raw_chunks] done chunks={total_chunks} paras={total_paras} kept_paras={kept_paras} "
@@ -458,6 +677,13 @@ def main() -> None:
         f"section_rejected={filtered_by_section}  "
         f"noise_rejected={filtered_by_noise}  "
         f"allowed_sections={sorted(allowed_para_types) if allowed_para_types else 'all'}",
+        flush=True,
+    )
+    print(
+        f"[evidence_from_raw_chunks] abstract_coverage: "
+        f"seed_docs={len(doc_abstract_seed)}  "
+        f"docs_with_abstract={sum(1 for _d, ok in doc_has_abstract_block.items() if ok)}  "
+        f"fallback_added={added_fallback_abstract}",
         flush=True,
     )
     if docs_meta_f is not None:
