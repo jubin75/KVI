@@ -321,6 +321,33 @@ def _pick_abstract_seed_sentence(window: str) -> str:
     return sents[0][:420].strip()
 
 
+def _pick_generic_seed_sentence(text: str) -> str:
+    """Pick one generic high-level sentence from raw chunk text.
+
+    Used when explicit 'Abstract' keyword is missing. We still prefer
+    non-method, complete sentences and avoid very short title-like fragments.
+    """
+    t = re.sub(r"\s+", " ", str(text or "").strip())
+    if not t:
+        return ""
+    sents = _split_sentences_simple(t)
+    for s in sents:
+        if len(s) < 55 or len(s) > 420:
+            continue
+        if _METHODISH_SENT_RE.search(s):
+            continue
+        if _DOI_RE.search(s):
+            continue
+        # Skip mostly title-like fragments (few words, no verb-ish cues)
+        if len(s.split()) < 8:
+            continue
+        return s
+    for s in sents:
+        if len(s) >= 45:
+            return s[:420].strip()
+    return ""
+
+
 def _infer_sections_for_paragraphs(
     full_text: str,
     paras: list,
@@ -453,6 +480,7 @@ def main() -> None:
     # Abstract quality/coverage tracking
     doc_has_abstract_block: Dict[str, bool] = {}
     doc_abstract_seed: Dict[str, Dict[str, Any]] = {}
+    doc_generic_seed: Dict[str, Dict[str, Any]] = {}
 
     with out_path.open("w", encoding="utf-8") as fout:
         for rec in _read_jsonl(in_path):
@@ -501,6 +529,17 @@ def main() -> None:
                             "lang": lang,
                             "meta": meta,
                         }
+            # Generic fallback seed for documents without explicit 'Abstract' heading.
+            if doc_id and doc_id not in doc_generic_seed:
+                seed_g = _pick_generic_seed_sentence(txt[:2500])
+                if seed_g:
+                    doc_generic_seed[doc_id] = {
+                        "text": seed_g,
+                        "chunk_id": chunk_id,
+                        "source_uri": source_uri,
+                        "lang": lang,
+                        "meta": meta,
+                    }
             paras = _split_paragraphs(txt)
 
             # --- Section inference: scan ALL lines of full chunk text ---
@@ -632,11 +671,14 @@ def main() -> None:
             if int(args.max_paragraphs) > 0 and total_paras >= int(args.max_paragraphs):
                 break
 
-        # Ensure abstract coverage: if a document has an abstract seed but no
-        # extracted abstract block, inject one synthetic abstract block.
+        # Ensure abstract coverage: for each seen doc without extracted abstract,
+        # inject one synthetic abstract block from (1) abstract seed, else (2) generic seed.
         added_fallback_abstract = 0
-        for did, seed in doc_abstract_seed.items():
+        for did in sorted(seen_docs):
             if doc_has_abstract_block.get(did, False):
+                continue
+            seed = doc_abstract_seed.get(did) or doc_generic_seed.get(did)
+            if not seed:
                 continue
             txt_seed = str(seed.get("text") or "").strip()
             if not txt_seed:
@@ -682,6 +724,7 @@ def main() -> None:
     print(
         f"[evidence_from_raw_chunks] abstract_coverage: "
         f"seed_docs={len(doc_abstract_seed)}  "
+        f"generic_seed_docs={len(doc_generic_seed)}  "
         f"docs_with_abstract={sum(1 for _d, ok in doc_has_abstract_block.items() if ok)}  "
         f"fallback_added={added_fallback_abstract}",
         flush=True,
