@@ -208,18 +208,28 @@ def _build_section_markers(full_text: str) -> list:
 
 
 _INLINE_SECTION_ANYWHERE_RE = re.compile(
-    r"\b(abstract|introduction|background|methods?|results?|discussion|conclusions?)\b[:\s]",
+    r"\b("
+    r"abstract|summary|"
+    r"introduction|background|"
+    r"methods?|materials?\s+and\s+methods?|experimental|"
+    r"results?|discussion|conclusions?|"
+    r"references?|bibliography|literature\s+cited|"
+    r"funding|disclosure|author\s+contributions?|"
+    r"conflicts?\s+of\s+interest|competing\s+interests?|"
+    r"data\s+availability|ethics\s+statement|"
+    r"acknowledg?ements?"
+    r")\b[:\s]",
     flags=re.IGNORECASE,
 )
 
 
 def _section_from_keyword(keyword: str) -> str:
-    k = str(keyword or "").strip().lower()
+    k = re.sub(r"\s+", " ", str(keyword or "").strip().lower())
     if k in ("abstract", "summary"):
         return "abstract"
     if k in ("introduction", "background"):
         return "introduction"
-    if k in ("method", "methods", "materials", "experimental"):
+    if k in ("method", "methods", "materials", "experimental", "materials and methods"):
         return "methods"
     if k in ("result", "results", "findings"):
         return "results"
@@ -227,6 +237,25 @@ def _section_from_keyword(keyword: str) -> str:
         return "discussion"
     if k in ("conclusion", "conclusions", "concluding"):
         return "conclusion"
+    if k in ("reference", "references", "bibliography", "literature cited"):
+        return "references"
+    if k in (
+        "funding",
+        "disclosure",
+        "author contribution",
+        "author contributions",
+        "conflict of interest",
+        "conflicts of interest",
+        "competing interest",
+        "competing interests",
+        "data availability",
+        "ethics statement",
+        "acknowledgement",
+        "acknowledgements",
+        "acknowledgment",
+        "acknowledgments",
+    ):
+        return "acknowledgements"
     return ""
 
 
@@ -578,7 +607,10 @@ def main() -> None:
                 # Fallback for inline headings in long paragraphs:
                 # "... 2024 Abstract Severe fever ..."
                 inline_sec, para_inline = _inline_section_and_content(para)
-                if inline_sec and not effective_type:
+                if inline_sec:
+                    # Always allow inline heading to override inherited section.
+                    # This prevents "abstract" state from leaking into
+                    # Funding/Disclosure/Acknowledgements paragraphs.
                     effective_type = inline_sec
                 if para_inline:
                     para_for_extract = para_inline
