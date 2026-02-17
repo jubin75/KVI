@@ -94,42 +94,112 @@ _DOI_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.IGNORECASE)
 _JOURNALISH_RE = re.compile(r"\b(vol\.?|issue|pages?|doi|journal|proceedings)\b", re.IGNORECASE)
 
 
-_SECTION_HEADING_PATTERNS: list = [
-    (re.compile(r"^\s*abstract\s*[:：]?\s*$", re.I), "abstract"),
-    (re.compile(r"^\s*(introduction|background)\s*[:：]?\s*$", re.I), "introduction"),
-    (re.compile(r"^\s*(materials?\s+and\s+)?methods?\s*[:：]?\s*$", re.I), "methods"),
-    (re.compile(r"^\s*results?\s*[:：]?\s*$", re.I), "results"),
-    (re.compile(r"^\s*(results?\s+and\s+)?discussion\s*[:：]?\s*$", re.I), "results"),
-    (re.compile(r"^\s*conclusions?\s*[:：]?\s*$", re.I), "conclusion"),
-    (re.compile(r"^\s*(references?|bibliography)\s*[:：]?\s*$", re.I), "references"),
-    (re.compile(r"^\s*(acknowledge?ments?|funding|author\s+contributions?"
-                r"|conflicts?\s+of\s+interest|competing\s+interests?"
-                r"|data\s+availability|ethics\s+statement)\s*[:：]?\s*$", re.I), "acknowledgements"),
-    (re.compile(r"^\s*supplementary\s*(materials?|data|information)?\s*[:：]?\s*$", re.I), "supplementary"),
-]
+# ---------------------------------------------------------------------------
+#  Section detection — inline-aware, cross-chunk, handles numbered headings
+# ---------------------------------------------------------------------------
+#  PDF headings appear in many forms:
+#   "Abstract"  /  "ABSTRACT"  /  "1. Introduction"  /  "3.1 Results"
+#   "Abstract. This study..."  (inline, heading on same line as content)
+#   "Abstract\nThis study..."  (heading on first line of paragraph)
+#   "Results and Discussion"   (multi-word)
+# ---------------------------------------------------------------------------
+
+_SECTION_KEYWORDS: dict = {
+    "abstract": "abstract",
+    "summary": "abstract",        # some journals use "Summary" instead of "Abstract"
+    "introduction": "introduction",
+    "background": "introduction",
+    "methods": "methods",
+    "method": "methods",
+    "materials": "methods",       # "Materials and Methods"
+    "experimental": "methods",    # "Experimental Section"
+    "results": "results",
+    "result": "results",
+    "findings": "results",
+    "discussion": "results",      # "Discussion" or "Results and Discussion" → keep as results
+    "conclusions": "conclusion",
+    "conclusion": "conclusion",
+    "concluding": "conclusion",
+    "references": "references",
+    "bibliography": "references",
+    "literature": "references",   # "Literature Cited"
+    "acknowledgements": "acknowledgements",
+    "acknowledgments": "acknowledgements",
+    "acknowledgement": "acknowledgements",
+    "acknowledgment": "acknowledgements",
+    "funding": "acknowledgements",
+    "conflicts": "acknowledgements",
+    "competing": "acknowledgements",
+    "declaration": "acknowledgements",
+    "ethics": "acknowledgements",
+    "data": "acknowledgements",   # "Data Availability"
+    "supporting": "supplementary",
+    "supplementary": "supplementary",
+    "appendix": "supplementary",
+}
+
+# Matches section heading at the START of a line, with optional number prefix.
+# Captures the first keyword for lookup in _SECTION_KEYWORDS.
+# Works for both standalone headings ("Abstract") and inline ("Abstract. This study...")
+_INLINE_HEADING_RE = re.compile(
+    r"^\s*(?:[\dIVXivx]+[\.\)]\s*)*"          # optional number/roman prefix: "1.", "3.1.", "IV)"
+    r"([A-Za-z]+)"                              # first keyword (captured)
+    r"(?:\s+(?:and\s+)?[A-Za-z]+)*"            # optional extra words: "and Methods", "and Discussion"
+    r"\s*[:：.\n]",                              # followed by : or . or newline (signals end of heading)
+    re.MULTILINE,
+)
+
+# Stricter standalone heading: heading is the ENTIRE line (possibly with number)
+_STANDALONE_HEADING_RE = re.compile(
+    r"^\s*(?:[\dIVXivx]+[\.\)]\s*)*"
+    r"([A-Za-z]+(?:\s+(?:and\s+)?[A-Za-z]+)*)"
+    r"\s*[:：]?\s*$",
+    re.MULTILINE,
+)
 
 
-def _detect_section_heading(para: str) -> str:
-    """If *para* looks like a section heading, return its normalised type; else ''."""
-    first_line = para.strip().split("\n")[0].strip().rstrip(":：. ")
-    if len(first_line) > 80:
-        return ""
-    for pat, section in _SECTION_HEADING_PATTERNS:
-        if pat.match(first_line):
-            return section
+def _detect_section_from_text(text: str) -> str:
+    """Scan *text* (a paragraph or chunk) for a section heading.
+
+    Returns the normalised section type, or '' if none found.
+    Checks: (1) standalone headings, (2) inline headings at line starts.
+    """
+    # Try each line (check first 5 lines only — headings are at the top)
+    lines = text.strip().split("\n")[:5]
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or len(stripped) > 120:
+            continue
+
+        # --- Standalone heading (line IS the heading) ---
+        m = _STANDALONE_HEADING_RE.match(stripped)
+        if m and len(stripped) <= 60:
+            first_word = m.group(1).split()[0].lower()
+            section = _SECTION_KEYWORDS.get(first_word, "")
+            if section:
+                return section
+
+        # --- Inline heading ("Abstract. This study...") ---
+        m2 = _INLINE_HEADING_RE.match(stripped)
+        if m2:
+            first_word = m2.group(1).lower()
+            section = _SECTION_KEYWORDS.get(first_word, "")
+            if section:
+                return section
+
     return ""
 
 
-def _infer_sections_for_paragraphs(paras: list) -> list:
+def _infer_sections_for_paragraphs(paras: list, initial_section: str = "") -> list:
     """Return a list of inferred section types parallel to *paras*.
 
-    Scans paragraphs for section headings and propagates the section label
-    forward until the next heading.  Paragraphs before any heading get "".
+    Scans paragraphs for section headings and propagates the label forward.
+    *initial_section* inherits from the previous chunk of the same document.
     """
     sections: list = []
-    current = ""
+    current = initial_section
     for para in paras:
-        detected = _detect_section_heading(para)
+        detected = _detect_section_from_text(para)
         if detected:
             current = detected
         sections.append(current)
@@ -137,19 +207,25 @@ def _infer_sections_for_paragraphs(paras: list) -> list:
 
 
 def _is_low_value_paragraph(para: str) -> bool:
+    """Reject only the most obvious noise.  Everything else goes to DeepSeek.
+
+    DeepSeek handles semantic summarisation — it can extract meaningful
+    sentences from paragraphs that contain citations or methodology details.
+    We only pre-filter content that is structurally unparseable by DeepSeek:
+    pure reference entries, concatenated citation blocks, etc.
+    """
     p = str(para or "").strip()
     if not p:
         return True
+    # Explicit "References" / "Bibliography" section headers
     if _REF_PREFIX_RE.match(p):
         return True
-    if _DOI_RE.search(p):
+    # Extremely short fragments (< 40 chars) — too short to be useful
+    if len(p) < 40:
         return True
-    if _CITATION_RE.search(p):
-        return True
-    years = len(_YEAR_PAREN_RE.findall(p))
-    if years >= 4:
-        return True
-    if _JOURNALISH_RE.search(p):
+    # Dense reference block: many (year) citations packed together
+    year_count = len(_YEAR_PAREN_RE.findall(p))
+    if year_count >= 6:
         return True
     return False
 
@@ -205,6 +281,9 @@ def main() -> None:
     total_paras = 0
     kept_paras = 0
     out_blocks = 0
+    filtered_by_section = 0
+    filtered_by_noise = 0
+    filtered_heading = 0
 
     docs_meta_path = Path(str(args.out_docs_meta_jsonl)) if str(args.out_docs_meta_jsonl or "").strip() else None
     docs_meta_f = docs_meta_path.open("w", encoding="utf-8") if docs_meta_path else None
@@ -217,6 +296,9 @@ def main() -> None:
         for x in str(args.allowed_paragraph_types or "").split(",")
         if x.strip()
     }
+
+    # Cross-chunk section tracking: inherit section label across chunks of the same document
+    doc_section_state: Dict[str, str] = {}
 
     with out_path.open("w", encoding="utf-8") as fout:
         for rec in _read_jsonl(in_path):
@@ -252,10 +334,23 @@ def main() -> None:
                 )
 
             txt = _strip_table_markdown(str(rec.get("text") or ""))
+
+            # --- Pre-scan full chunk text for section heading (catches headings
+            #     that are lost during paragraph splitting, e.g. short lines) ---
+            chunk_section = _detect_section_from_text(txt)
+            if chunk_section:
+                doc_section_state[doc_id] = chunk_section
+
             paras = _split_paragraphs(txt)
 
-            # --- Infer section types when raw_chunks lack paragraph_type ---
-            inferred_sections = _infer_sections_for_paragraphs(paras) if not para_type else [""] * len(paras)
+            # --- Infer section types: inherit from previous chunk of same doc ---
+            inherited = doc_section_state.get(doc_id, "")
+            inferred_sections = _infer_sections_for_paragraphs(paras, initial_section=inherited) if not para_type else [para_type] * len(paras)
+            # Update document section state with the last inferred section
+            if inferred_sections:
+                last_sec = inferred_sections[-1]
+                if last_sec:
+                    doc_section_state[doc_id] = last_sec
 
             for p_idx, para in enumerate(paras):
                 total_paras += 1
@@ -265,15 +360,18 @@ def main() -> None:
                 # Effective section: metadata para_type > inferred from headings
                 effective_type = para_type or inferred_sections[p_idx]
 
-                # Skip section heading paragraphs themselves (short, already used for classification)
-                if not para_type and _detect_section_heading(para):
+                # Skip standalone section heading paragraphs (short, only a heading)
+                if not para_type and len(para.strip()) < 60 and _detect_section_from_text(para):
+                    filtered_heading += 1
                     continue
 
                 # --- Section filter ---
                 if allowed_para_types and effective_type and effective_type not in allowed_para_types:
+                    filtered_by_section += 1
                     continue
 
                 if _is_low_value_paragraph(para):
+                    filtered_by_noise += 1
                     continue
                 # If paragraph looks like a figure caption, emit it directly.
                 if _FIG_CAP_RE.match(para.strip()):
@@ -351,12 +449,14 @@ def main() -> None:
         f"out_blocks={out_blocks} out={out_path}",
         flush=True,
     )
-    if allowed_para_types:
-        print(
-            f"[evidence_from_raw_chunks] section_filter: allowed={sorted(allowed_para_types)}  "
-            f"rejected={total_paras - kept_paras} paragraphs",
-            flush=True,
-        )
+    print(
+        f"[evidence_from_raw_chunks] filter_breakdown: "
+        f"heading_skipped={filtered_heading}  "
+        f"section_rejected={filtered_by_section}  "
+        f"noise_rejected={filtered_by_noise}  "
+        f"allowed_sections={sorted(allowed_para_types) if allowed_para_types else 'all'}",
+        flush=True,
+    )
     if docs_meta_f is not None:
         docs_meta_f.close()
         print(f"[evidence_from_raw_chunks] wrote_docs_meta={docs_meta_path} docs={len(seen_docs)}", flush=True)
