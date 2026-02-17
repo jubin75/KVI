@@ -116,7 +116,7 @@ _SECTION_KEYWORDS: dict = {
     "results": "results",
     "result": "results",
     "findings": "results",
-    "discussion": "results",      # "Discussion" or "Results and Discussion" → keep as results
+    "discussion": "discussion",
     "conclusions": "conclusion",
     "conclusion": "conclusion",
     "concluding": "conclusion",
@@ -241,13 +241,13 @@ def main() -> None:
     p.add_argument("--max_paragraphs", type=int, default=0, help="If >0, only process first N paragraphs (debug)")
     p.add_argument(
         "--allowed_paragraph_types",
-        default="abstract,results,conclusion",
-        help="Comma-separated allowlist of paragraph_type from raw_chunks metadata",
+        default="abstract,introduction,results,discussion,conclusion",
+        help="Comma-separated allowlist of section types to keep",
     )
     p.add_argument(
-        "--drop_figure_captions",
+        "--keep_figure_captions",
         action="store_true",
-        help="Drop figure caption paragraphs instead of keeping them as evidence",
+        help="Keep figure captions as evidence (default: drop)",
     )
     p.add_argument("--deepseek_base_url", type=str, default="https://api.deepseek.com")
     p.add_argument("--deepseek_model", type=str, default="deepseek-chat")
@@ -373,9 +373,9 @@ def main() -> None:
                 if _is_low_value_paragraph(para):
                     filtered_by_noise += 1
                     continue
-                # If paragraph looks like a figure caption, emit it directly.
+                # Figure captions: drop by default (low value for knowledge extraction)
                 if _FIG_CAP_RE.match(para.strip()):
-                    if bool(args.drop_figure_captions):
+                    if not bool(args.keep_figure_captions):
                         continue
                     ev_block_id = f"{chunk_id}_p{p_idx}::cap"
                     out_rec = {
@@ -407,12 +407,15 @@ def main() -> None:
                     quote = str(it.get("quote") or "").strip()
                     if not quote:
                         continue
+                    # Reject truncated sentences: must end with sentence-ending punctuation
+                    if not re.search(r'[.!?。！？;；)\]）」\'\"]\s*$', quote):
+                        continue
                     span = it.get("span") if isinstance(it.get("span"), dict) else {}
                     ev_block_id = f"{chunk_id}_p{p_idx}::ev{s_idx}"
                     block_type = "paragraph_summary"
                     if effective_type == "abstract":
                         block_type = "abstract"
-                    elif effective_type in ("results", "conclusion"):
+                    elif effective_type in ("results", "conclusion", "discussion", "introduction"):
                         block_type = effective_type
                     out_rec = {
                         "block_id": ev_block_id,
