@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -729,14 +728,6 @@ def _append_lines_to_evidence_set(topic: str, source_id: str, lines: List[str]) 
 _REL_OPS: set[str] = {">", ">=", "<", "<=", "=", "!=", "range"}
 
 
-def _is_number_str(s: str) -> bool:
-    try:
-        v = float(str(s).strip())
-        return bool(str(s).strip()) and math.isfinite(v)
-    except Exception:
-        return False
-
-
 def _validate_normalize_relation(r: Dict[str, Any]) -> Optional[Dict[str, str]]:
     var = str(r.get("variable") or "").strip()
     op = str(r.get("operator") or "").strip()
@@ -753,13 +744,7 @@ def _validate_normalize_relation(r: Dict[str, Any]) -> Optional[Dict[str, str]]:
         parts = [x.strip() for x in val.split(",") if str(x).strip()]
         if len(parts) != 2:
             raise ValueError("range value must be 'min,max'")
-        if not _is_number_str(parts[0]) or not _is_number_str(parts[1]):
-            raise ValueError("range min,max must be numeric")
-        a, b = float(parts[0]), float(parts[1])
-        mn, mx = (a, b) if a <= b else (b, a)
-        return {"variable": var, "operator": op, "value": f"{mn:g},{mx:g}"}
-    if op in {">", ">=", "<", "<=", "=", "!="} and not _is_number_str(val):
-        raise ValueError(f"operator {op} requires numeric value")
+        return {"variable": var, "operator": op, "value": f"{parts[0]},{parts[1]}"}
     return {"variable": var, "operator": op, "value": val}
 
 
