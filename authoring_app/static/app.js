@@ -48,6 +48,7 @@ let selectedDoc = null;
 let selectedDocDetails = null;
 let evidenceSets = [];
 let currentSet = null;
+let pipelineDebugPollTimer = null;
 
 async function createTopicFromUi() {
   const name = ($("topic_new_name").value || "").trim();
@@ -202,9 +203,14 @@ async function compileGraph() {
 async function buildPipelineFromDocs() {
   const summaryEl = $("pipeline_summary");
   const itemsEl = $("pipeline_kv_items");
+  const debugEl = $("pipeline_debug_log");
+  const btn = $("btn_build_pipeline");
   $("pipeline_result_view").style.display = "block";
   summaryEl.textContent = "Building full pipeline (Sentences → Triples → Graph → KV)...\nThis may take 1-2 minutes.";
   itemsEl.textContent = "Waiting...";
+  if (debugEl) debugEl.textContent = "Polling backend runtime log...";
+  if (btn) btn.disabled = true;
+  startPipelineDebugPoll(selectedTopic);
   try {
     const resp = await buildFullPipelineImpl(summaryEl);
     summaryEl.textContent = formatPipelineResult(resp);
@@ -212,6 +218,56 @@ async function buildPipelineFromDocs() {
   } catch (err) {
     summaryEl.textContent = "Pipeline FAILED\n\n" + String(err.message || err);
     itemsEl.textContent = "";
+  } finally {
+    await stopPipelineDebugPoll(selectedTopic, true);
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderPipelineDebugStatus(st) {
+  const el = $("pipeline_debug_log");
+  if (!el) return;
+  const lines = [];
+  lines.push(`running: ${st && st.running ? "yes" : "no"}`);
+  if (st && st.updated_at) lines.push(`updated_at: ${st.updated_at}`);
+  if (st && st.last_error) lines.push(`last_error: ${st.last_error}`);
+  lines.push("");
+  const logs = (st && Array.isArray(st.logs)) ? st.logs : [];
+  if (!logs.length) lines.push("(no backend logs yet)");
+  else lines.push(...logs);
+  el.textContent = lines.join("\n");
+}
+
+function startPipelineDebugPoll(topic) {
+  stopPipelineDebugPoll(topic, false);
+  const tick = async () => {
+    if (!topic) return;
+    try {
+      const st = await apiGet(`/api/kvi/topic/${encodeURIComponent(topic)}/build_full_pipeline/status`);
+      renderPipelineDebugStatus(st);
+      if (!st.running && pipelineDebugPollTimer) {
+        clearInterval(pipelineDebugPollTimer);
+        pipelineDebugPollTimer = null;
+      }
+    } catch (err) {
+      const el = $("pipeline_debug_log");
+      if (el) el.textContent = "Failed to poll backend log: " + String(err.message || err);
+    }
+  };
+  tick();
+  pipelineDebugPollTimer = setInterval(tick, 1500);
+}
+
+async function stopPipelineDebugPoll(topic, refreshOnce) {
+  if (pipelineDebugPollTimer) {
+    clearInterval(pipelineDebugPollTimer);
+    pipelineDebugPollTimer = null;
+  }
+  if (refreshOnce && topic) {
+    try {
+      const st = await apiGet(`/api/kvi/topic/${encodeURIComponent(topic)}/build_full_pipeline/status`);
+      renderPipelineDebugStatus(st);
+    } catch {}
   }
 }
 

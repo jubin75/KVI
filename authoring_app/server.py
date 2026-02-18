@@ -9,6 +9,7 @@ import time
 import hashlib
 import re
 import shutil
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +39,11 @@ TOPICS_DIR = PROJECT_ROOT / "config" / "topics"
 DEFAULT_MAX_SENTENCE_TOKENS = 128
 HARD_MAX_INJECTED_SENTENCES_PER_STEP = 4
 HARD_MAX_TOTAL_INJECTED_TOKENS = 512
+
+# Build-pipeline runtime state (for UI polling + per-topic mutex)
+_PIPELINE_STATE_LOCK = threading.Lock()
+_PIPELINE_STATE: Dict[str, Dict[str, Any]] = {}
+_PIPELINE_TOPIC_LOCKS: Dict[str, threading.Lock] = {}
 
 _DEFAULT_SEMANTIC_TYPE_SPECS = {
     "symptom": {
@@ -677,6 +683,49 @@ def _save_doc_details(work_dir: Path, data: Dict[str, Dict[str, Any]]) -> None:
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _get_topic_pipeline_lock(topic: str) -> threading.Lock:
+    with _PIPELINE_STATE_LOCK:
+        lk = _PIPELINE_TOPIC_LOCKS.get(topic)
+        if lk is None:
+            lk = threading.Lock()
+            _PIPELINE_TOPIC_LOCKS[topic] = lk
+        return lk
+
+
+def _pipeline_set(topic: str, **kwargs: Any) -> None:
+    with _PIPELINE_STATE_LOCK:
+        cur = _PIPELINE_STATE.get(topic, {"topic": topic, "running": False, "logs": [], "updated_at": _safe_now_iso()})
+        cur.update(kwargs)
+        cur["updated_at"] = _safe_now_iso()
+        _PIPELINE_STATE[topic] = cur
+
+
+def _pipeline_log(topic: str, line: str) -> None:
+    with _PIPELINE_STATE_LOCK:
+        cur = _PIPELINE_STATE.get(topic, {"topic": topic, "running": False, "logs": [], "updated_at": _safe_now_iso()})
+        logs = list(cur.get("logs") or [])
+        logs.append(str(line))
+        # Keep last 300 lines
+        cur["logs"] = logs[-300:]
+        cur["updated_at"] = _safe_now_iso()
+        _PIPELINE_STATE[topic] = cur
+
+
+def _pipeline_get(topic: str) -> Dict[str, Any]:
+    with _PIPELINE_STATE_LOCK:
+        cur = _PIPELINE_STATE.get(topic)
+        if not cur:
+            return {"topic": topic, "running": False, "logs": [], "updated_at": _safe_now_iso()}
+        return {
+            "topic": topic,
+            "running": bool(cur.get("running")),
+            "logs": list(cur.get("logs") or []),
+            "updated_at": cur.get("updated_at"),
+            "last_error": cur.get("last_error"),
+            "last_result_ok": cur.get("last_result_ok"),
+        }
+
+
 def _append_lines_to_evidence_set(topic: str, source_id: str, lines: List[str]) -> Dict[str, Any]:
     # Import into the first enabled evidence set; if none exist, create one.
     sets = _list_evidence_sets(topic)
@@ -1122,6 +1171,11 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "block_count": len(blks),
                 })
             _json_response(self, HTTPStatus.OK, {"topic": topic, "items": items_fb, "count": len(items_fb), "source": str(blocks_path.name)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and path.endswith("/build_full_pipeline/status"):
+            topic = unquote(path[len("/api/kvi/topic/") : -len("/build_full_pipeline/status")].strip("/"))
+            _json_response(self, HTTPStatus.OK, {"ok": True, **_pipeline_get(topic)})
             return
 
         if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/blocks"):
@@ -1611,6 +1665,7 @@ class KVIHandler(BaseHTTPRequestHandler):
 
             if not use_deepseek and not base_llm:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing DeepSeek config or build.base_llm in topic config.json"})
+                _finish_pipeline(False, "missing_config")
                 return
 
             # Use tagged sentences if available, else raw sentences
@@ -1780,6 +1835,15 @@ class KVIHandler(BaseHTTPRequestHandler):
         # ==================== Full Pipeline: Sentences → Triples → Graph → KV ====================
         if path.startswith("/api/kvi/topic/") and path.endswith("/build_full_pipeline"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/build_full_pipeline")].strip("/"))
+            topic_lock = _get_topic_pipeline_lock(topic)
+            if not topic_lock.acquire(blocking=False):
+                _json_response(
+                    self,
+                    HTTPStatus.CONFLICT,
+                    {"ok": False, "error": "running", "message": f"build_full_pipeline already running for topic={topic}"},
+                )
+                return
+            _pipeline_set(topic, running=True, logs=[f"[{_safe_now_iso()}] build_full_pipeline started"], last_error=None, last_result_ok=None)
             topic_cfg = _load_topic_config(topic)
             build = _topic_build_cfg(topic)
             base_llm = str(build.get("base_llm") or "").strip()
@@ -1797,6 +1861,11 @@ class KVIHandler(BaseHTTPRequestHandler):
 
             if not use_deepseek and not base_llm:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "Missing DeepSeek config or build.base_llm in topic config.json"})
+                _pipeline_set(topic, running=False, last_result_ok=False, last_error="missing_config")
+                try:
+                    topic_lock.release()
+                except Exception:
+                    pass
                 return
             if not encoder:
                 # Encoder is optional for tagging; skip tagging if missing
@@ -1806,6 +1875,14 @@ class KVIHandler(BaseHTTPRequestHandler):
             obj = obj if isinstance(obj, dict) else {}
             device = str(obj.get("device") or "").strip()
             timeout_s = int(obj.get("timeout_s") or 600)
+            _pipeline_log(topic, f"[cfg] timeout_s={timeout_s} device={device or '(auto)'} deepseek={use_deepseek}")
+
+            def _finish_pipeline(ok: Optional[bool] = None, err: Optional[str] = None) -> None:
+                _pipeline_set(topic, running=False, last_result_ok=ok, last_error=err)
+                try:
+                    topic_lock.release()
+                except Exception:
+                    pass
 
             # ---- Step 1: Compile sentences ----
             # Priority: blocks.evidence.jsonl > blocks.enriched.jsonl > blocks.jsonl > evidence sets
@@ -1833,6 +1910,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                             })
                     if recs:
                         sentence_source = f"{bname} ({len(recs)} blocks)"
+                        _pipeline_log(topic, f"[step1] source={sentence_source}")
                         break
                     # File existed but had no usable text — try next candidate
             if not recs:
@@ -1845,6 +1923,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     "message": f"No evidence found in work_dir={out_dir}. "
                                f"Checked: {', '.join(blocks_candidates)} and evidence sets.",
                 })
+                _finish_pipeline(False, "no_evidence")
                 return
 
             sentences_jsonl = out_dir / "sentences.jsonl"
@@ -1875,6 +1954,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     written += 1
 
             pipeline_status: Dict[str, Any] = {"sentences_compiled": written, "sentence_source": sentence_source}
+            _pipeline_log(topic, f"[step1] compiled_sentences={written}")
 
             # ---- Step 2: Tag sentences (semantic intent) ----
             sentences_tagged = out_dir / "sentences.tagged.jsonl"
@@ -1895,12 +1975,15 @@ class KVIHandler(BaseHTTPRequestHandler):
                 if r_tag.returncode == 0 and sentences_tagged.exists():
                     sentences_src = sentences_tagged
                     pipeline_status["sentences_tagged"] = True
+                    _pipeline_log(topic, "[step2] tagging ok")
                 else:
                     pipeline_status["sentences_tagged"] = False
                     pipeline_status["tag_error"] = (r_tag.stderr or "")[-500:]
+                    _pipeline_log(topic, f"[step2] tagging failed: {(r_tag.stderr or '')[-200:]}")
             else:
                 pipeline_status["sentences_tagged"] = False
                 pipeline_status["tag_note"] = "no encoder configured; skipping tagging"
+                _pipeline_log(topic, "[step2] tagging skipped")
 
             # ---- Step 3: Write aliases.jsonl (if provided) ----
             aliases_jsonl = out_dir / "aliases.jsonl"
@@ -1910,6 +1993,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     for alias_rec in aliases_data:
                         if isinstance(alias_rec, dict):
                             af.write(json.dumps(alias_rec, ensure_ascii=False) + "\n")
+                _pipeline_log(topic, f"[step3] aliases={len(aliases_data)}")
 
             # ---- Step 4: Extract triples ----
             triples_jsonl = out_dir / "triples.jsonl"
@@ -1931,14 +2015,19 @@ class KVIHandler(BaseHTTPRequestHandler):
                 cmd_extract.extend(["--model", base_llm])
                 if device:
                     cmd_extract.extend(["--device", device])
+            _pipeline_log(topic, f"[step4] extract backend={'deepseek' if use_deepseek else 'local'}")
 
             try:
                 r_extract = subprocess.run(cmd_extract, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
             except subprocess.TimeoutExpired:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "timeout", "message": f"Triple extraction timed out after {timeout_s}s."})
+                _pipeline_log(topic, f"[step4] extract timeout after {timeout_s}s")
+                _finish_pipeline(False, "extract_timeout")
                 return
             if r_extract.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "extract_triples", "error": (r_extract.stderr or "")[-2000:]})
+                _pipeline_log(topic, f"[step4] extract failed rc={r_extract.returncode}")
+                _finish_pipeline(False, "extract_failed")
                 return
 
             # Count triples
@@ -1948,6 +2037,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                     if ln.strip():
                         triple_count += 1
             pipeline_status["triples_extracted"] = triple_count
+            _pipeline_log(topic, f"[step4] extract ok triples={triple_count}")
 
             # ---- Step 5: Build knowledge graph ----
             graph_index_json = out_dir / "graph_index.json"
@@ -1962,7 +2052,10 @@ class KVIHandler(BaseHTTPRequestHandler):
             r_build = subprocess.run(cmd_build, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=120)
             if r_build.returncode != 0:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "topic": topic, "failed_step": "build_knowledge_graph", "error": (r_build.stderr or "")[-2000:]})
+                _pipeline_log(topic, f"[step5] graph build failed rc={r_build.returncode}")
+                _finish_pipeline(False, "build_graph_failed")
                 return
+            _pipeline_log(topic, "[step5] graph build ok")
 
             # Parse graph summary
             graph_summary: Dict[str, Any] = {}
@@ -1997,8 +2090,12 @@ class KVIHandler(BaseHTTPRequestHandler):
                     r_kv = subprocess.run(cmd_kv, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=timeout_s)
                     if r_kv.returncode != 0:
                         pipeline_status["triple_kv_error"] = (r_kv.stderr or "")[-1000:]
+                        _pipeline_log(topic, f"[step6] triple kv failed rc={r_kv.returncode}")
+                    else:
+                        _pipeline_log(topic, "[step6] triple kv ok")
                 except subprocess.TimeoutExpired:
                     pipeline_status["triple_kv_error"] = "timeout"
+                    _pipeline_log(topic, f"[step6] triple kv timeout after {timeout_s}s")
 
                 # Read manifest for results
                 manifest_path = triple_kvbank_dir / "manifest.json"
@@ -2028,6 +2125,7 @@ class KVIHandler(BaseHTTPRequestHandler):
                         pass
             else:
                 pipeline_status["triple_kv_note"] = "no base_llm; skipping KV compilation"
+                _pipeline_log(topic, "[step6] triple kv skipped")
 
             pipeline_status["triple_kv"] = triple_kv_summary
 
@@ -2037,6 +2135,8 @@ class KVIHandler(BaseHTTPRequestHandler):
                 "pipeline_status": pipeline_status,
                 "triple_kv_items": triple_kv_items,
             })
+            _pipeline_log(topic, f"[done] pipeline ok triples={pipeline_status.get('triples_extracted', 0)}")
+            _finish_pipeline(True, None)
             return
 
         if path.startswith("/api/kvi/topic/") and path.endswith("/run_simple"):
