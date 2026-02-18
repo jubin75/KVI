@@ -190,7 +190,7 @@
           </div>
           <div class="help-content">
             选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
-            点击文档查看 raw sentences。<br/>
+            点击文档进入 <b>View Details</b>，编辑 Abstract / Key Notes / 三元关系。<br/>
             点击 <b>Build Graph</b> 一键编译三元 KV：<br/>
             Sentences → Triples → graph_index.json → triple_kvbank/
           </div>
@@ -204,11 +204,35 @@
         <div class="panel" id="doc_detail_view" style="display:none">
           <div class="btns">
             <button id="btn_back_to_docs">Back</button>
-            <button class="ok" id="btn_import_doc_blocks" disabled>Import Blocks</button>
+            <button id="btn_save_doc_details">Save Details</button>
+            <button class="ok" id="btn_import_doc_details" disabled>Import Details</button>
           </div>
           <div class="field">
-            <label>Document Blocks</label>
-            <div class="pre" id="doc_detail">Loading...</div>
+            <label>Abstract</label>
+            <textarea id="doc_abstract" placeholder="Paste/adjust full abstract text"></textarea>
+          </div>
+          <div class="field">
+            <label>Key Notes <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span></label>
+            <div class="help-content">每行一条关键要点，可点击 Add Note 增加新行。</div>
+            <div id="doc_key_notes"></div>
+            <div class="btns">
+              <button id="btn_add_key_note">Add Note</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Relations (变量 / 比较符 / 数值)</label>
+            <div id="doc_relations"></div>
+            <div class="btns">
+              <button id="btn_add_relation">Add Relation</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Raw Blocks (Read-only)</label>
+            <div class="pre" id="doc_detail_blocks">Loading...</div>
+          </div>
+          <div class="field">
+            <label>Status</label>
+            <div class="pre" id="doc_detail_status">Ready.</div>
           </div>
         </div>
         <div class="panel" id="pipeline_result_view" style="display:none">

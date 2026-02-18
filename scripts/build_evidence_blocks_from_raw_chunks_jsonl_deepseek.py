@@ -283,7 +283,13 @@ def _inline_section_and_content(para: str) -> tuple:
 
 
 _ABSTRACT_END_RE = re.compile(
-    r"\b(keywords?|introduction|background|methods?|materials?\s+and\s+methods?|results?)\b",
+    r"\b("
+    r"keywords?|introduction|background|methods?|materials?\s+and\s+methods?|results?|"
+    r"funding|disclosure|author\s+contributions?|"
+    r"conflicts?\s+of\s+interest|competing\s+interests?|"
+    r"data\s+availability|ethics\s+statement|"
+    r"acknowledg?ements?|references?|bibliography"
+    r")\b",
     flags=re.IGNORECASE,
 )
 _METHODISH_SENT_RE = re.compile(
@@ -295,6 +301,28 @@ _METHODISH_SENT_RE = re.compile(
     r")\b",
     flags=re.IGNORECASE,
 )
+
+_ABSTRACT_BAD_RE = re.compile(
+    r"\b("
+    r"funding|disclosure|author\s+contributions?|"
+    r"conflicts?\s+of\s+interest|competing\s+interests?|"
+    r"data\s+availability|ethics\s+statement|"
+    r"acknowledg?ements?|references?|bibliography|"
+    r"received\s*:|accepted\s*:|published\s+online"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _truncate_abstract_noise_tail(text: str) -> str:
+    """Trim abstract text before trailing non-abstract sections if present."""
+    t = re.sub(r"\s+", " ", str(text or "").strip())
+    if not t:
+        return ""
+    m = _ABSTRACT_END_RE.search(t)
+    if m and m.start() > 120:
+        t = t[: m.start()].strip()
+    return t
 
 
 def _extract_abstract_window(full_text: str) -> str:
@@ -549,7 +577,7 @@ def main() -> None:
             if doc_id and doc_id not in doc_abstract_seed:
                 abs_window = _extract_abstract_window(txt)
                 if abs_window:
-                    window_text = re.sub(r"\s+", " ", abs_window).strip()
+                    window_text = _truncate_abstract_noise_tail(abs_window)
                     if len(window_text) >= 120:
                         doc_abstract_seed[doc_id] = {
                             "text": window_text[:2500],
@@ -627,35 +655,40 @@ def main() -> None:
                 # Abstract handling: keep full abstract paragraph/window directly.
                 # Do NOT send abstract to DeepSeek sentence summarization.
                 if effective_type == "abstract":
-                    abs_text = re.sub(r"\s+", " ", para_for_extract).strip()
+                    abs_text = _truncate_abstract_noise_tail(para_for_extract)
                     if len(abs_text) < 80:
                         continue
-                    ev_block_id = f"{chunk_id}_p{p_idx}::abs"
-                    out_rec = {
-                        "block_id": ev_block_id,
-                        "doc_id": doc_id,
-                        "kb_id": (str(args.kb_id) if str(args.kb_id or "").strip() else None),
-                        "source_uri": source_uri,
-                        "lang": lang,
-                        "block_type": "abstract",
-                        "text": abs_text,
-                        "token_count": int(_approx_token_count(abs_text)),
-                        "metadata": {
-                            "from_raw_chunk_id": chunk_id,
-                            "paragraph_index": int(p_idx),
-                            "span": {"char_start": None, "char_end": None},
-                            "relevance": None,
-                            "claim": None,
-                            "raw_chunk_metadata": meta,
-                            "direct_abstract": True,
-                        },
-                    }
-                    fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
-                    out_blocks += 1
-                    kept_paras += 1
-                    if doc_id:
-                        doc_has_abstract_block[doc_id] = True
-                    continue
+                    # If the paragraph still looks like non-abstract metadata,
+                    # don't keep it as abstract; let normal DS flow handle it.
+                    if _ABSTRACT_BAD_RE.search(abs_text):
+                        effective_type = "paragraph"
+                    else:
+                        ev_block_id = f"{chunk_id}_p{p_idx}::abs"
+                        out_rec = {
+                            "block_id": ev_block_id,
+                            "doc_id": doc_id,
+                            "kb_id": (str(args.kb_id) if str(args.kb_id or "").strip() else None),
+                            "source_uri": source_uri,
+                            "lang": lang,
+                            "block_type": "abstract",
+                            "text": abs_text,
+                            "token_count": int(_approx_token_count(abs_text)),
+                            "metadata": {
+                                "from_raw_chunk_id": chunk_id,
+                                "paragraph_index": int(p_idx),
+                                "span": {"char_start": None, "char_end": None},
+                                "relevance": None,
+                                "claim": None,
+                                "raw_chunk_metadata": meta,
+                                "direct_abstract": True,
+                            },
+                        }
+                        fout.write(json.dumps(out_rec, ensure_ascii=False) + "\n")
+                        out_blocks += 1
+                        kept_paras += 1
+                        if doc_id:
+                            doc_has_abstract_block[doc_id] = True
+                        continue
 
                 # Figure captions: drop by default (low value for knowledge extraction)
                 if _FIG_CAP_RE.match(para_for_extract.strip()):
@@ -748,6 +781,11 @@ def main() -> None:
                 continue
             txt_seed = str(seed.get("text") or "").strip()
             if not txt_seed:
+                continue
+            txt_seed = _truncate_abstract_noise_tail(txt_seed)
+            if len(txt_seed) < 80:
+                continue
+            if _ABSTRACT_BAD_RE.search(txt_seed):
                 continue
             block_id = f"{seed.get('chunk_id', 'chunk')}_fallback::abs"
             out_rec = {

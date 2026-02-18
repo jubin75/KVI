@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -655,6 +656,134 @@ def _save_doc_approvals(work_dir: Path, approvals: Dict[str, bool]) -> None:
     p.write_text(json.dumps(approvals, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_doc_details(work_dir: Path) -> Dict[str, Dict[str, Any]]:
+    p = work_dir / "docs.details.json"
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(obj, dict):
+            out: Dict[str, Dict[str, Any]] = {}
+            for k, v in obj.items():
+                if isinstance(v, dict):
+                    out[str(k)] = v
+            return out
+    except Exception:
+        pass
+    return {}
+
+
+def _save_doc_details(work_dir: Path, data: Dict[str, Dict[str, Any]]) -> None:
+    p = work_dir / "docs.details.json"
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _append_lines_to_evidence_set(topic: str, source_id: str, lines: List[str]) -> Dict[str, Any]:
+    # Import into the first enabled evidence set; if none exist, create one.
+    sets = _list_evidence_sets(topic)
+    target: Optional[Dict[str, Any]] = None
+    for s in sets:
+        if bool(s.get("enabled")):
+            target = s
+            break
+    if target is None:
+        d = _topic_evidence_sets_dir(topic)
+        d.mkdir(parents=True, exist_ok=True)
+        name = "evidence_001.jsonl"
+        fp_new = d / name
+        fp_new.write_text("", encoding="utf-8")
+        mf = _load_manifest(topic)
+        mf.setdefault("sets", {})
+        mf["sets"][name] = {"enabled": True, "note": "auto_created_for_doc_import", "created_at": _safe_now_iso()}
+        _save_manifest(topic, mf)
+        target = {"name": name, "path": str(fp_new), "enabled": True}
+
+    fp = Path(str(target.get("path") or ""))
+    existing = _read_sentence_set(fp)
+    seen_claims = {str(r.get("claim") or "").strip() for r in existing if str(r.get("claim") or "").strip()}
+    now = _safe_now_iso()
+    appended = 0
+    for ln in lines:
+        t = str(ln or "").strip()
+        if not t or t in seen_claims:
+            continue
+        seen_claims.add(t)
+        existing.append(
+            {
+                "id": _stable_sentence_id(topic=topic, claim=t, source_id=source_id),
+                "topic": topic,
+                "claim": t,
+                "source_id": source_id,
+                "source_ref": {"doi": None, "title": None},
+                "created_at": now,
+                "updated_at": now,
+                "author": None,
+                "tags": [],
+            }
+        )
+        appended += 1
+    _write_sentence_set(fp, existing)
+    return {"evidence_set": str(target.get("name")), "appended": int(appended)}
+
+
+_REL_OPS: set[str] = {">", ">=", "<", "<=", "=", "!=", "range"}
+
+
+def _is_number_str(s: str) -> bool:
+    try:
+        v = float(str(s).strip())
+        return bool(str(s).strip()) and math.isfinite(v)
+    except Exception:
+        return False
+
+
+def _validate_normalize_relation(r: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    var = str(r.get("variable") or "").strip()
+    op = str(r.get("operator") or "").strip()
+    val = str(r.get("value") or "").strip()
+    if not (var or op or val):
+        return None
+    if not var:
+        raise ValueError("relation variable is required")
+    if op not in _REL_OPS:
+        raise ValueError(f"invalid relation operator: {op}")
+    if not val:
+        raise ValueError("relation value is required")
+    if op == "range":
+        parts = [x.strip() for x in val.split(",") if str(x).strip()]
+        if len(parts) != 2:
+            raise ValueError("range value must be 'min,max'")
+        if not _is_number_str(parts[0]) or not _is_number_str(parts[1]):
+            raise ValueError("range min,max must be numeric")
+        a, b = float(parts[0]), float(parts[1])
+        mn, mx = (a, b) if a <= b else (b, a)
+        return {"variable": var, "operator": op, "value": f"{mn:g},{mx:g}"}
+    if op in {">", ">=", "<", "<=", "=", "!="} and not _is_number_str(val):
+        raise ValueError(f"operator {op} requires numeric value")
+    return {"variable": var, "operator": op, "value": val}
+
+
+def _relation_to_claim_text(r: Dict[str, str]) -> str:
+    var = str(r.get("variable") or "").strip()
+    op = str(r.get("operator") or "").strip()
+    val = str(r.get("value") or "").strip()
+    if not (var and op and val):
+        return ""
+    if op == "range":
+        parts = [x.strip() for x in val.split(",") if str(x).strip()]
+        if len(parts) == 2:
+            return f"临床变量{var}取值范围在{parts[0]}到{parts[1]}之间。"
+    op_zh = {
+        ">": "大于",
+        ">=": "大于等于",
+        "<": "小于",
+        "<=": "小于等于",
+        "=": "等于",
+        "!=": "不等于",
+    }.get(op, op)
+    return f"临床变量{var}{op_zh}{val}。"
+
+
 def _json_response(handler: BaseHTTPRequestHandler, code: int, payload: Any) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(int(code))
@@ -1023,6 +1152,45 @@ class KVIHandler(BaseHTTPRequestHandler):
             blocks = [b for b in _read_jsonl(blocks_path) if str(b.get("doc_id") or "").strip() == str(doc_id)]
             items = [{"block_id": b.get("block_id"), "block_type": b.get("block_type") or "paragraph_summary", "claim": (b.get("text") or "")} for b in blocks]
             _json_response(self, HTTPStatus.OK, {"topic": topic, "doc_id": doc_id, "items": items, "count": len(items), "blocks_jsonl": str(blocks_path)})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/details"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/details")])
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            details_map = _load_doc_details(work_dir)
+            details = details_map.get(str(doc_id), {})
+
+            # Prefill from blocks when manual details are absent
+            if not isinstance(details, dict) or not details:
+                blocks_path = work_dir / "blocks.evidence.jsonl"
+                abstract = ""
+                key_notes: List[str] = []
+                if blocks_path.exists():
+                    for b in _read_jsonl(blocks_path):
+                        if str(b.get("doc_id") or "").strip() != str(doc_id):
+                            continue
+                        bt = str(b.get("block_type") or "").strip().lower()
+                        txt = str(b.get("text") or "").strip()
+                        if not txt:
+                            continue
+                        if bt == "abstract" and not abstract:
+                            abstract = txt
+                        elif bt in {"results", "discussion", "conclusion", "introduction", "paragraph_summary"}:
+                            if len(key_notes) < 10:
+                                key_notes.append(txt)
+                details = {
+                    "doc_id": str(doc_id),
+                    "abstract": abstract,
+                    "key_notes": key_notes,
+                    "relations": [],
+                    "updated_at": None,
+                    "source": "prefill_from_blocks",
+                }
+
+            _json_response(self, HTTPStatus.OK, {"topic": topic, "doc_id": doc_id, "details": details})
             return
 
         _text_response(self, HTTPStatus.NOT_FOUND, "not found", content_type="text/plain; charset=utf-8")
@@ -2499,6 +2667,102 @@ class KVIHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "doc_id": doc_id, "approved": approved})
             return
 
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/details/save"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/details/save")])
+            obj, err = _read_body_json(self)
+            if err or not isinstance(obj, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": err or "dict required"})
+                return
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            abstract = str(obj.get("abstract") or "").strip()
+            key_notes_in = obj.get("key_notes")
+            rel_in = obj.get("relations")
+            key_notes: List[str] = []
+            if isinstance(key_notes_in, list):
+                for x in key_notes_in:
+                    t = str(x or "").strip()
+                    if t:
+                        key_notes.append(t)
+            relations: List[Dict[str, str]] = []
+            if isinstance(rel_in, list):
+                for r in rel_in:
+                    if not isinstance(r, dict):
+                        continue
+                    try:
+                        rr = _validate_normalize_relation(r)
+                    except Exception as e:
+                        _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": f"invalid relation: {e}"})
+                        return
+                    if rr:
+                        relations.append(rr)
+            details = {
+                "doc_id": str(doc_id),
+                "abstract": abstract,
+                "key_notes": key_notes,
+                "relations": relations,
+                "updated_at": _safe_now_iso(),
+                "source": "manual",
+            }
+            details_map = _load_doc_details(work_dir)
+            details_map[str(doc_id)] = details
+            _save_doc_details(work_dir, details_map)
+            _json_response(self, HTTPStatus.OK, {"ok": True, "topic": topic, "doc_id": doc_id, "details": details})
+            return
+
+        if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/import_details_to_evidence"):
+            rest = path[len("/api/kvi/topic/") :].strip("/")
+            topic, _, tail = rest.partition("/doc/")
+            doc_id = unquote(tail[: -len("/import_details_to_evidence")])
+            build = _topic_build_cfg(topic)
+            work_dir = Path(str(build.get("work_dir") or "")).expanduser()
+            approvals = _load_doc_approvals(work_dir)
+            if not bool(approvals.get(str(doc_id), False)):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "doc is not approved; approve it first"})
+                return
+            details_map = _load_doc_details(work_dir)
+            d = details_map.get(str(doc_id))
+            if not isinstance(d, dict):
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "doc details not found; save details first"})
+                return
+            lines: List[str] = []
+            abs_text = str(d.get("abstract") or "").strip()
+            if abs_text:
+                lines.append(f"文献摘要：{abs_text}")
+            for i, n in enumerate(d.get("key_notes") or [], start=1):
+                t = str(n or "").strip()
+                if t:
+                    lines.append(f"关键要点{i}：{t}")
+            for r in d.get("relations") or []:
+                if not isinstance(r, dict):
+                    continue
+                try:
+                    rr = _validate_normalize_relation(r)
+                except Exception:
+                    rr = None
+                text = _relation_to_claim_text(rr or {})
+                if text:
+                    lines.append(text)
+            if not lines:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": "empty details; nothing to import"})
+                return
+            imp = _append_lines_to_evidence_set(topic=topic, source_id=str(doc_id), lines=lines)
+            _json_response(
+                self,
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "topic": topic,
+                    "doc_id": doc_id,
+                    "evidence_set": imp.get("evidence_set"),
+                    "appended": int(imp.get("appended") or 0),
+                    "num_lines": len(lines),
+                },
+            )
+            return
+
         if path.startswith("/api/kvi/topic/") and "/doc/" in path and path.endswith("/import_to_evidence"):
             rest = path[len("/api/kvi/topic/") :].strip("/")
             topic, _, tail = rest.partition("/doc/")
@@ -2519,53 +2783,11 @@ class KVIHandler(BaseHTTPRequestHandler):
                 t = str(b.get("text") or "").strip()
                 if t:
                     lines.append(t)
-            # Import into the first enabled evidence set; if none exist, create one.
-            sets = _list_evidence_sets(topic)
-            target: Optional[Dict[str, Any]] = None
-            for s in sets:
-                if bool(s.get("enabled")):
-                    target = s
-                    break
-            if target is None:
-                d = _topic_evidence_sets_dir(topic)
-                d.mkdir(parents=True, exist_ok=True)
-                name = "evidence_001.jsonl"
-                fp_new = d / name
-                fp_new.write_text("", encoding="utf-8")
-                mf = _load_manifest(topic)
-                mf.setdefault("sets", {})
-                mf["sets"][name] = {"enabled": True, "note": "auto_created_for_doc_import", "created_at": _safe_now_iso()}
-                _save_manifest(topic, mf)
-                target = {"name": name, "path": str(fp_new), "enabled": True}
-
-            fp = Path(str(target.get("path") or ""))
-            existing = _read_sentence_set(fp)
-            seen_claims = {str(r.get("claim") or "").strip() for r in existing if str(r.get("claim") or "").strip()}
-            now = _safe_now_iso()
-            appended = 0
-            for ln in lines:
-                if ln in seen_claims:
-                    continue
-                seen_claims.add(ln)
-                existing.append(
-                    {
-                        "id": _stable_sentence_id(topic=topic, claim=ln, source_id=str(doc_id)),
-                        "topic": topic,
-                        "claim": ln,
-                        "source_id": str(doc_id),
-                        "source_ref": {"doi": None, "title": None},
-                        "created_at": now,
-                        "updated_at": now,
-                        "author": None,
-                        "tags": [],
-                    }
-                )
-                appended += 1
-            _write_sentence_set(fp, existing)
+            imp = _append_lines_to_evidence_set(topic=topic, source_id=str(doc_id), lines=lines)
             _json_response(
                 self,
                 HTTPStatus.OK,
-                {"ok": True, "topic": topic, "doc_id": doc_id, "evidence_set": str(target.get("name")), "appended": appended},
+                {"ok": True, "topic": topic, "doc_id": doc_id, "evidence_set": imp.get("evidence_set"), "appended": int(imp.get("appended") or 0)},
             )
             return
 

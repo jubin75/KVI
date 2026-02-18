@@ -45,6 +45,7 @@ function pretty(obj) {
 let topics = [];
 let selectedTopic = "";
 let selectedDoc = null;
+let selectedDocDetails = null;
 let evidenceSets = [];
 let currentSet = null;
 
@@ -309,10 +310,10 @@ async function loadDocsList() {
     const el = $("docs_list");
     el.innerHTML = "";
     selectedDoc = null;
-    $("btn_import_doc_blocks").disabled = true;
+    selectedDocDetails = null;
+    $("btn_import_doc_details").disabled = true;
     $("docs_list_view").style.display = "block";
     $("doc_detail_view").style.display = "none";
-    const source = resp.source || "";
     for (const d of resp.items || []) {
       const card = document.createElement("div"); card.className = "card";
       const top = document.createElement("div"); top.className = "top";
@@ -327,8 +328,8 @@ async function loadDocsList() {
       fileLine.style.color = "var(--text-muted)";
       fileLine.textContent = d.pdf_name ? `file: ${d.pdf_name}` : "";
       const btns = document.createElement("div"); btns.className = "btns";
-      const open = document.createElement("button"); open.className = "primary"; open.textContent = "View Sentences";
-      open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocBlocks(d.doc_id); };
+      const open = document.createElement("button"); open.className = "primary"; open.textContent = "View Details";
+      open.onclick = async (ev) => { ev.stopPropagation(); selectedDoc = d; $("docs_list_view").style.display = "none"; $("doc_detail_view").style.display = "block"; await loadDocDetails(d.doc_id); };
       btns.appendChild(open);
       card.appendChild(top); card.appendChild(fileLine); card.appendChild(meta); card.appendChild(btns); el.appendChild(card);
     }
@@ -340,20 +341,218 @@ async function loadDocsList() {
   }
 }
 
+function renderKeyNotes(notes) {
+  const root = $("doc_key_notes");
+  root.innerHTML = "";
+  const arr = Array.isArray(notes) ? notes : [];
+  if (arr.length === 0) arr.push("");
+  for (const n of arr) {
+    const row = document.createElement("div"); row.className = "row";
+    const input = document.createElement("input"); input.placeholder = "Key note"; input.value = String(n || "");
+    input.style.flex = "1";
+    const del = document.createElement("button"); del.className = "danger"; del.textContent = "x";
+    del.onclick = () => row.remove();
+    row.appendChild(input); row.appendChild(del); root.appendChild(row);
+  }
+}
+
+function renderRelations(relations) {
+  const root = $("doc_relations");
+  root.innerHTML = "";
+  const arr = Array.isArray(relations) ? relations : [];
+  if (arr.length === 0) arr.push({ variable: "", operator: ">=", value: "" });
+  for (const r of arr) root.appendChild(createRelationRow(r));
+}
+
+const REL_OPS = [">", ">=", "<", "<=", "=", "!=", "range"];
+
+function _splitRangeValue(value) {
+  const parts = String(value || "").split(",").map(x => String(x || "").trim()).filter(Boolean);
+  return [parts[0] || "", parts[1] || ""];
+}
+
+function createRelationRow(r) {
+  const row = document.createElement("div"); row.className = "row"; row.style.alignItems = "center";
+  const variable = document.createElement("input");
+  variable.placeholder = "变量名";
+  variable.style.flex = "1";
+  variable.value = String((r && r.variable) || "");
+
+  const op = document.createElement("select");
+  for (const o of REL_OPS) {
+    const opt = document.createElement("option"); opt.value = o; opt.textContent = o;
+    if (String((r && r.operator) || "") === o) opt.selected = true;
+    op.appendChild(opt);
+  }
+
+  const valueWrap = document.createElement("div");
+  valueWrap.style.display = "flex";
+  valueWrap.style.gap = "6px";
+  valueWrap.style.flex = "1";
+  valueWrap.className = "rel-value-wrap";
+
+  const del = document.createElement("button"); del.className = "danger"; del.textContent = "x";
+  del.onclick = () => row.remove();
+
+  function renderValueInputs() {
+    valueWrap.innerHTML = "";
+    const curOp = String(op.value || "");
+    if (curOp === "range") {
+      const [mn, mx] = _splitRangeValue((r && r.value) || "");
+      const minInp = document.createElement("input");
+      minInp.placeholder = "min";
+      minInp.value = mn;
+      minInp.dataset.role = "range_min";
+      minInp.style.width = "110px";
+      const maxInp = document.createElement("input");
+      maxInp.placeholder = "max";
+      maxInp.value = mx;
+      maxInp.dataset.role = "range_max";
+      maxInp.style.width = "110px";
+      const hint = document.createElement("span");
+      hint.className = "note";
+      hint.textContent = "range";
+      valueWrap.appendChild(minInp); valueWrap.appendChild(maxInp); valueWrap.appendChild(hint);
+    } else {
+      const val = document.createElement("input");
+      val.placeholder = "数值（数字）";
+      val.value = String((r && r.value) || "");
+      val.dataset.role = "single_value";
+      val.style.flex = "1";
+      valueWrap.appendChild(val);
+    }
+  }
+
+  op.onchange = () => {
+    // reset cached r.value so UI won't carry wrong shape value
+    r.value = "";
+    renderValueInputs();
+  };
+  renderValueInputs();
+
+  row.appendChild(variable);
+  row.appendChild(op);
+  row.appendChild(valueWrap);
+  row.appendChild(del);
+  return row;
+}
+
+function _isFiniteNumberString(s) {
+  const t = String(s || "").trim();
+  if (!t) return false;
+  const n = Number(t);
+  return Number.isFinite(n);
+}
+
+function validateAndNormalizeRelations(relations) {
+  const out = [];
+  for (let i = 0; i < (relations || []).length; i++) {
+    const r = relations[i] || {};
+    const variable = String(r.variable || "").trim();
+    const operator = String(r.operator || "").trim();
+    const value = String(r.value || "").trim();
+    if (!(variable || operator || value)) continue;
+    if (!variable) throw new Error(`Relation #${i + 1}: 变量名不能为空`);
+    if (!REL_OPS.includes(operator)) throw new Error(`Relation #${i + 1}: 比较符无效（支持: ${REL_OPS.join(", ")}）`);
+    if (!value) throw new Error(`Relation #${i + 1}: 数值不能为空`);
+
+    if (operator === "range") {
+      const parts = value.split(",").map(x => String(x || "").trim()).filter(Boolean);
+      if (parts.length !== 2) throw new Error(`Relation #${i + 1}: range 格式应为 min,max`);
+      if (!_isFiniteNumberString(parts[0]) || !_isFiniteNumberString(parts[1])) {
+        throw new Error(`Relation #${i + 1}: range 的 min,max 必须是数值`);
+      }
+      const a = Number(parts[0]), b = Number(parts[1]);
+      const mn = Math.min(a, b), mx = Math.max(a, b);
+      out.push({ variable, operator, value: `${mn},${mx}` });
+      continue;
+    }
+
+    if (["<", "<=", ">", ">=", "=", "!="].includes(operator) && !_isFiniteNumberString(value)) {
+      throw new Error(`Relation #${i + 1}: ${operator} 的数值必须是数字`);
+    }
+    out.push({ variable, operator, value });
+  }
+  return out;
+}
+
+function collectDocDetailsFromForm() {
+  const abstract = ($("doc_abstract").value || "").trim();
+  const key_notes = [];
+  for (const row of ($("doc_key_notes").children || [])) {
+    const inp = row.querySelector("input");
+    const t = inp ? String(inp.value || "").trim() : "";
+    if (t) key_notes.push(t);
+  }
+  const relations = [];
+  for (const row of ($("doc_relations").children || [])) {
+    const sel = row.querySelector("select");
+    const variableInp = row.querySelector("input");
+    const variable = variableInp ? String(variableInp.value || "").trim() : "";
+    const operator = sel ? String(sel.value || "").trim() : "";
+    let value = "";
+    if (operator === "range") {
+      const minInp = row.querySelector('input[data-role="range_min"]');
+      const maxInp = row.querySelector('input[data-role="range_max"]');
+      const mn = minInp ? String(minInp.value || "").trim() : "";
+      const mx = maxInp ? String(maxInp.value || "").trim() : "";
+      value = [mn, mx].filter(Boolean).join(",");
+    } else {
+      const valInp = row.querySelector('input[data-role="single_value"]');
+      value = valInp ? String(valInp.value || "").trim() : "";
+    }
+    if (variable || operator || value) relations.push({ variable, operator, value });
+  }
+  const relationsNorm = validateAndNormalizeRelations(relations);
+  return { abstract, key_notes, relations: relationsNorm };
+}
+
+async function loadDocDetails(docId) {
+  const detailsResp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/details`);
+  const blocksResp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/blocks`);
+  const d = (detailsResp && detailsResp.details) ? detailsResp.details : {};
+  selectedDocDetails = d;
+  $("doc_abstract").value = d.abstract || "";
+  renderKeyNotes(d.key_notes || []);
+  renderRelations(d.relations || []);
+  const lines = [`doc_id=${docId}`, `blocks=${blocksResp.count}`, ""];
+  let idx = 0;
+  for (const b of blocksResp.items || []) { idx++; lines.push(`[${String(idx).padStart(3,"0")}] (${b.block_type}) ${b.claim}`); }
+  $("doc_detail_blocks").textContent = lines.join("\n");
+  $("doc_detail_status").textContent = `Loaded details source=${d.source || "manual"}  updated_at=${d.updated_at || "(n/a)"}`;
+  $("btn_import_doc_details").disabled = !(selectedDoc && selectedDoc.approved);
+}
+
+async function saveDocDetails() {
+  if (!selectedDoc) throw new Error("Select a doc.");
+  const payload = collectDocDetailsFromForm();
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/details/save`, payload);
+  selectedDocDetails = resp.details || payload;
+  $("doc_detail_status").textContent = `Saved details at ${selectedDocDetails.updated_at || "(now)"}`;
+}
+
+async function importDocDetails() {
+  if (!selectedDoc) throw new Error("Select a doc.");
+  if (!selectedDoc.approved) throw new Error("Not approved.");
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/import_details_to_evidence`, {});
+  $("doc_detail_status").textContent += `\nImported details: set=${resp.evidence_set} appended=${resp.appended} lines=${resp.num_lines}`;
+  await loadEvidenceSets();
+}
+
 async function loadDocBlocks(docId) {
   const resp = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(docId)}/blocks`);
   const lines = [`doc_id=${docId}`, `blocks=${resp.count}`, ""];
   let idx = 0;
   for (const b of resp.items || []) { idx++; lines.push(`[${String(idx).padStart(3,"0")}] (${b.block_type}) ${b.claim}`); }
-  $("doc_detail").textContent = lines.join("\n");
-  $("btn_import_doc_blocks").disabled = !(selectedDoc && selectedDoc.approved);
+  $("doc_detail_blocks").textContent = lines.join("\n");
+  $("btn_import_doc_details").disabled = !(selectedDoc && selectedDoc.approved);
 }
 
 async function importDocBlocks() {
   if (!selectedDoc) throw new Error("Select a doc.");
   if (!selectedDoc.approved) throw new Error("Not approved.");
   const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/doc/${encodeURIComponent(selectedDoc.doc_id)}/import_to_evidence`, {});
-  $("doc_detail").textContent += `\n\n---\nImported: set=${resp.evidence_set} appended=${resp.appended}`;
+  $("doc_detail_status").textContent += `\nImported blocks: set=${resp.evidence_set} appended=${resp.appended}`;
   await loadEvidenceSets();
 }
 
@@ -489,7 +688,20 @@ function wire() {
   $("btn_create_set").onclick = () => createEvidenceSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_add_sentence").onclick = () => addSentenceToSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
   // btn_load_docs_topic removed — docs auto-load on tab switch
-  $("btn_import_doc_blocks").onclick = () => importDocBlocks().catch(err => { $("doc_detail").textContent = String(err.message || err); });
+  $("btn_save_doc_details").onclick = () => saveDocDetails().catch(err => { $("doc_detail_status").textContent = String(err.message || err); });
+  $("btn_import_doc_details").onclick = () => importDocDetails().catch(err => { $("doc_detail_status").textContent = String(err.message || err); });
+  $("btn_add_key_note").onclick = () => {
+    const root = $("doc_key_notes");
+    const row = document.createElement("div"); row.className = "row";
+    const input = document.createElement("input"); input.placeholder = "Key note"; input.style.flex = "1";
+    const del = document.createElement("button"); del.className = "danger"; del.textContent = "x";
+    del.onclick = () => row.remove();
+    row.appendChild(input); row.appendChild(del); root.appendChild(row);
+  };
+  $("btn_add_relation").onclick = () => {
+    const root = $("doc_relations");
+    root.appendChild(createRelationRow({ variable: "", operator: ">=", value: "" }));
+  };
   $("btn_back_to_docs").onclick = () => { selectedDoc = null; $("docs_list_view").style.display = "block"; $("doc_detail_view").style.display = "none"; };
   $("btn_run_debug").onclick = () => runDebug().catch(err => { const el = $("out_debug_log"); if (el) el.textContent = String(err.message || err); });
 
