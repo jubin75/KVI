@@ -64,3 +64,55 @@ Build Graph 的 Step1 逻辑（`server.py` 中 `_run_build_full_pipeline_backgro
   - 设计并实现「extract 输出 (S,R,O,short_zh) + compiler 只 forward short_zh」的 B 方案，把 forward 语义对齐彻底收拢到 base_llm 一条链路里。
 
 以上内容可直接作为「Build Graph 句子来源」和「用 base LLM 做抽取与语义对齐」的设计依据与实现备忘。
+
+---
+
+## 3. 三元组质量评估示例（含 compiler 修复）
+
+### 3.1 原始 sentence 与期望
+
+- **原文**：`The molecular weight of the SFTSV Gn monomer was estimated to be approximately 48 kDa.`
+- **期望**：三元组 (SFTSV Gn monomer, has_molecular_weight, approximately 48 kDa)，编译成短句如「SFTSV Gn monomer 分子量约为 approximately 48 kDa」或中文等价表述。
+
+### 3.2 你看到的质量问题（修复前）
+
+| 现象 | 原因 |
+|------|------|
+| `SFTSV Gn monomerhas_molecular_` 粘连、截断、缺宾语 | ① `has_molecular_weight` 未在 `_PRED_VERB` 中，直接用英文谓词；② `_build_triple_sentence` 用 `subject+verb+obj` 无分隔，且按 30 字符截断，导致宾语丢失。 |
+| `immunoassaysutilizesantigens d`、`rGn-ELISAdetectsSFTSV Gn antib` | 同上：`utilizes`、`detects` 未映射为中文动词，且无分隔导致粘连，截断在词中间。 |
+| `SFTSV导致unexpected SFTSV infect` | 抽取为英文片段，且「infect」被截断；设计上希望短句尽量中文，数值/单位可保留。 |
+
+### 3.3 已做代码修改（triple_kv_compiler.py）
+
+1. **补全谓词映射与层映射**  
+   - `_PRED_VERB` 新增：`has_molecular_weight` → 「分子量约为」、`utilizes` → 「利用」、`detects` → 「检测」。  
+   - `RELATION_LAYER_MAP` 为上述关系分配 (0, 7)。
+
+2. **短句生成方式**  
+   - 由 `subject+verb+obj` 无分隔改为用空格拼接：`" ".join([subject, verb, obj])`，避免「monomerhas_molecular_weight」式粘连。  
+   - 截断由 30 字符改为 45 字符，减少在词中间截断、保留「48 kDa」等宾语。
+
+重跑 Build Graph（当前文档）后，同一句应得到类似：  
+`SFTSV Gn monomer 分子量约为 approximately 48 kDa`（或略截断在 45 字符内），质量会明显好于修复前。
+
+---
+
+## 4. 知识图谱格式是否为 (S, R, O, I)？
+
+**结论：是。** 当前抽取与建图在语义上就是 **(S, R, O, I)**，其中 **I = 句子索引（sentence_id，可追溯来源句）**；只是存储时没有四个并列字段，而是把 I 放在 `provenance` 和图索引里。
+
+### 4.1 各层存储方式
+
+| 层级 | 格式 | I 的存放位置 |
+|------|------|----------------|
+| **Triple 结构**（`src/graph/schema.py`） | subject, predicate, object, triple_id, subject_type, object_type, confidence, **provenance** | `provenance["sentence_id"]`；provenance 还可含 sentence_text、source_block_id、source_doc_id |
+| **triples.jsonl**（抽取输出） | 每行一个 Triple 的 `to_dict()` | 同左：`provenance.sentence_id` 即 I |
+| **graph_index.json**（建图结果） | nodes, triples, entity_index, **sentence_index**, **triple_sentence_index** | `triple_sentence_index[triple_id] = [sentence_id]`；`sentence_index[sentence_id]` 存该句 text、source_block_id、triple_ids |
+
+### 4.2 数据流
+
+1. **抽取**（`triple_extractor.py`）：从句子列表得到 Triple，每个 Triple 带 `provenance = {sentence_id, sentence_text, source_block_id, source_doc_id}`，即 **(S, R, O) + I（及来源信息）**。
+2. **写入 triples.jsonl**：`Triple.to_dict()` 含 subject, predicate, object, provenance，故 **I 在 provenance 里**。
+3. **建图**（`knowledge_graph.py`）：读 triples，用 `triple.provenance["sentence_id"]` 建 `triple_sentence_index` 和 `sentence_index`，检索时可从 triple_id 反查 sentence_id 和原文。
+
+因此可以确认：**抽取与知识图谱格式等价于 (S, R, O, I)**，I 用于句子级溯源与多跳检索时的证据回链。

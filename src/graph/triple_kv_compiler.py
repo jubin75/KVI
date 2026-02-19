@@ -38,6 +38,9 @@ RELATION_LAYER_MAP: Dict[str, Tuple[int, int]] = {
     "is_a":               (0, 7),
     "has_subtype":        (0, 7),
     "also_known_as":      (0, 7),
+    "has_molecular_weight": (0, 7),
+    "utilizes":           (0, 7),
+    "detects":            (0, 7),
 
     # 因果/机制 → 中层 (semantic reasoning)
     "causes":             (8, 15),
@@ -94,6 +97,9 @@ _PRED_VERB: Dict[str, str] = {
     "associated_with":  "与…相关",
     "also_known_as":    "又称",
     "distributed_in":   "分布于",
+    "has_molecular_weight": "分子量约为",
+    "utilizes":         "利用",
+    "detects":          "检测",
 }
 
 
@@ -215,13 +221,15 @@ def _build_subject_anchor_text(entity_name: str, description: str, aliases: List
 def _build_triple_sentence(subject: str, predicate: str, obj: str) -> str:
     """
     Build a short Chinese sentence from a triple.
-    Target: ≤ 15 tokens, pure Chinese.
+    Target: ≤ 15 tokens. Insert separators so subject/verb/object don't run together.
     """
     verb = _PRED_VERB.get(predicate, predicate)
-    sent = f"{subject}{verb}{obj}"
-    # Truncate if way too long
-    if len(sent) > 30:
-        sent = sent[:30]
+    # Avoid "subjectverbobject"粘连: add thin space between parts when verb is long or ASCII
+    parts = [subject.strip(), verb.strip(), obj.strip()]
+    sent = " ".join(p for p in parts if p)
+    # Truncate by char to stay within ~15 tokens (roughly 45 chars for Chinese/English mix)
+    if len(sent) > 45:
+        sent = sent[:45].rstrip()
     return sent
 
 
