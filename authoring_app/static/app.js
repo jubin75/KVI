@@ -30,10 +30,11 @@ function setTab(active) {
     { id: "tab_debug", view: "view_debug", key: "debug" },
   ];
   for (const t of tabs) {
-    $(t.id).classList.toggle("active", t.key === active);
-    $(t.view).style.display = (t.key === active) ? "block" : "none";
+    const tabEl = $(t.id);
+    const viewEl = $(t.view);
+    if (tabEl) tabEl.classList.toggle("active", t.key === active);
+    if (viewEl) viewEl.style.display = (t.key === active) ? "block" : "none";
   }
-  // Show/hide sidebar debug params
   const dp = $("sidebar_debug_params");
   if (dp) dp.style.display = (active === "debug") ? "block" : "none";
 }
@@ -736,47 +737,62 @@ async function runDebug() {
 /* ==================== Wiring ==================== */
 
 function wire() {
-  $("tab_simple").onclick = () => { setTab("simple"); loadEvidenceSets().catch(err => console.warn("tab reload evidence:", err)); };
-  $("tab_docs").onclick = () => { setTab("docs"); loadDocsList().catch(err => console.warn("tab reload docs:", err)); };
-  $("tab_debug").onclick = () => setTab("debug");
+  try {
+    const tabSimple = $("tab_simple"), tabDocs = $("tab_docs"), tabDebug = $("tab_debug");
+    if (tabSimple) tabSimple.onclick = () => { setTab("simple"); loadEvidenceSets().catch(err => console.warn("tab reload evidence:", err)); };
+    if (tabDocs) tabDocs.onclick = () => { setTab("docs"); loadDocsList().catch(err => console.warn("tab reload docs:", err)); };
+    if (tabDebug) tabDebug.onclick = () => setTab("debug");
 
-  $("topic_select").onchange = async (e) => await onTopicChange(e.target.value);
-  $("topic_select_docs").onchange = async (e) => { await onTopicChange(e.target.value); await loadDocsList(); };
-  $("topic_select_debug").onchange = async (e) => await onTopicChange(e.target.value);
+    const topicSelect = $("topic_select"), topicSelectDocs = $("topic_select_docs"), topicSelectDebug = $("topic_select_debug");
+    if (topicSelect) topicSelect.onchange = async (e) => await onTopicChange(e.target.value);
+    if (topicSelectDocs) topicSelectDocs.onchange = async (e) => { await onTopicChange(e.target.value); await loadDocsList(); };
+    if (topicSelectDebug) topicSelectDebug.onchange = async (e) => await onTopicChange(e.target.value);
 
-  $("btn_compile_graph").onclick = () => compileGraph().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_build_pipeline").onclick = () => buildPipelineFromDocs().catch(err => { const el = $("pipeline_summary"); if (el) el.textContent = String(err.message || err); });
-  $("btn_build_pipeline_current_doc").onclick = () => buildPipelineFromCurrentDoc().catch(err => { alert(String(err.message || err)); const el = $("pipeline_summary"); if (el) el.textContent = "Pipeline FAILED\n\n" + String(err.message || err); });
-  $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_delete_topic").onclick = () => deleteTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_reload_sets").onclick = () => loadEvidenceSets().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("set_select").onchange = async (e) => { await loadEvidenceSet(e.target.value).catch(err => { $("compile_log").textContent = String(err.message || err); }); };
-  $("btn_save_set").onclick = () => saveCurrentSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_create_set").onclick = () => createEvidenceSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  $("btn_add_sentence").onclick = () => addSentenceToSet().catch(err => { $("compile_log").textContent = String(err.message || err); });
-  // btn_load_docs_topic removed — docs auto-load on tab switch
-  $("btn_save_doc_details").onclick = () => saveDocDetails().catch(err => { alert(String(err.message || err)); });
-  $("btn_import_doc_details").onclick = () => importDocDetails().catch(err => { alert(String(err.message || err)); });
-  $("btn_add_key_note").onclick = () => {
-    const root = $("doc_key_notes");
-    const row = document.createElement("div"); row.className = "row";
-    const input = document.createElement("input"); input.placeholder = "Key note"; input.style.flex = "1";
-    const del = document.createElement("button"); del.className = "danger"; del.textContent = "x";
-    del.onclick = () => row.remove();
-    row.appendChild(input); row.appendChild(del); root.appendChild(row);
-  };
-  $("btn_add_relation").onclick = () => {
-    const root = $("doc_relations");
-    root.appendChild(createRelationRow({ variable: "", operator: ">=", value: "" }));
-  };
-  $("btn_back_to_docs").onclick = () => { selectedDoc = null; $("docs_list_view").style.display = "block"; $("doc_detail_view").style.display = "none"; };
-  $("btn_run_debug").onclick = () => runDebug().catch(err => { const el = $("out_debug_log"); if (el) el.textContent = String(err.message || err); });
+    const btnCompile = $("btn_compile_graph"), btnBuild = $("btn_build_pipeline");
+    if (btnCompile) btnCompile.onclick = () => compileGraph().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    if (btnBuild) btnBuild.onclick = () => buildPipelineFromDocs().catch(err => { const el = $("pipeline_summary"); if (el) el.textContent = String(err.message || err); });
+    const btnBuildCurrentDoc = $("btn_build_pipeline_current_doc");
+    if (btnBuildCurrentDoc) btnBuildCurrentDoc.onclick = () => buildPipelineFromCurrentDoc().catch(err => { alert(String(err.message || err)); const el = $("pipeline_summary"); if (el) el.textContent = "Pipeline FAILED\n\n" + String(err.message || err); });
+    const btnCreateTopic = $("btn_create_topic"), btnDeleteTopic = $("btn_delete_topic");
+    if (btnCreateTopic) btnCreateTopic.onclick = () => createTopicFromUi().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    if (btnDeleteTopic) btnDeleteTopic.onclick = () => deleteTopicFromUi().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    const btnReloadSets = $("btn_reload_sets"), setSelect = $("set_select");
+    if (btnReloadSets) btnReloadSets.onclick = () => loadEvidenceSets().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    if (setSelect) setSelect.onchange = async (e) => { await loadEvidenceSet(e.target.value).catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); }); };
+    const btnSaveSet = $("btn_save_set"), btnCreateSet = $("btn_create_set"), btnAddSentence = $("btn_add_sentence");
+    if (btnSaveSet) btnSaveSet.onclick = () => saveCurrentSet().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    if (btnCreateSet) btnCreateSet.onclick = () => createEvidenceSet().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    if (btnAddSentence) btnAddSentence.onclick = () => addSentenceToSet().catch(err => { const el = $("compile_log"); if (el) el.textContent = String(err.message || err); });
+    const btnSaveDetails = $("btn_save_doc_details"), btnImportDetails = $("btn_import_doc_details");
+    if (btnSaveDetails) btnSaveDetails.onclick = () => saveDocDetails().catch(err => { alert(String(err.message || err)); });
+    if (btnImportDetails) btnImportDetails.onclick = () => importDocDetails().catch(err => { alert(String(err.message || err)); });
+    const btnAddKeyNote = $("btn_add_key_note");
+    if (btnAddKeyNote) btnAddKeyNote.onclick = () => {
+      const root = $("doc_key_notes");
+      if (!root) return;
+      const row = document.createElement("div"); row.className = "row";
+      const input = document.createElement("input"); input.placeholder = "Key note"; input.style.flex = "1";
+      const del = document.createElement("button"); del.className = "danger"; del.textContent = "x";
+      del.onclick = () => row.remove();
+      row.appendChild(input); row.appendChild(del); root.appendChild(row);
+    };
+    const btnAddRelation = $("btn_add_relation");
+    if (btnAddRelation) btnAddRelation.onclick = () => {
+      const root = $("doc_relations");
+      if (root) root.appendChild(createRelationRow({ variable: "", operator: ">=", value: "" }));
+    };
+    const btnBackToDocs = $("btn_back_to_docs"), btnRunDebug = $("btn_run_debug");
+    if (btnBackToDocs) btnBackToDocs.onclick = () => { selectedDoc = null; $("docs_list_view").style.display = "block"; $("doc_detail_view").style.display = "none"; };
+    if (btnRunDebug) btnRunDebug.onclick = () => runDebug().catch(err => { const el = $("out_debug_log"); if (el) el.textContent = String(err.message || err); });
 
-  const slider = $("debug_topk_slider"), show = $("debug_topk_n"), topKInput = $("debug_top_k");
-  if (slider && show) {
-    const sync = () => { show.textContent = String(slider.value || "2"); if (topKInput) topKInput.value = String(slider.value || "2"); };
-    slider.addEventListener("input", sync);
-    sync();
+    const slider = $("debug_topk_slider"), show = $("debug_topk_n"), topKInput = $("debug_top_k");
+    if (slider && show) {
+      const sync = () => { show.textContent = String(slider.value || "2"); if (topKInput) topKInput.value = String(slider.value || "2"); };
+      slider.addEventListener("input", sync);
+      sync();
+    }
+  } catch (err) {
+    console.error("wire() failed:", err);
   }
 }
 
