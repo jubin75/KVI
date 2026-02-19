@@ -124,8 +124,8 @@ function toJsonl(records) {
   return (records || []).map(r => { try { return JSON.stringify(r); } catch { return ""; } }).filter(x => x).join("\n") + "\n";
 }
 
-async function buildFullPipelineImpl(outputEl) {
-  // Parse aliases from textarea (if available)
+async function buildFullPipelineImpl(outputEl, opts) {
+  opts = opts || {};
   const aliasesRaw = (($("graph_aliases") || {}).value || "").trim();
   const aliases = [];
   if (aliasesRaw) {
@@ -135,9 +135,27 @@ async function buildFullPipelineImpl(outputEl) {
       try { aliases.push(JSON.parse(s)); } catch {}
     }
   }
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline`, {
+  const body = {
     aliases: aliases.length > 0 ? aliases : undefined,
-  });
+    doc_id: opts.doc_id || undefined,
+    use_base_llm_extraction: opts.use_base_llm_extraction,
+  };
+  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline`, body);
+  if (resp.status === "started") {
+    const maxWait = 30 * 60 * 1000;
+    const interval = 2000;
+    const start = Date.now();
+    while (Date.now() - start < maxWait) {
+      const st = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline/status`);
+      if (!st.running) {
+        if (st.last_result) return st.last_result;
+        if (st.last_error) return { ok: false, message: st.last_error, pipeline_status: {}, triple_kv_items: [] };
+        return { ok: false, message: "Pipeline finished but no result", pipeline_status: {}, triple_kv_items: [] };
+      }
+      await new Promise(r => setTimeout(r, interval));
+    }
+    throw new Error("Pipeline timed out (30 min)");
+  }
   return resp;
 }
 
@@ -206,13 +224,44 @@ async function buildPipelineFromDocs() {
   const debugEl = $("pipeline_debug_log");
   const btn = $("btn_build_pipeline");
   $("pipeline_result_view").style.display = "block";
-  summaryEl.textContent = "Building full pipeline (Sentences → Triples → Graph → KV)...\nThis may take 1-2 minutes.";
+  summaryEl.textContent = "Building full pipeline (全部文档)...\nThis may take several minutes.";
   itemsEl.textContent = "Waiting...";
   if (debugEl) debugEl.textContent = "Polling backend runtime log...";
   if (btn) btn.disabled = true;
   startPipelineDebugPoll(selectedTopic);
   try {
-    const resp = await buildFullPipelineImpl(summaryEl);
+    const resp = await buildFullPipelineImpl(summaryEl, {});
+    summaryEl.textContent = formatPipelineResult(resp);
+    itemsEl.textContent = formatKvItems(resp.triple_kv_items || []);
+  } catch (err) {
+    summaryEl.textContent = "Pipeline FAILED\n\n" + String(err.message || err);
+    itemsEl.textContent = "";
+  } finally {
+    await stopPipelineDebugPoll(selectedTopic, true);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function buildPipelineFromCurrentDoc() {
+  if (!selectedDoc || !selectedDoc.doc_id) {
+    alert("请先在文档列表中打开一篇文档（View Details）");
+    return;
+  }
+  const summaryEl = $("pipeline_summary");
+  const itemsEl = $("pipeline_kv_items");
+  const debugEl = $("pipeline_debug_log");
+  const btn = $("btn_build_pipeline_current_doc");
+  $("pipeline_result_view").style.display = "block";
+  summaryEl.textContent = `Building graph for current doc only (doc_id=${selectedDoc.doc_id}), using base LLM extraction...`;
+  itemsEl.textContent = "Waiting...";
+  if (debugEl) debugEl.textContent = "Polling backend runtime log...";
+  if (btn) btn.disabled = true;
+  startPipelineDebugPoll(selectedTopic);
+  try {
+    const resp = await buildFullPipelineImpl(summaryEl, {
+      doc_id: selectedDoc.doc_id,
+      use_base_llm_extraction: true,
+    });
     summaryEl.textContent = formatPipelineResult(resp);
     itemsEl.textContent = formatKvItems(resp.triple_kv_items || []);
   } catch (err) {
@@ -697,6 +746,7 @@ function wire() {
 
   $("btn_compile_graph").onclick = () => compileGraph().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_build_pipeline").onclick = () => buildPipelineFromDocs().catch(err => { const el = $("pipeline_summary"); if (el) el.textContent = String(err.message || err); });
+  $("btn_build_pipeline_current_doc").onclick = () => buildPipelineFromCurrentDoc().catch(err => { alert(String(err.message || err)); const el = $("pipeline_summary"); if (el) el.textContent = "Pipeline FAILED\n\n" + String(err.message || err); });
   $("btn_create_topic").onclick = () => createTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_delete_topic").onclick = () => deleteTopicFromUi().catch(err => { $("compile_log").textContent = String(err.message || err); });
   $("btn_reload_sets").onclick = () => loadEvidenceSets().catch(err => { $("compile_log").textContent = String(err.message || err); });

@@ -185,14 +185,14 @@
             <div class="field" style="flex:0 0 auto;min-width:120px">
               <select id="topic_select_docs"></select>
             </div>
-            <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff;white-space:nowrap">Build Graph</button>
+            <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff;white-space:nowrap">Build Graph（全部文档）</button>
             <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:13px;color:var(--text-muted);margin-left:4px">?</span>
           </div>
           <div class="help-content">
             选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
             点击文档进入 <b>View Details</b>，编辑 Abstract / Key Notes / 三元关系。<br/>
-            点击 <b>Build Graph</b> 一键编译三元 KV：<br/>
-            Sentences → Triples → graph_index.json → triple_kvbank/
+            <b>Build Graph（全部文档）</b>：使用本 topic 下全部 document 的 blocks 建图（Sentences → Triples → graph_index.json → triple_kvbank/）。<br/>
+            <b>Build Graph（当前文档，base LLM 抽取）</b>：在 View Details 中可用，仅对当前打开的这篇文档建图，并用 base LLM 做三元抽取与 forward 语义对齐（无需 DeepSeek API）。
           </div>
         </div>
         <div class="panel" id="docs_list_view">
@@ -206,6 +206,7 @@
             <button id="btn_back_to_docs">Back</button>
             <button id="btn_save_doc_details">Save Details</button>
             <button class="ok" id="btn_import_doc_details" disabled>Import Details</button>
+            <button class="ok" id="btn_build_pipeline_current_doc" style="background:#2d7d5e;color:#fff">Build Graph（当前文档，base LLM 抽取）</button>
           </div>
           <div class="field">
             <label>Abstract</label>

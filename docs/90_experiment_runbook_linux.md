@@ -149,7 +149,7 @@ wc -l /home/jb/topics/SFTSV/work/docs.meta.jsonl
 - `blocks.evidence.jsonl`：PDF 抽取的完整 evidence（预计数百条）
 - `docs.meta.jsonl`：文档级元数据（标题、DOI、年份等）
 - UI Literature Import 页面可显示文档列表
-- Build Graph 将从完整 evidence 编译三元 KV Bank
+- **Build Graph 将从本 topic 下「全部 document」的 evidence 编译三元 KV Bank**（即整份 `blocks.evidence.jsonl` 的所有 block 都会参与抽取，不是单篇文档）。句子数量 = 该 topic 下所有 PDF 的 block 总数。详见 `docs/091_Build_Graph_Sentences_And_Extraction.md`。
 
 **其他 Topic 替换参数**：修改 `--pdf_dir` / `--out_jsonl` / `--topic_goal` 中的路径和目标描述即可。
 
