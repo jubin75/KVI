@@ -2149,31 +2149,39 @@ class KVIHandler(BaseHTTPRequestHandler):
 
         # ==================== Full Pipeline: Sentences → Triples → Graph → KV (async: POST returns 202, run in background) ====================
         if path.startswith("/api/kvi/topic/") and path.endswith("/build_full_pipeline"):
-            topic = unquote(path[len("/api/kvi/topic/") : -len("/build_full_pipeline")].strip("/"))
-            obj, body_err = _read_body_json(self)
-            if body_err:
-                _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": body_err})
+            try:
+                topic = unquote(path[len("/api/kvi/topic/") : -len("/build_full_pipeline")].strip("/"))
+                obj, body_err = _read_body_json(self)
+                if body_err:
+                    _json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": body_err})
+                    return
+                obj = obj if isinstance(obj, dict) else {}
+                topic_lock = _get_topic_pipeline_lock(topic)
+                if not topic_lock.acquire(blocking=False):
+                    _json_response(
+                        self,
+                        HTTPStatus.CONFLICT,
+                        {"ok": False, "error": "running", "message": f"build_full_pipeline already running for topic={topic}"},
+                    )
+                    return
+                _pipeline_set(topic, running=True, logs=[f"[{_safe_now_iso()}] build_full_pipeline started"], last_error=None, last_result_ok=None, last_result=None)
+                def run_bg() -> None:
+                    _run_build_full_pipeline_background(topic, obj, topic_lock)
+                t = threading.Thread(target=run_bg, daemon=True)
+                t.start()
+                _json_response(self, HTTPStatus.ACCEPTED, {
+                    "ok": True,
+                    "status": "started",
+                    "message": "Pipeline running in background. Poll GET .../build_full_pipeline/status for logs; when running=false, use last_result.",
+                })
                 return
-            obj = obj if isinstance(obj, dict) else {}
-            topic_lock = _get_topic_pipeline_lock(topic)
-            if not topic_lock.acquire(blocking=False):
-                _json_response(
-                    self,
-                    HTTPStatus.CONFLICT,
-                    {"ok": False, "error": "running", "message": f"build_full_pipeline already running for topic={topic}"},
-                )
+            except Exception as e:
+                _json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "ok": False,
+                    "error": "server_error",
+                    "message": f"build_full_pipeline failed to start: {e!s}",
+                })
                 return
-            _pipeline_set(topic, running=True, logs=[f"[{_safe_now_iso()}] build_full_pipeline started"], last_error=None, last_result_ok=None, last_result=None)
-            def run_bg() -> None:
-                _run_build_full_pipeline_background(topic, obj, topic_lock)
-            t = threading.Thread(target=run_bg, daemon=True)
-            t.start()
-            _json_response(self, HTTPStatus.ACCEPTED, {
-                "ok": True,
-                "status": "started",
-                "message": "Pipeline running in background. Poll GET .../build_full_pipeline/status for logs; when running=false, use last_result.",
-            })
-            return
 
         if path.startswith("/api/kvi/topic/") and path.endswith("/run_simple"):
             topic = unquote(path[len("/api/kvi/topic/") : -len("/run_simple")].strip("/"))

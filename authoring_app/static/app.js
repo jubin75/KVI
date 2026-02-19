@@ -141,13 +141,31 @@ async function buildFullPipelineImpl(outputEl, opts) {
     doc_id: opts.doc_id || undefined,
     use_base_llm_extraction: opts.use_base_llm_extraction,
   };
-  const resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline`, body);
+  let resp;
+  try {
+    resp = await apiPost(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline`, body);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    if (msg === "Failed to fetch" || /network|fetch|load/i.test(msg)) {
+      throw new Error("网络请求失败。请检查：1) 后端服务是否在运行 2) 地址与端口是否正确 3) 若经代理/反向代理，是否超时或断开。");
+    }
+    throw e;
+  }
   if (resp.status === "started") {
     const maxWait = 30 * 60 * 1000;
     const interval = 2000;
     const start = Date.now();
     while (Date.now() - start < maxWait) {
-      const st = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline/status`);
+      let st;
+      try {
+        st = await apiGet(`/api/kvi/topic/${encodeURIComponent(selectedTopic)}/build_full_pipeline/status`);
+      } catch (e) {
+        const msg = String(e && e.message || e);
+        if (msg === "Failed to fetch" || /network|fetch|load/i.test(msg)) {
+          throw new Error("轮询状态时网络断开。请检查服务是否仍在运行，或稍后重试。");
+        }
+        throw e;
+      }
       if (!st.running) {
         if (st.last_result) return st.last_result;
         if (st.last_error) return { ok: false, message: st.last_error, pipeline_status: {}, triple_kv_items: [] };
