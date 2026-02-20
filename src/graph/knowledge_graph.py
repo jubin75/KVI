@@ -259,6 +259,7 @@ def build_graph_from_triples_jsonl(
     aliases_path: Optional[Path] = None,
     relation_types_path: Optional[Path] = None,
     entity_types_path: Optional[Path] = None,
+    entities_from_triples_only: bool = False,
 ) -> KnowledgeGraphIndex:
     """
     Build a knowledge graph from a ``triples.jsonl`` file.
@@ -266,6 +267,12 @@ def build_graph_from_triples_jsonl(
     Optionally load:
     * ``aliases.jsonl`` — entity alias mappings
     * ``relation_types.json`` / ``entity_types.json`` — custom taxonomies
+
+    When ``entities_from_triples_only`` is True (e.g. single-doc build), only
+    entities that appear as subject or object in at least one triple are kept;
+    alias records whose canonical name is not in the triple set are skipped, so
+    they do not create new nodes (e.g. 安徽、山东 from aliases won't appear if
+    they don't appear in any triple).
     """
     rel_types = load_relation_types(relation_types_path)
     ent_types = load_entity_types(entity_types_path)
@@ -277,6 +284,9 @@ def build_graph_from_triples_jsonl(
             triple = Triple.from_jsonl_line(line)
             if triple:
                 builder.add_triple(triple)
+
+    # When entities_from_triples_only, we only apply aliases for entities already in the graph
+    entities_from_triples = set(builder._entities.keys()) if entities_from_triples_only else None
 
     # Load aliases (with optional description and entity_type)
     if aliases_path and aliases_path.exists():
@@ -290,9 +300,10 @@ def build_graph_from_triples_jsonl(
                     canon = str(rec.get("canonical") or rec.get("name") or "").strip()
                     if not canon:
                         continue
+                    if entities_from_triples is not None and canon not in entities_from_triples:
+                        continue
                     for alias in (rec.get("aliases") or []):
                         builder.add_entity_alias(canon, str(alias))
-                    # Load description and entity_type if provided
                     desc = str(rec.get("description") or "").strip()
                     etype = str(rec.get("entity_type") or "").strip()
                     if desc or etype:

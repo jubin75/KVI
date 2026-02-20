@@ -30,6 +30,7 @@ def main() -> None:
     p.add_argument("--triples_jsonl", required=True, help="Input triples JSONL file")
     p.add_argument("--out_graph", required=True, help="Output graph index JSON file")
     p.add_argument("--aliases_jsonl", default="", help="Entity aliases JSONL (canonical + aliases)")
+    p.add_argument("--entities_from_triples_only", action="store_true", help="Only keep entities that appear in triples; skip alias-only entities (for single-doc build)")
     p.add_argument("--relation_types_json", default="", help="Custom relation types JSON")
     p.add_argument("--entity_types_json", default="", help="Custom entity types JSON")
     args = p.parse_args()
@@ -51,6 +52,7 @@ def main() -> None:
         aliases_path=aliases_path,
         relation_types_path=rel_path,
         entity_types_path=ent_path,
+        entities_from_triples_only=args.entities_from_triples_only,
     )
 
     out_path = Path(args.out_graph)

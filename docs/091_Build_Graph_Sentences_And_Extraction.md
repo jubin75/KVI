@@ -116,3 +116,13 @@ Build Graph 的 Step1 逻辑（`server.py` 中 `_run_build_full_pipeline_backgro
 3. **建图**（`knowledge_graph.py`）：读 triples，用 `triple.provenance["sentence_id"]` 建 `triple_sentence_index` 和 `sentence_index`，检索时可从 triple_id 反查 sentence_id 和原文。
 
 因此可以确认：**抽取与知识图谱格式等价于 (S, R, O, I)**，I 用于句子级溯源与多跳检索时的证据回链。
+
+---
+
+## 5. 单文档建图时只保留本文出现的实体
+
+当使用 **Build Graph（当前文档）**（即带 `doc_id`）时，建图会传入 `--entities_from_triples_only`：
+
+- **行为**：只保留在**本批 triples** 中作为 subject 或 object 出现过的实体；aliases 里若某条记录的 `canonical` 不在这些实体中，整条记录会被跳过，**不会**为该 canonical 创建新节点。
+- **效果**：例如 aliases 里配置了 安徽、山东、河南、湖北，但当前文档的 5 条 triples 里没有出现这些省份，则图中不会再有这 4 个节点，KV 列表里也不会出现这些 anchor。
+- **实现**：`build_knowledge_graph.py` 支持 `--entities_from_triples_only`；`build_graph_from_triples_jsonl(..., entities_from_triples_only=True)` 时，加载 aliases 只处理 `canonical in builder._entities` 的记录。

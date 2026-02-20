@@ -767,7 +767,7 @@ def _run_subprocess_with_log_stream(
             if now - last_heartbeat >= heartbeat_interval_s:
                 last_heartbeat = now
                 elapsed_min = int((now - start) / 60)
-                _pipeline_log(topic, f"[{log_prefix}] DeepSeek extraction in progress... ({elapsed_min} min)")
+                _pipeline_log(topic, f"[{log_prefix}] Triple extraction in progress... ({elapsed_min} min)")
             if (now - start) > timeout_s:
                 proc.kill()
                 proc.wait()
@@ -973,6 +973,8 @@ def _run_build_full_pipeline_background(topic: str, obj: Dict[str, Any], topic_l
     ]
     if aliases_jsonl.exists():
         cmd_build.extend(["--aliases_jsonl", str(aliases_jsonl)])
+    if filter_doc_id:
+        cmd_build.append("--entities_from_triples_only")
     r_build = subprocess.run(cmd_build, cwd=str(PROJECT_ROOT), capture_output=True, text=True, check=False, timeout=120)
     if r_build.returncode != 0:
         _pipeline_log(topic, f"[step5] graph build failed rc={r_build.returncode}")
