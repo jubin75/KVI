@@ -119,9 +119,20 @@ Build Graph 的 Step1 逻辑（`server.py` 中 `_run_build_full_pipeline_backgro
 
 ---
 
-## 5. 单文档建图时只保留本文出现的实体
+## 5. 单文档建图：句子来源与实体过滤
 
-当使用 **Build Graph（当前文档）**（即带 `doc_id`）时，建图会传入 `--entities_from_triples_only`：
+### 5.1 当前文档的句子来源（含 Abstract 与 Key Notes）
+
+当使用 **Build Graph（当前文档）**（即带 `doc_id`）时，Step1 的句子列表由两部分组成：
+
+1. **blocks**：从 `blocks.evidence.jsonl`（或 enriched/jsonl）中按 `doc_id` 过滤得到的 block 文本。
+2. **View Details 内容**：从该 topic 的 `docs.details.json` 中读取该 doc 的 **Abstract** 和 **Key Notes**，各作为一条/多条 sentence 追加进列表（Abstract 一条，每条 Key Note 一条），再一起参与后续 tagging 与三元组抽取。
+
+因此「当前文档」建图时，三元组会来自：PDF 抽取得到的 blocks **以及** 你在 View Details 里保存的摘要与要点；若只看到 5 条 triple 而 Abstract 很长，多半是之前未把 Abstract 纳入句子来源——现已修复为会纳入。
+
+### 5.2 只保留本文出现的实体（entities_from_triples_only）
+
+当使用 **Build Graph（当前文档）** 时，建图会传入 `--entities_from_triples_only`：
 
 - **行为**：只保留在**本批 triples** 中作为 subject 或 object 出现过的实体；aliases 里若某条记录的 `canonical` 不在这些实体中，整条记录会被跳过，**不会**为该 canonical 创建新节点。
 - **效果**：例如 aliases 里配置了 安徽、山东、河南、湖北，但当前文档的 5 条 triples 里没有出现这些省份，则图中不会再有这 4 个节点，KV 列表里也不会出现这些 anchor。

@@ -851,6 +851,37 @@ def _run_build_full_pipeline_background(topic: str, obj: Dict[str, Any], topic_l
     if not recs and not filter_doc_id:
         recs, _ = _collect_enabled_sentence_records(topic, enabled_only=True)
         sentence_source = f"evidence_sets ({len(recs)} records)"
+    # When building for a single doc, append Abstract and Key Notes from docs.details.json so they are included in triple extraction
+    if filter_doc_id and recs:
+        details_map = _load_doc_details(out_dir)
+        doc_details = (details_map.get(filter_doc_id) or {}) if isinstance(details_map, dict) else {}
+        abstract = str(doc_details.get("abstract") or "").strip()
+        key_notes = doc_details.get("key_notes")
+        if isinstance(key_notes, list):
+            for i, note in enumerate(key_notes):
+                note = str(note or "").strip()
+                if note:
+                    recs.append({
+                        "id": f"{filter_doc_id}::key_note_{i}",
+                        "claim": note,
+                        "source_id": filter_doc_id,
+                        "source_ref": {"doi": None, "title": None},
+                        "author": None,
+                        "tags": [],
+                    })
+        if abstract:
+            recs.insert(0, {
+                "id": f"{filter_doc_id}::abstract",
+                "claim": abstract,
+                "source_id": filter_doc_id,
+                "source_ref": {"doi": None, "title": None},
+                "author": None,
+                "tags": [],
+            })
+        n_notes = len([n for n in (key_notes or []) if str(n or "").strip()])
+        if abstract or n_notes:
+            sentence_source = sentence_source + f" + Abstract & {n_notes} key_notes (docs.details)"
+            _pipeline_log(topic, f"[step1] added Abstract + {n_notes} key_notes from docs.details.json")
     if not recs:
         msg = f"No evidence for doc_id={filter_doc_id}" if filter_doc_id else f"No evidence in work_dir={out_dir}"
         _finish(False, "no_evidence", {"ok": False, "error": "bad_request", "message": msg})
