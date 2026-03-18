@@ -117,6 +117,65 @@ Build Graph 的 Step1 逻辑（`server.py` 中 `_run_build_full_pipeline_backgro
 
 因此可以确认：**抽取与知识图谱格式等价于 (S, R, O, I)**，I 用于句子级溯源与多跳检索时的证据回链。
 
+### 4.3 存的是三元组还是四元组？JSON 长什么样
+
+**结论：存的是「一条三元组 + provenance」；概念上等价于四元组 (S, R, O, I)，但 JSON 里没有四个并列顶级字段，I 在 `provenance` 里。**
+
+- **triples.jsonl**：每行一个 JSON 对象，即一个 Triple 的序列化。**顶层是** `subject`、`predicate`、`object`（三元组）和 `provenance`（其中 **`sentence_id` 就是 I**），不是 S、R、O、I 四个平级键。
+
+**示例（triples.jsonl 的一行）：**
+
+```json
+{
+  "triple_id": "sftsv__causes__发热",
+  "subject": "SFTSV",
+  "subject_type": "pathogen",
+  "predicate": "causes",
+  "object": "发热",
+  "object_type": "symptom",
+  "confidence": 0.9,
+  "provenance": {
+    "sentence_id": "doc_001#block_3",
+    "sentence_text": "Patients with SFTSV infection typically present with acute fever, fatigue, and anorexia.",
+    "source_block_id": "block_3",
+    "source_doc_id": "doc_001"
+  }
+}
+```
+
+这里 **I = `provenance.sentence_id`**（如 `"doc_001#block_3"`），和 (S, R, O) 存在同一条 JSON 里，所以是「一条记录同时带三元组和 I」，而不是单独再存一个“第四元”字段。
+
+- **graph_index.json** 里用 I 建了两张索引，方便**由三元组反查证据句**：
+  - **triple_sentence_index**：`triple_id → [sentence_id]`（即 triple → I）
+  - **sentence_index**：`sentence_id → { text, source_block_id, source_doc_id, triple_ids }`（即 I → 证据句原文及所属 triple）
+
+**示例（graph_index.json 的片段）：**
+
+```json
+{
+  "triple_sentence_index": {
+    "sftsv__causes__发热": ["doc_001#block_3"]
+  },
+  "sentence_index": {
+    "doc_001#block_3": {
+      "text": "Patients with SFTSV infection typically present with acute fever, fatigue, and anorexia.",
+      "source_block_id": "block_3",
+      "source_doc_id": "doc_001",
+      "triple_ids": ["sftsv__causes__发热"]
+    }
+  }
+}
+```
+
+### 4.4 运行时「三元组 → 证据句」是怎么用的
+
+检索时拿到的是**三元组**（例如图谱遍历得到某条 triple）。要展示或注入**原文证据**时：
+
+1. 从该 triple 的 **provenance.sentence_id** 得到 **I**；
+2. 用 I 去 **sentence_index** 里查：`sentence_index[I]["text"]` 就是这条三元组对应的证据句原文。
+
+也就是说：**存的是「三元组 + provenance」；I 在 provenance 里；运行时用 I 查 sentence_index 得到证据句**，从而把「结构化 triple」和「原文证据」绑在一起。没有单独存一份“四元组”表，绑定关系通过 provenance 和 sentence_index 完成。
+
 ---
 
 ## 5. 单文档建图：句子来源与实体过滤
