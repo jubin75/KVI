@@ -42,6 +42,20 @@ prompt window.
 
 ### 1.4 Open Direction — KV as Reasoning-Chain / Memory Trace (Not Only Attention Bias)
 
+2. 「KV 不应只当成改 Attention，而应像推理链里的思考节点 / 记忆轨迹」——方向是否合理？
+合理，而且和「长 NL context、多轮、长时间」场景高度相关。
+
+当前常见做法是：把 KV 当成 前缀里的静态偏置，主要作用是 改变后续 token 的注意力与表征；它不显式承担「这一步我确认了啥、下一步要查啥」的可解释中间状态。在长文或多轮里，模型容易 遗忘、漂移或过度依赖某一段；若再叠一层 可能错的 triple-KV，问题会被放大。
+
+你提议的形态更接近：
+
+Memory / scratchpad 节点：用 NL（或结构化+NL 释义） 写出「已锁定实体 / 已排除假设 / 待验证子问题」，而不是仅压缩成与 triple 一一对应的张量块。
+推理链上的节点：KV 不是「多灌一点先验」，而是 显式的一步中间结论，可串联成 轨迹（例如：锚定 query 药 → 列出候选相互作用 → 与证据句对齐 → 输出单一 DB ID）。
+生命周期：
+在 KV cache 里：适合 本会话内 的多步推理（类似把「工作记忆」写进可复用的前缀状态）；
+在磁盘 / 外部 store：适合 跨会话、跨文档 的「长期记忆」，下次 load 再作为 条件 或 RAG 检索目标，而不是无条件当注意力偏置。
+这和「单纯影响 Attention 的 KV 注入」的差别在于：后者缺少「节点语义 + 在链中的位置 + 是否仍有效」的显式管理；前者把 KV 当成 可被覆盖、可被否定、可被引用的记忆单元，更接近人做长推理时的 便签与提纲。
+
 **Empirical context (MedHopQA-ID *n=40* vs. *official* NL split, Exp01):** GraphRAG largely remains **evidence-in-prompt**: retrieved sentences (plus graph anchors) are exposed as natural language in the prompt. KVI **adds** a second channel: **triple → compiled KV prefix** on top of the same visible evidence. Under **NL queries + a large graph** (see gloss below), triple selection (DRM, relation gating, KV budget) is more brittle than text retrieval alignment: a **wrong triple** becomes a **high-salience wrong prior** in attention, and can **conflict** with correct sentences already in the prompt — yielding **smaller EM drop for GraphRAG than for KVI** on that split.
 
 **Design hypothesis for future implementation (no code commitment here):** For settings with **long NL context** and **multi-turn or long-horizon** use, KV should not be conceptualised solely as **static prefix that reshapes attention**. It may need to behave as **explicit intermediate states** on a **reasoning chain** or **memory trace**:
