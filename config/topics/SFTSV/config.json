@@ -75,7 +75,7 @@
 
   "build": {
     "work_dir": "/home/jb/topics/SFTSV/work",
-    "base_llm": "Qwen/Qwen2.5-7B-Instruct",
+    "base_llm": "/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct",
     "retrieval_encoder_model": "sentence-transformers/all-MiniLM-L6-v2",
     "layers": [0, 1, 2, 3],
 

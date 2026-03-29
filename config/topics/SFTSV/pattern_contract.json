@@ -1,0 +1,162 @@
+{
+  "topic": "SFTSV",
+  "generated_at": "2026-03-21T08:24:07Z",
+  "source": "/home/zd/dev/KVI/config/topics/SFTSV/blocks.enriched.jsonl",
+  "patterns": [
+    {
+      "pattern_id": "abbr:SFTSV",
+      "question_skeleton": {
+        "intent": "ask_definition",
+        "surface_forms": [
+          "X \u662f\u4ec0\u4e48",
+          "X \u7684\u5168\u79f0\u662f\u4ec0\u4e48",
+          "What is X",
+          "What does X stand for"
+        ]
+      },
+      "slots": {
+        "abbr": {
+          "type": "string",
+          "required": true,
+          "evidence_type": [
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "hard"
+        },
+        "full_name": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "definition",
+            "abbreviation"
+          ],
+          "min_evidence": 1,
+          "inference_level": "soft"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    },
+    {
+      "pattern_id": "schema:transmission",
+      "question_skeleton": {
+        "intent": "ask_schema_list",
+        "surface_forms": [
+          "X \u7684transmission\u662f\u4ec0\u4e48",
+          "X \u6709\u54ea\u4e9btransmission"
+        ]
+      },
+      "slots": {
+        "transmission": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    },
+    {
+      "pattern_id": "schema:diagnosis",
+      "question_skeleton": {
+        "intent": "ask_schema_list",
+        "surface_forms": [
+          "X \u7684diagnosis\u662f\u4ec0\u4e48",
+          "X \u6709\u54ea\u4e9bdiagnosis"
+        ]
+      },
+      "slots": {
+        "diagnosis": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    },
+    {
+      "pattern_id": "schema:epidemiology",
+      "question_skeleton": {
+        "intent": "ask_schema_list",
+        "surface_forms": [
+          "X \u7684epidemiology\u662f\u4ec0\u4e48",
+          "X \u6709\u54ea\u4e9bepidemiology"
+        ]
+      },
+      "slots": {
+        "epidemiology": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    },
+    {
+      "pattern_id": "schema:clinical_features",
+      "question_skeleton": {
+        "intent": "ask_schema_list",
+        "surface_forms": [
+          "X \u7684clinical_features\u662f\u4ec0\u4e48",
+          "X \u6709\u54ea\u4e9bclinical_features"
+        ]
+      },
+      "slots": {
+        "clinical_features": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    },
+    {
+      "pattern_id": "schema:geographic_distribution",
+      "question_skeleton": {
+        "intent": "ask_schema_list",
+        "surface_forms": [
+          "X \u7684geographic_distribution\u662f\u4ec0\u4e48",
+          "X \u6709\u54ea\u4e9bgeographic_distribution"
+        ]
+      },
+      "slots": {
+        "geographic_distribution": {
+          "type": "string",
+          "required": false,
+          "evidence_type": [
+            "schema"
+          ],
+          "min_evidence": 1,
+          "inference_level": "schema"
+        }
+      },
+      "answer_style": "factual",
+      "count": 1
+    }
+  ],
+  "stats": {
+    "total_blocks": 1,
+    "unique_abbr": 1,
+    "unique_slots": 5
+  }
+}

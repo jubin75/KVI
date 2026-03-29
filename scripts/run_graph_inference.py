@@ -86,7 +86,13 @@ def _classify_intent(query: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _tokenize_chinese(text: str) -> set[str]:
-    """Bigram + word tokenization for Chinese + English."""
+    """
+    Bigram + word tokenization for Chinese + English.
+
+    NOTE: For ID-style QA (e.g. MedHop DrugBank IDs like DB04844),
+    we must treat alphanumeric IDs as tokens; otherwise DRM/text_search/grounding
+    will see near-zero overlap and systematically drop correct answers.
+    """
     tokens: set[str] = set()
     # Chinese bigrams
     chars = re.findall(r"[\u4e00-\u9fff]", text)
@@ -94,6 +100,16 @@ def _tokenize_chinese(text: str) -> set[str]:
         tokens.add(chars[i] + chars[i + 1])
     # English words
     for w in re.findall(r"[a-zA-Z]{2,}", text.lower()):
+        tokens.add(w)
+    # Alphanumeric IDs with digits (keep short-ish to avoid flooding)
+    # Examples: db04844, p13569, q9h3n8
+    for w in re.findall(r"\b[a-zA-Z]{1,6}\d{2,8}\b", text.lower()):
+        tokens.add(w)
+    # DrugBank IDs (explicit)
+    for w in re.findall(r"\bdb\d+\b", text.lower()):
+        tokens.add(w)
+    # Pure numbers (years, counts) — helps numeric-only answers in Hotpot/NQ.
+    for w in re.findall(r"\b\d{2,8}\b", text):
         tokens.add(w)
     return tokens
 
@@ -307,6 +323,19 @@ def main() -> None:
     p.add_argument("--max_hops", type=int, default=2)
     p.add_argument("--device", default="auto")
     p.add_argument("--dtype", default="float16")
+    # Open-domain QA (Hotpot/NQ): avoid medical-domain Chinese prompts that hurt English QA + KVI.
+    p.add_argument(
+        "--openqa_mode",
+        action="store_true",
+        help="Use English open-QA system/instructions (Hotpot/NQ). Default is legacy medical Chinese prompts.",
+    )
+    # When KVI injects KV, optionally drop long evidence from the *prompt* to test dual-channel (KV structure vs prompt text).
+    p.add_argument(
+        "--kvi_minimal_prompt",
+        action="store_true",
+        help="If --enable_kvi and KV assembled: user prompt = question + short instruction only (no evidence block). "
+        "Tests whether prompt evidence + KV duplicates or KV deflects attention.",
+    )
     args = p.parse_args()
 
     # ---- 1. Load graph ----
@@ -480,6 +509,7 @@ def main() -> None:
         model_kwargs["local_files_only"] = True
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, **tok_kwargs)
+    model_kwargs.setdefault("attn_implementation", "eager")
     model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
     model.to(device).eval()
     print("[graphC] Model loaded", file=sys.stderr)
@@ -601,20 +631,54 @@ def main() -> None:
     ranked_evidence_texts = [et for et, _s in evidence_with_scores]
     evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
 
-    prompt_parts: list[str] = []
-    if entity_context:
-        prompt_parts.append(entity_context)
-    prompt_parts.append(f"### 参考证据\n{evidence_block}")
-    prompt_parts.append(f"### 问题\n{args.prompt}")
-    # Relaxed instruction: evidence + entity context as primary, allow model
-    # to supplement with background medical knowledge when evidence is sparse.
-    prompt_parts.append(
-        "### 要求\n"
-        "请根据上述实体背景和参考证据回答问题。"
-        "以参考证据为主，必要时可结合医学常识补充。"
-        "使用中文简洁作答。"
+    use_openqa = bool(getattr(args, "openqa_mode", False))
+    use_kvi_minimal = (
+        bool(getattr(args, "kvi_minimal_prompt", False))
+        and bool(args.enable_kvi)
+        and assembled_kv is not None
     )
-    full_prompt = "\n\n".join(prompt_parts)
+
+    if use_openqa:
+        prompt_parts: list[str] = []
+        if entity_context and not use_kvi_minimal:
+            prompt_parts.append(f"Entity context:\n{entity_context}")
+        if not use_kvi_minimal:
+            prompt_parts.append(f"Evidence:\n{evidence_block}")
+        prompt_parts.append(f"Question: {args.prompt}")
+        prompt_parts.append(
+            "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase)."
+        )
+        full_prompt = "\n\n".join(prompt_parts)
+        system_msg = (
+            "You are a careful assistant for open-domain question answering. "
+            "Ground answers in the provided evidence when it is present."
+        )
+    elif use_kvi_minimal:
+        prompt_parts = []
+        if entity_context:
+            prompt_parts.append(entity_context)
+        prompt_parts.append(f"### 问题\n{args.prompt}")
+        prompt_parts.append(
+            "### 要求\n"
+            "已注入结构化知识（KV）。请直接作答，避免冗长推理。"
+            "使用中文简洁作答。"
+        )
+        full_prompt = "\n\n".join(prompt_parts)
+        system_msg = "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
+    else:
+        prompt_parts = []
+        if entity_context:
+            prompt_parts.append(entity_context)
+        prompt_parts.append(f"### 参考证据\n{evidence_block}")
+        prompt_parts.append(f"### 问题\n{args.prompt}")
+        prompt_parts.append(
+            "### 要求\n"
+            "请根据上述实体背景和参考证据回答问题。"
+            "以参考证据为主，必要时可结合医学常识补充。"
+            "使用中文简洁作答。"
+        )
+        full_prompt = "\n\n".join(prompt_parts)
+        system_msg = "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
 
     # ---- 8. Generate (graph + evidence + KV injection) ----
     def _build_input(messages: list[dict]) -> str:
@@ -628,7 +692,7 @@ def main() -> None:
         return messages[-1]["content"]
 
     main_messages = [
-        {"role": "system", "content": "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"},
+        {"role": "system", "content": system_msg},
         {"role": "user", "content": full_prompt},
     ]
     text_input = _build_input(main_messages)
@@ -641,9 +705,36 @@ def main() -> None:
         "repetition_penalty": 1.15,
     }
 
-    # Inject triple KV as past_key_values if available
+    # Inject triple KV as past_key_values if available.
+    # Transformers 5.x requires Cache object (legacy tuple is rejected).
     if assembled_kv is not None:
-        generate_kwargs["past_key_values"] = assembled_kv
+        pkv_for_generate = assembled_kv
+        try:
+            from transformers.cache_utils import DynamicCache  # type: ignore
+
+            if not isinstance(pkv_for_generate, DynamicCache):
+                # Manual legacy(tuple) -> DynamicCache conversion.
+                if isinstance(pkv_for_generate, (tuple, list)):
+                    legacy_layers = list(pkv_for_generate)
+                    sample_pair = None
+                    for lp in legacy_layers:
+                        if isinstance(lp, (tuple, list)) and len(lp) >= 2 and lp[0] is not None and lp[1] is not None:
+                            sample_pair = (lp[0], lp[1])
+                            break
+                    if sample_pair is not None:
+                        sk, sv = sample_pair
+                        dc = DynamicCache(config=model.config)
+                        for li, lp in enumerate(legacy_layers):
+                            if isinstance(lp, (tuple, list)) and len(lp) >= 2 and lp[0] is not None and lp[1] is not None:
+                                lk, lv = lp[0], lp[1]
+                            else:
+                                lk = torch.zeros_like(sk)
+                                lv = torch.zeros_like(sv)
+                            dc.update(lk, lv, li)
+                        pkv_for_generate = dc
+        except Exception:
+            pass
+        generate_kwargs["past_key_values"] = pkv_for_generate
         print("[graphC] Generating with triple KV injection", file=sys.stderr)
     else:
         print("[graphC] Generating without KV injection", file=sys.stderr)
@@ -655,8 +746,13 @@ def main() -> None:
     print(f"[graphC] Generated answer ({len(answer)} chars)", file=sys.stderr)
 
     # ---- 9. Generate baseline (no evidence, no KV) ----
+    base_system = (
+        "You are a helpful assistant."
+        if use_openqa
+        else "你是一个医学专业助手。"
+    )
     base_messages = [
-        {"role": "system", "content": "你是一个医学专业助手。"},
+        {"role": "system", "content": base_system},
         {"role": "user", "content": args.prompt},
     ]
     base_input = _build_input(base_messages)
@@ -718,6 +814,12 @@ def main() -> None:
         "grounding_report": grounding,
         "kv_injection_debug": kv_injection_debug,
         "verbatim_evidence": verbatim_evidence,
+        "openqa_mode": bool(getattr(args, "openqa_mode", False)),
+        "kvi_minimal_prompt": bool(
+            getattr(args, "kvi_minimal_prompt", False)
+            and bool(args.enable_kvi)
+            and assembled_kv is not None
+        ),
     }
     print(json.dumps(result_json, ensure_ascii=False))
 

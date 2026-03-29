@@ -74,10 +74,15 @@ def build_past_key_values_prefix(
     sample = next(iter(ext_kv_by_layer.values()), None)
     if sample is None:
         raise ValueError("ext_kv_by_layer is empty")
-    # Prefer representing "no cache for this layer" as None (NOT zero-length tensors).
-    # Some HF cache implementations / model forwards behave poorly when given empty tensors
-    # for non-injected layers (can lead to inconsistent past-length bookkeeping).
-    pkv: List[Optional[Tuple[torch.Tensor, torch.Tensor]]] = [None for _ in range(num_layers)]
+    # Keep cache length consistent across layers for Transformers 5.x/Qwen2 masking:
+    # mask creation may use a single layer's kv_length globally. If non-injected layers
+    # have shorter cache than injected layers, attention_mask and key length can mismatch.
+    # Therefore we fill missing layers with zero-prefix K/V of the same ext_len.
+    sample_k = sample.K
+    sample_v = sample.V
+    zero_k = torch.zeros_like(sample_k)
+    zero_v = torch.zeros_like(sample_v)
+    pkv: List[Optional[Tuple[torch.Tensor, torch.Tensor]]] = [(zero_k, zero_v) for _ in range(num_layers)]
     for layer_idx, ext in ext_kv_by_layer.items():
         pkv[int(layer_idx)] = (ext.K, ext.V)
     legacy = tuple(pkv)

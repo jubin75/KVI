@@ -1,0 +1,80 @@
+{
+  "传播": [
+    "transmission"
+  ],
+  "途径": [
+    "transmission"
+  ],
+  "transmission": [
+    "transmission"
+  ],
+  "vector": [
+    "transmission"
+  ],
+  "蜱": [
+    "transmission"
+  ],
+  "tick": [
+    "transmission"
+  ],
+  "症状": [
+    "clinical_features"
+  ],
+  "表现": [
+    "clinical_features"
+  ],
+  "clinical": [
+    "clinical_features"
+  ],
+  "diagnosis": [
+    "diagnosis"
+  ],
+  "诊断": [
+    "diagnosis"
+  ],
+  "检测": [
+    "diagnosis"
+  ],
+  "treatment": [
+    "treatment"
+  ],
+  "治疗": [
+    "treatment"
+  ],
+  "drug": [
+    "treatment"
+  ],
+  "药物": [
+    "treatment"
+  ],
+  "prevention": [
+    "prevention"
+  ],
+  "预防": [
+    "prevention"
+  ],
+  "vaccine": [
+    "prevention"
+  ],
+  "疫苗": [
+    "prevention"
+  ],
+  "pathogenesis": [
+    "pathogenesis"
+  ],
+  "mechanism": [
+    "mechanism"
+  ],
+  "发病机制": [
+    "pathogenesis"
+  ],
+  "致病": [
+    "pathogenesis"
+  ],
+  "流行病学": [
+    "epidemiology"
+  ],
+  "epidemiology": [
+    "epidemiology"
+  ]
+}

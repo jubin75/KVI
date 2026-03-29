@@ -24,6 +24,33 @@ from ..encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderC
 from ..vector_store.faiss_kv_bank import FaissKVBank
 
 
+def _layer_kv_from_past_key_values(pkv: Any, layer_idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Extract (K, V) for one layer from `past_key_values`.
+
+    Newer transformers return a `DynamicCache` (or `Cache`) that is not subscriptable like a tuple;
+    older code used `tuple[tuple[K,V], ...]` indexed by layer.
+    """
+    if pkv is None:
+        raise RuntimeError("past_key_values is None")
+    # Legacy: tuple of (K, V) per layer
+    try:
+        pair = pkv[layer_idx]
+        if isinstance(pair, (tuple, list)) and len(pair) >= 2:
+            return pair[0], pair[1]
+    except (TypeError, IndexError, KeyError):
+        pass
+    # Cache / DynamicCache: per-layer tensors on .layers[layer_idx]
+    layers = getattr(pkv, "layers", None)
+    if isinstance(layers, list) and layer_idx < len(layers):
+        layer = layers[layer_idx]
+        k = getattr(layer, "keys", None)
+        v = getattr(layer, "values", None)
+        if k is not None and v is not None:
+            return k, v
+    raise RuntimeError(f"Cannot read K/V for layer {layer_idx} from past_key_values type {type(pkv)}")
+
+
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -267,14 +294,14 @@ def build_kvbank_from_blocks_jsonl(
                 raise RuntimeError("past_key_values missing")
 
             # build per-layer padded K/V to block_tokens
-            K0, _ = pkv[layer_ids[0]]
+            K0, _ = _layer_kv_from_past_key_values(pkv, layer_ids[0])
             kv_heads = int(K0.shape[1])
             head_dim = int(K0.shape[-1])
 
             per_layer_k: List[np.ndarray] = []
             per_layer_v: List[np.ndarray] = []
             for li in layer_ids:
-                K, V = pkv[li]  # [1, kv_heads, T, head_dim]
+                K, V = _layer_kv_from_past_key_values(pkv, li)  # [1, kv_heads, T, head_dim]
                 K = K[0, :, :kv_len, :]
                 V = V[0, :, :kv_len, :]
                 K_pad = torch.zeros((kv_heads, block_tokens, head_dim), device="cpu", dtype=torch.float32)

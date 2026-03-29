@@ -1,5 +1,50 @@
 jubin
 jubin.pub
 
+# Large model weights (use HF mirror or local snapshot_download)
+models/
+
 # Topic runtime artifacts (if present under repo topics)
 config/topics/**/evidence_sets/
+
+# --- Virtual environments (do not commit) ---
+KVI/
+.venv/
+venv/
+env/
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Editor / local ---
+.vscode/
+.idea/
+_toy/
+
+# --- Topic pipeline: generated corpora / KV blocks (not source) ---
+config/topics/SFTSV/*.jsonl
+config/topics/SFTSV/blocks*.jsonl
+config/topics/SFTSV/evidence.txt
+config/topics/SFTSV/kvbank_blocks/
+config/topics/SFTSV/alias_map.debug.json
+
+# --- Exp01: datasets, graph/KV tree (often a symlink to cold storage; never commit) ---
+experiments/exp01_main_qa/artifacts
+experiments/exp01_main_qa/data/
+
+# Symlinked or local-heavy run tree (jsonl/csv/logs/json predictions). Paper *.md 副本见 experiments/exp01_main_qa/reports/
+experiments/exp01_main_qa/results
+
+# --- Other experiments: local data + numeric artifacts (keep README/code/*.md) ---
+experiments/exp03_retrieval_quality/data/
+experiments/exp03_retrieval_quality/results/*.json
+experiments/exp06_ablation/**/data/
+experiments/exp06_ablation/results/**/*.json
+experiments/exp06_ablation/results/**/*.jsonl
+experiments/exp06_ablation/results/**/*.csv
+experiments/logs/

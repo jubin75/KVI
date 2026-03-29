@@ -989,10 +989,20 @@ class MultiStepInjector:
         prefix_len = _cache_seq_len(past_key_values)
         if prefix_len < 0:
             prefix_len = 0
-        # IMPORTANT: attention_mask length must account for prefix cache length, otherwise HF models
-        # may compute wrong position_ids/cache_position and produce degenerate outputs.
-        prefix_mask = torch.ones((prompt_mask.shape[0], prefix_len), dtype=prompt_mask.dtype, device=device)
-        attention_mask = torch.cat([prefix_mask, prompt_mask], dim=1)
+        # Transformers 5.x + `Cache` / Qwen2: when `past_key_values` is a HF Cache object, the 2D
+        # `attention_mask` must match *only* the current `input_ids` length (prefix is already in the cache).
+        # Concatenating prefix_mask||prompt_mask breaks `create_causal_mask` (e.g. 155 vs 269 on last dim).
+        try:
+            from transformers.cache_utils import Cache as _HFCache  # type: ignore
+        except Exception:  # pragma: no cover
+            _HFCache = ()  # type: ignore
+
+        if past_key_values is not None and isinstance(past_key_values, _HFCache):
+            attention_mask = prompt_mask
+        else:
+            # Legacy tuple past_key_values: keep full-length mask (prefix + prompt).
+            prefix_mask = torch.ones((prompt_mask.shape[0], prefix_len), dtype=prompt_mask.dtype, device=device)
+            attention_mask = torch.cat([prefix_mask, prompt_mask], dim=1)
 
         eos_id = getattr(tokenizer, "eos_token_id", None)
 

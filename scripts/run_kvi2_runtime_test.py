@@ -1511,6 +1511,8 @@ def main() -> None:
             torch_dtype=torch_dtype,
             trust_remote_code=True,
             local_files_only=bool(args.local_files_only),
+            # SDPA + injected past_key_values can hit shape mismatches on recent transformers; eager is stable for KVI injection.
+            attn_implementation="eager",
         )
         model.to(device).eval()
 
@@ -1889,7 +1891,8 @@ def main() -> None:
         )
 
         # We want a prose answer (no bullets) in this debug mode.
-        # Iron law: do NOT append any evidence text into prompt; rely on KV injection only.
+        # Primary path uses KV injection. If injected output is low-quality (e.g. gibberish),
+        # we enable a dual-channel rescue pass (Prompt evidence channel) for stability.
         prose_guard = (
             "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
             "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
@@ -1907,6 +1910,14 @@ def main() -> None:
         # UI hard-cap: at most 4 sentences per step.
         max_blocks = max(1, min(4, int(max_blocks)))
         top_k = int(args.top_k)
+        # Fallback text lookup for simple mode when sentences_jsonl is not provided.
+        block_text_lookup_simple: Dict[str, str] = {}
+        try:
+            if str(args.blocks_jsonl or "").strip():
+                block_text_lookup_simple = _load_block_text_lookup(str(args.blocks_jsonl))
+        except Exception:
+            block_text_lookup_simple = {}
+
         def _run_once(*, prompt_for_user: str, extra_guard: str) -> Tuple[str, List[Dict[str, Any]]]:
             used: set[str] = set()
             generated = ""
@@ -2089,13 +2100,40 @@ def main() -> None:
             return generated.strip(), step_debug
 
         def _gather_ev_texts(all_steps: List[Dict[str, Any]]) -> List[str]:
-            if not sentence_text_lookup:
-                return []
             evs: List[str] = []
             for st in all_steps or []:
                 for sid in (st.get("selected_ids") or []) if isinstance(st.get("selected_ids"), list) else []:
-                    evs.append(sentence_text_lookup.get(str(sid), ""))
+                    _sid = str(sid)
+                    txt = ""
+                    if sentence_text_lookup:
+                        txt = str(sentence_text_lookup.get(_sid, "") or "")
+                    if (not txt) and block_text_lookup_simple:
+                        txt = str(block_text_lookup_simple.get(_sid, "") or "")
+                    evs.append(txt)
             return [x for x in evs if str(x or "").strip()]
+
+        def _is_low_quality_text(s: str) -> bool:
+            t = str(s or "").strip()
+            if not t:
+                return True
+            if len(t) < 12:
+                return True
+            import re
+            total = max(1, len(t))
+            cjk_or_alnum = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", t))
+            weird = len(re.findall(r"[<>{}\\[\\]|`~^_*=&$#@%]", t))
+            if "�" in t:
+                return True
+            if "<>" in t or "><" in t:
+                return True
+            if re.search(r"(.)\1{6,}", t):
+                return True
+            # Heuristic: coherent answers should mostly be language chars, not symbol soup.
+            if (cjk_or_alnum / total) < 0.52:
+                return True
+            if (weird / total) > 0.10:
+                return True
+            return False
 
         regen_enabled = bool(args.simple_regen_on_violation)
         max_regen_rounds = max(0, int(args.simple_max_regen_rounds))
@@ -2124,6 +2162,8 @@ def main() -> None:
         steps_final = steps0
         violations_final = violations0
         regen_used = 0
+        dual_channel_rescue_used = 0
+        dual_channel_rescue_reason = ""
 
         if regen_enabled and violations0_for_regen and max_regen_rounds > 0:
             # Build a minimal "regen guard" using violation info (no evidence text appended).
@@ -2172,6 +2212,37 @@ def main() -> None:
             entity_priming_texts=_ep_texts_simple,
         )
 
+        # Dual-channel rescue: if KV-injected answer quality collapses (gibberish),
+        # switch to prompt evidence channel for readable grounded output.
+        if _is_low_quality_text(injected_final):
+            ev_for_rescue = ev_texts_final or _gather_ev_texts(steps0)
+            if ev_for_rescue:
+                ev_block = "\n".join([f"- {str(t)}" for t in ev_for_rescue if str(t).strip()])
+                rescue_prompt = (
+                    str(user_prompt).strip()
+                    + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
+                    + ev_block
+                    + "\n\n### 要求：\n"
+                    + "1. 用自然语言中文回答，覆盖证据中的核心事实。\n"
+                    + "2. 不要输出乱码、符号串、代码片段或无关语言混杂内容。\n"
+                    + "3. 若证据不足，请明确说明“证据不足”。"
+                )
+                rescue_prompt = KVI2Runtime._format_prompt(tok, rescue_prompt, use_chat_template=bool(args.use_chat_template))
+                rescued = MultiStepInjector._greedy_generate_with_past_prefix(
+                    model=model,
+                    tokenizer=tok,
+                    prompt=rescue_prompt,
+                    device=device,
+                    past_key_values=None,
+                    max_new_tokens=128,
+                    no_repeat_ngram_size=6,
+                    repetition_penalty=1.15,
+                ).strip()
+                if not _is_low_quality_text(rescued):
+                    injected_final = rescued
+                    dual_channel_rescue_used = 1
+                    dual_channel_rescue_reason = "low_quality_injected_answer"
+
         out_simple = {
             "pipeline": "simple",
             "prompt": user_prompt,
@@ -2187,6 +2258,8 @@ def main() -> None:
             "regen_on_violation": bool(regen_enabled),
             "regen_rounds_used": int(regen_used),
             "postprocess_stripped_abbr": bool(postprocess_changed),
+            "dual_channel_rescue_used": int(dual_channel_rescue_used),
+            "dual_channel_rescue_reason": str(dual_channel_rescue_reason),
             "steps": steps_final,
         }
         if bool(args.final_only):
