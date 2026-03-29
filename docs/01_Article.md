@@ -40,6 +40,20 @@ prompt window.
 4. **DRM filtering before KV injection** — irrelevant triples must be pruned before entering attention
 5. **Graph structure + sentence index** — triples provide structural semantics; sentence index provides traceable evidence
 
+### 1.4 Open Direction — KV as Reasoning-Chain / Memory Trace (Not Only Attention Bias)
+
+**Empirical context (MedHopQA-ID *n=40* vs. *official* NL split, Exp01):** GraphRAG largely remains **evidence-in-prompt**: retrieved sentences (plus graph anchors) are exposed as natural language in the prompt. KVI **adds** a second channel: **triple → compiled KV prefix** on top of the same visible evidence. Under **NL queries + a large graph** (see gloss below), triple selection (DRM, relation gating, KV budget) is more brittle than text retrieval alignment: a **wrong triple** becomes a **high-salience wrong prior** in attention, and can **conflict** with correct sentences already in the prompt — yielding **smaller EM drop for GraphRAG than for KVI** on that split.
+
+**Design hypothesis for future implementation (no code commitment here):** For settings with **long NL context** and **multi-turn or long-horizon** use, KV should not be conceptualised solely as **static prefix that reshapes attention**. It may need to behave as **explicit intermediate states** on a **reasoning chain** or **memory trace**:
+
+- **NL-supplemented nodes**: each injected unit is not only tensor KV but carries a **short natural-language gloss** (what was committed, what remains open, provenance, confidence), readable and auditable.
+- **Chain semantics**: nodes are **ordered or linked** (e.g. anchor entity → candidate relations → disambiguation after evidence) rather than an unordered bag of triple-KV blocks.
+- **Lifecycle**: **session-local** traces can live in **extended KV cache** (prefix state); **cross-session** traces can be **serialised to disk** and **re-loaded** as conditioning for the next run (external memory), analogous to scratchpad + long-term store.
+
+This direction targets the failure mode **“wrong triple dominates attention”** by making memory **revocable, inspectable, and structurally part of inference**, rather than only an attention bias injected once at the front.
+
+**Gloss — “NL + large graph” (NL + 大图):** *Large graph* means a **large knowledge-graph instance for the benchmark build**: many **entities** and **relation edges (triples)** *and* a **large sentence index** (e.g. on the order of **10⁵** evidence sentences for the full MedHop official split), as opposed to a **small subgraph** built for a tiny subset (e.g. *n=40*). It is **not** primarily about the PNG figure size; it is about **graph + text index scale and density**, which increase **candidate triples**, **neighbourhood noise**, and **selection error rate** for the KV path.
+
 ---
 
 ## 2. System Architecture Overview
