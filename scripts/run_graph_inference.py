@@ -81,6 +81,22 @@ def _classify_intent(query: str) -> str:
     return max(scores, key=lambda k: scores[k])
 
 
+_DB_ID_RE = re.compile(r"DB\d+", re.IGNORECASE)
+
+
+def _drugbank_id_grounding_key(pred: str, support: str) -> tuple:
+    """Lexicographic sort: higher overlap of DB ids with support wins; then shorter pred."""
+    sup = set(_DB_ID_RE.findall(support or ""))
+    if not sup:
+        return (0, 0)
+    ids = _DB_ID_RE.findall(pred or "")
+    if not ids:
+        return (-1, -min(len(pred or ""), 1_000_000))
+    sup_u = {s.upper() for s in sup}
+    overlap = sum(1 for i in ids if i.upper() in sup_u)
+    return (overlap, -min(len(pred), 1_000_000))
+
+
 # ---------------------------------------------------------------------------
 # Simple grounding filter (token-overlap based)
 # ---------------------------------------------------------------------------
@@ -335,6 +351,12 @@ def main() -> None:
         action="store_true",
         help="If --enable_kvi and KV assembled: user prompt = question + short instruction only (no evidence block). "
         "Tests whether prompt evidence + KV duplicates or KV deflects attention.",
+    )
+    p.add_argument(
+        "--kvi_reconcile_no_kv_decode",
+        action="store_true",
+        help="If --enable_kvi and KV assembled: run a second decode on the same prompt without past_key_values, "
+        "then pick KV vs no-KV output by which cites more DrugBank IDs present in entity+full evidence block.",
     )
     args = p.parse_args()
 
@@ -640,19 +662,34 @@ def main() -> None:
 
     if use_openqa:
         prompt_parts: list[str] = []
-        if entity_context and not use_kvi_minimal:
+        # Keep entity context whenever present (including KVI minimal). Stripping
+        # entity+evidence while KV is only in past_key_values caused degenerate
+        # outputs on MedHop official (kvituned sweep).
+        if entity_context:
             prompt_parts.append(f"Entity context:\n{entity_context}")
         if not use_kvi_minimal:
             prompt_parts.append(f"Evidence:\n{evidence_block}")
+        elif ranked_evidence_texts:
+            k_tail = min(3, len(ranked_evidence_texts))
+            thin = "\n".join(
+                f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts[:k_tail])
+            )
+            prompt_parts.append(f"Evidence (brief):\n{thin}")
         prompt_parts.append(f"Question: {args.prompt}")
         prompt_parts.append(
             "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase)."
         )
         full_prompt = "\n\n".join(prompt_parts)
-        system_msg = (
-            "You are a careful assistant for open-domain question answering. "
-            "Ground answers in the provided evidence when it is present."
-        )
+        if use_kvi_minimal:
+            system_msg = (
+                "You are a careful assistant for open-domain question answering. "
+                "Ground answers in the brief evidence when helpful; answer concisely."
+            )
+        else:
+            system_msg = (
+                "You are a careful assistant for open-domain question answering. "
+                "Ground answers in the provided evidence when it is present."
+            )
     elif use_kvi_minimal:
         prompt_parts = []
         if entity_context:
@@ -745,6 +782,38 @@ def main() -> None:
     answer = tokenizer.decode(new_ids, skip_special_tokens=True).strip()
     print(f"[graphC] Generated answer ({len(answer)} chars)", file=sys.stderr)
 
+    kvi_reconcile_debug = None
+    if (
+        bool(args.enable_kvi)
+        and assembled_kv is not None
+        and bool(getattr(args, "kvi_reconcile_no_kv_decode", False))
+    ):
+        support_for_score = "\n".join(
+            str(x) for x in (entity_context or "", evidence_block or "") if str(x).strip()
+        )
+        gen_plain = {k: v for k, v in generate_kwargs.items() if k != "past_key_values"}
+        with torch.no_grad():
+            out_plain = model.generate(**inputs, **gen_plain)
+        plain_new = out_plain[0][inputs["input_ids"].shape[1] :]
+        answer_plain = tokenizer.decode(plain_new, skip_special_tokens=True).strip()
+        k_kv = _drugbank_id_grounding_key(answer, support_for_score)
+        k_pl = _drugbank_id_grounding_key(answer_plain, support_for_score)
+        # Prefer the no-KV decode when it is at least as evidence-grounded (ties → GraphRAG-like path).
+        picked = "kv"
+        if k_pl >= k_kv:
+            answer = answer_plain
+            picked = "no_kv"
+        kvi_reconcile_debug = {
+            "picked": picked,
+            "key_kv": list(k_kv),
+            "key_no_kv": list(k_pl),
+            "preview_plain": answer_plain[:240],
+        }
+        print(
+            f"[graphC] KVI reconcile: picked={picked} key_kv={k_kv} key_plain={k_pl}",
+            file=sys.stderr,
+        )
+
     # ---- 9. Generate baseline (no evidence, no KV) ----
     base_system = (
         "You are a helpful assistant."
@@ -820,6 +889,7 @@ def main() -> None:
             and bool(args.enable_kvi)
             and assembled_kv is not None
         ),
+        "kvi_reconcile_debug": kvi_reconcile_debug,
     }
     print(json.dumps(result_json, ensure_ascii=False))
 

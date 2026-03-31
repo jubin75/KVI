@@ -129,6 +129,7 @@ def _run_graph(
     kvi_max_kv_triples: int = 3,
     kvi_drm_threshold: float = 0.05,
     kvi_top_k_relations: int = 2,
+    kvi_reconcile_no_kv_decode: bool = False,
 ) -> Dict[str, Any]:
     argv = [
         "--model",
@@ -158,6 +159,8 @@ def _run_graph(
         argv += ["--openqa_mode"]
     if kvi_minimal_prompt and enable_kvi:
         argv += ["--kvi_minimal_prompt"]
+    if enable_kvi and kvi_reconcile_no_kv_decode:
+        argv += ["--kvi_reconcile_no_kv_decode"]
     if service_url.strip():
         return _run_json_service(url=service_url, endpoint="/infer/graph", argv=argv, timeout_s=timeout_s)
     cmd = [sys.executable, str(repo_root / "scripts" / "run_graph_inference.py")] + argv
@@ -373,6 +376,12 @@ def main() -> None:
         default=2,
         help="Relation gating top-k (run_graph_inference --top_k_relations).",
     )
+    p.add_argument(
+        "--kvi_reconcile_no_kv_decode",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="KVI only: dual-decode reconcile in run_graph_inference (see --kvi_reconcile_no_kv_decode there).",
+    )
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -508,6 +517,7 @@ def main() -> None:
                     kvi_max_kv_triples=int(args.kvi_max_kv_triples),
                     kvi_drm_threshold=float(args.kvi_drm_threshold),
                     kvi_top_k_relations=int(args.kvi_top_k_relations),
+                    kvi_reconcile_no_kv_decode=bool(args.kvi_reconcile_no_kv_decode),
                 )
 
             out_rag = None
@@ -638,6 +648,7 @@ def main() -> None:
             "kvi_max_kv_triples": int(args.kvi_max_kv_triples),
             "kvi_drm_threshold": float(args.kvi_drm_threshold),
             "kvi_top_k_relations": int(args.kvi_top_k_relations),
+            "kvi_reconcile_no_kv_decode": bool(args.kvi_reconcile_no_kv_decode),
             "ci_method": "bootstrap",
             "ci_level": 0.95,
             "bootstrap_samples": int(args.bootstrap_samples),
