@@ -58,6 +58,9 @@ experiments/**/*.npy
 experiments/**/*.pt
 experiments/**/*.parquet
 
+# Pipeline / supervisor / nohup logs (keep summaries, csv, json, plots, *.md)
+experiments/**/results/**/*.log
+
 # --- Other experiments: local data + numeric artifacts (keep README/code/*.md) ---
 experiments/exp03_retrieval_quality/data/
 experiments/exp03_retrieval_quality/results/*.json

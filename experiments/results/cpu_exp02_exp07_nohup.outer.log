@@ -1,7 +1,0 @@
-[2026-04-03T11:32:43+08:00] ======== start cpu pipeline (CUDA_VISIBLE_DEVICES=empty) resident=http://127.0.0.1:18888 ========
-[2026-04-03T11:32:43+08:00] SMOKE exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888 --truthfulqa_max 40 --fever_max 40 --limit 5
-[2026-04-03T11:33:29+08:00] FAILED: SMOKE exp02 (see /home/zd/dev/KVI/experiments/results/cpu_exp02_exp07_pipeline.log)
-[2026-04-03T17:17:18+08:00] ======== start cpu pipeline (CUDA_VISIBLE_DEVICES=empty) resident=http://127.0.0.1:18888 ========
-[2026-04-03T17:17:18+08:00] SMOKE exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888 --truthfulqa_max 40 --fever_max 40 --limit 5
-[2026-04-03T17:27:43+08:00] OK: SMOKE exp02
-[2026-04-03T17:27:43+08:00] FULL exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888

@@ -1,4 +1,0 @@
-[2026-04-03T18:18:17+08:00] FEVER KVI safe sweep start
-dataset=/home/zd/dev/KVI/experiments/exp02_hallucination/data/fever_eval.jsonl
-service=http://127.0.0.1:18888
-[2026-04-03T18:18:17+08:00] RUN t1_d0.10_r1 start
