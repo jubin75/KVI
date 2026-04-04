@@ -41,9 +41,22 @@ experiments/exp01_main_qa/data/
 experiments/exp01_main_qa/results
 
 # --- Dataset mirrors (HF/local clones; often nested git repos — never `git add`) ---
-# Keeps commits to source, experiment results, and *.md; avoids submodule-style embedded repos.
+# Third-party datasets (CL-Bench, KILT, TruthfulQA mirrors, parquet, etc.) stay local only.
 experiments/_mirror_data/
 experiments/_mirror_data_resolved/
+
+# --- Exp02 / Exp07: rebuildable builds (KV banks, embeddings, graph index — very large) ---
+# Keep: **/code/*, **/results/* (summaries, tables, plots, small predictions), **/*.md, README
+experiments/exp02_hallucination/artifacts/
+experiments/exp07_clbench_longcontext/artifacts/
+# Prepared eval shards (regenerate from mirrors + prepare_* scripts)
+experiments/exp02_hallucination/data/
+experiments/exp07_clbench_longcontext/data/
+
+# Large binaries if ever placed under experiments/
+experiments/**/*.npy
+experiments/**/*.pt
+experiments/**/*.parquet
 
 # --- Other experiments: local data + numeric artifacts (keep README/code/*.md) ---
 experiments/exp03_retrieval_quality/data/
