@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from metrics import best_exact_match, best_f1, best_relaxed_em
+from metrics import best_exact_match, best_f1, best_fever_label_em, best_relaxed_em
 
 
 METHODS_ORDER = ["llm", "rag", "graphrag", "kv_prefix", "kvi"]
@@ -432,9 +432,12 @@ def main() -> None:
         raise SystemExit(f"Empty/invalid dataset: {dataset_path}")
 
     per_example_path = out_dir / "predictions.jsonl"
+    is_fever = str(args.dataset_name or "").strip().upper() == "FEVER"
     method_correct = {m: 0 for m in methods}
     method_em_series: Dict[str, List[int]] = {m: [] for m in methods}
     method_f1_sum = {m: 0.0 for m in methods}
+    method_fever_correct = {m: 0 for m in methods}
+    method_fever_series: Dict[str, List[int]] = {m: [] for m in methods}
     em_score_fn = best_exact_match if str(args.em_mode) == "strict" else best_relaxed_em
 
     # Resume logic: preload existing K records (if any), validate alignment, then append remaining.
@@ -476,6 +479,19 @@ def main() -> None:
             f1s = rec.get("f1") or {}
             if not isinstance(ems, dict) or not isinstance(f1s, dict):
                 raise SystemExit(f"Resume record missing em/f1 dict: {per_example_path} (i={i})")
+            fl_row: Optional[Dict[str, int]] = None
+            if is_fever:
+                fl_raw = rec.get("fever_label_em")
+                if isinstance(fl_raw, dict) and all(mm in fl_raw for mm in methods):
+                    fl_row = {mm: int(fl_raw[mm]) for mm in methods}
+                else:
+                    preds_resume = rec.get("predictions") or {}
+                    if not isinstance(preds_resume, dict):
+                        preds_resume = {}
+                    fl_row = {
+                        mm: int(best_fever_label_em(str(preds_resume.get(mm) or ""), ex.answers))
+                        for mm in methods
+                    }
             for m in methods:
                 if m not in ems or m not in f1s:
                     raise SystemExit(
@@ -487,6 +503,10 @@ def main() -> None:
                 method_correct[m] += em
                 method_em_series[m].append(em)
                 method_f1_sum[m] += f1
+                if is_fever and fl_row is not None:
+                    fv = int(fl_row[m])
+                    method_fever_correct[m] += fv
+                    method_fever_series[m].append(fv)
         start_idx = k + 1
 
     file_mode = "a" if (bool(args.resume) and per_example_path.exists() and start_idx > 1) else "w"
@@ -573,6 +593,7 @@ def main() -> None:
             preds: Dict[str, str] = {}
             ems: Dict[str, int] = {}
             f1s: Dict[str, float] = {}
+            fever_labs: Dict[str, int] = {}
             for m in methods:
                 pred = _pick_method_prediction(
                     method=m,
@@ -589,8 +610,13 @@ def main() -> None:
                 method_correct[m] += em
                 method_em_series[m].append(int(em))
                 method_f1_sum[m] += f1
+                if is_fever:
+                    fv = int(best_fever_label_em(pred, ex.answers))
+                    fever_labs[m] = fv
+                    method_fever_correct[m] += fv
+                    method_fever_series[m].append(fv)
 
-            rec = {
+            rec: Dict[str, Any] = {
                 "idx": idx,
                 "id": ex.id,
                 "question": ex.question,
@@ -600,6 +626,8 @@ def main() -> None:
                 "f1": f1s,
                 "em_mode": str(args.em_mode),
             }
+            if is_fever:
+                rec["fever_label_em"] = fever_labs
             wf.write(json.dumps(rec, ensure_ascii=False) + "\n")
             wf.flush()
 
@@ -616,20 +644,31 @@ def main() -> None:
             seed=int(args.random_seed),
         )
         f1_mean = (method_f1_sum[m] / n) if n else 0.0
-        rows.append(
-            {
-                "method_key": m,
-                "method": meta["label"],
-                "retrieval": meta["retrieval"],
-                "injection": meta["injection"],
-                "em": round(em_percent[m], 4),
-                "em_ci95_lo": round(ci["lo"], 4),
-                "em_ci95_hi": round(ci["hi"], 4),
-                "f1_mean": round(f1_mean, 4),
-                "correct": int(method_correct[m]),
-                "total": int(n),
-            }
-        )
+        row: Dict[str, Any] = {
+            "method_key": m,
+            "method": meta["label"],
+            "retrieval": meta["retrieval"],
+            "injection": meta["injection"],
+            "em": round(em_percent[m], 4),
+            "em_ci95_lo": round(ci["lo"], 4),
+            "em_ci95_hi": round(ci["hi"], 4),
+            "f1_mean": round(f1_mean, 4),
+            "correct": int(method_correct[m]),
+            "total": int(n),
+        }
+        if is_fever:
+            f_pct = 100.0 * method_fever_correct[m] / n if n else 0.0
+            f_ci = _bootstrap_ci_percent(
+                method_fever_series[m],
+                n_boot=int(args.bootstrap_samples),
+                alpha=0.05,
+                seed=int(args.random_seed),
+            )
+            row["fever_label_accuracy"] = round(f_pct, 4)
+            row["fever_label_ci95_lo"] = round(f_ci["lo"], 4)
+            row["fever_label_ci95_hi"] = round(f_ci["hi"], 4)
+            row["fever_label_correct"] = int(method_fever_correct[m])
+        rows.append(row)
 
     significance: Dict[str, Any] = {}
     if "kvi" in methods:
@@ -642,8 +681,39 @@ def main() -> None:
                 n_perm=int(args.permutation_samples),
                 seed=int(args.random_seed),
             )
-            significance[f"kvi_vs_{m}"] = {"p_value": float(pval)}
+            sig_entry: Dict[str, Any] = {"p_value": float(pval)}
+            if is_fever:
+                sig_entry["fever_label_p_value"] = float(
+                    _paired_permutation_pvalue(
+                        method_fever_series["kvi"],
+                        method_fever_series[m],
+                        n_perm=int(args.permutation_samples),
+                        seed=int(args.random_seed),
+                    )
+                )
+            significance[f"kvi_vs_{m}"] = sig_entry
 
+    stats: Dict[str, Any] = {
+        "em_mode": str(args.em_mode),
+        "openqa_mode": bool(args.openqa_mode),
+        "kvi_minimal_prompt": bool(args.kvi_minimal_prompt),
+        "kvi_max_kv_triples": int(args.kvi_max_kv_triples),
+        "kvi_drm_threshold": float(args.kvi_drm_threshold),
+        "kvi_top_k_relations": int(args.kvi_top_k_relations),
+        "kvi_reconcile_no_kv_decode": bool(args.kvi_reconcile_no_kv_decode),
+        "ci_method": "bootstrap",
+        "ci_level": 0.95,
+        "bootstrap_samples": int(args.bootstrap_samples),
+        "significance_method": "paired_permutation",
+        "permutation_samples": int(args.permutation_samples),
+        "random_seed": int(args.random_seed),
+        "significance": significance,
+    }
+    if is_fever:
+        stats["fever_label_metric"] = (
+            "First match in output of SUPPORTS | REFUTES | NOT ENOUGH INFO (case-insensitive); "
+            "compare to gold label. Closer to FEVER shared-task label accuracy than relaxed EM."
+        )
     summary = {
         "dataset": str(args.dataset_name or dataset_path.stem),
         "dataset_path": str(dataset_path),
@@ -654,56 +724,67 @@ def main() -> None:
             "results_md": str(out_dir / "results.md"),
             "results_csv": str(out_dir / "results.csv"),
         },
-        "statistics": {
-            "em_mode": str(args.em_mode),
-            "openqa_mode": bool(args.openqa_mode),
-            "kvi_minimal_prompt": bool(args.kvi_minimal_prompt),
-            "kvi_max_kv_triples": int(args.kvi_max_kv_triples),
-            "kvi_drm_threshold": float(args.kvi_drm_threshold),
-            "kvi_top_k_relations": int(args.kvi_top_k_relations),
-            "kvi_reconcile_no_kv_decode": bool(args.kvi_reconcile_no_kv_decode),
-            "ci_method": "bootstrap",
-            "ci_level": 0.95,
-            "bootstrap_samples": int(args.bootstrap_samples),
-            "significance_method": "paired_permutation",
-            "permutation_samples": int(args.permutation_samples),
-            "random_seed": int(args.random_seed),
-            "significance": significance,
-        },
+        "statistics": stats,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     with (out_dir / "results.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Method", "Retrieval", "Injection", "EM", "CI95 Low", "CI95 High", "F1 Mean"])
+        header = ["Method", "Retrieval", "Injection", "EM", "CI95 Low", "CI95 High", "F1 Mean"]
+        if is_fever:
+            header += ["FEVER Label Acc", "FEVER CI Lo", "FEVER CI Hi"]
+        w.writerow(header)
         for r in rows:
-            w.writerow(
-                [
-                    r["method"],
-                    r["retrieval"],
-                    r["injection"],
-                    f"{r['em']:.1f}",
-                    f"{r['em_ci95_lo']:.1f}",
-                    f"{r['em_ci95_hi']:.1f}",
-                    f"{r['f1_mean']:.1f}",
+            roww = [
+                r["method"],
+                r["retrieval"],
+                r["injection"],
+                f"{r['em']:.1f}",
+                f"{r['em_ci95_lo']:.1f}",
+                f"{r['em_ci95_hi']:.1f}",
+                f"{r['f1_mean']:.1f}",
+            ]
+            if is_fever:
+                roww += [
+                    f"{float(r['fever_label_accuracy']):.1f}",
+                    f"{float(r['fever_label_ci95_lo']):.1f}",
+                    f"{float(r['fever_label_ci95_hi']):.1f}",
                 ]
-            )
+            w.writerow(roww)
 
     md: List[str] = []
     md.append("## Experiment 1 — Main QA Performance (single dataset)\n\n")
     md.append(f"- Dataset: {summary['dataset']}\n")
     md.append(f"- N: {n}\n\n")
     md.append(f"- EM mode: **{args.em_mode}** (relaxed = gold answer substring in prediction after SQuAD-normalize; use `--em_mode strict` for full-string EM only)\n\n")
-    md.append("| Method | Retrieval | Injection | EM | 95% CI | F1 Mean |\n")
-    md.append("|---|---|---|---:|---:|---:|\n")
+    if is_fever:
+        md.append(
+            "- **FEVER label accuracy**: first occurrence in model text of "
+            "`SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO` (see `metrics.parse_fever_label`) vs gold; "
+            "closer to veracity label accuracy than substring relaxed EM.\n\n"
+        )
+    if is_fever:
+        md.append("| Method | Retrieval | Injection | EM | 95% CI | F1 Mean | FEVER lbl % | FEVER CI |\n")
+        md.append("|---|---|---|---:|---:|---:|---:|---:|\n")
+    else:
+        md.append("| Method | Retrieval | Injection | EM | 95% CI | F1 Mean |\n")
+        md.append("|---|---|---|---:|---:|---:|\n")
     for m in METHODS_ORDER:
         if m not in methods:
             continue
         r = next(x for x in rows if x["method_key"] == m)
-        md.append(
-            f"| {r['method']} | {r['retrieval']} | {r['injection']} | {r['em']:.1f} | "
-            f"[{r['em_ci95_lo']:.1f}, {r['em_ci95_hi']:.1f}] | {r['f1_mean']:.3f} |\n"
-        )
+        if is_fever:
+            md.append(
+                f"| {r['method']} | {r['retrieval']} | {r['injection']} | {r['em']:.1f} | "
+                f"[{r['em_ci95_lo']:.1f}, {r['em_ci95_hi']:.1f}] | {r['f1_mean']:.3f} | "
+                f"{float(r['fever_label_accuracy']):.1f} | "
+                f"[{float(r['fever_label_ci95_lo']):.1f}, {float(r['fever_label_ci95_hi']):.1f}] |\n"
+            )
+        else:
+            md.append(
+                f"| {r['method']} | {r['retrieval']} | {r['injection']} | {r['em']:.1f} | "
+                f"[{r['em_ci95_lo']:.1f}, {r['em_ci95_hi']:.1f}] | {r['f1_mean']:.3f} |\n"
+            )
     (out_dir / "results.md").write_text("".join(md), encoding="utf-8")
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))

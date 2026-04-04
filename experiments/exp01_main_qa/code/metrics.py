@@ -2,10 +2,42 @@ from __future__ import annotations
 
 import re
 import string
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 _WS_RE = re.compile(r"\s+")
+
+# FEVER / KILT-style veracity labels (longest phrase first for stable substring scan).
+_FEVER_LABEL_SCAN_ORDER = ("NOT ENOUGH INFO", "REFUTES", "SUPPORTS")
+
+
+def parse_fever_label(pred: str) -> Optional[str]:
+    """
+    Heuristic: first occurrence of a standard label in model output (case-insensitive).
+    Use when gold is SUPPORTS / REFUTES / NOT ENOUGH INFO.
+    """
+    if not str(pred or "").strip():
+        return None
+    u = pred.upper()
+    best_pos: Optional[int] = None
+    best_lab: Optional[str] = None
+    for lab in _FEVER_LABEL_SCAN_ORDER:
+        p = u.find(lab)
+        if p < 0:
+            continue
+        if best_pos is None or p < best_pos:
+            best_pos = p
+            best_lab = lab
+    return best_lab
+
+
+def best_fever_label_em(pred: str, golds: Iterable[str]) -> int:
+    """1 iff parsed label matches any gold string after upper/strip."""
+    parsed = parse_fever_label(pred)
+    if parsed is None:
+        return 0
+    gold_set = {str(g).strip().upper() for g in golds if str(g).strip()}
+    return int(parsed in gold_set)
 
 
 def _normalize_text(s: str) -> str:
