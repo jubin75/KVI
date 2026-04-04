@@ -40,6 +40,11 @@ experiments/exp01_main_qa/data/
 # Symlinked or local-heavy run tree (jsonl/csv/logs/json predictions). Paper *.md 副本见 experiments/exp01_main_qa/reports/
 experiments/exp01_main_qa/results
 
+# --- Dataset mirrors (HF/local clones; often nested git repos — never `git add`) ---
+# Keeps commits to source, experiment results, and *.md; avoids submodule-style embedded repos.
+experiments/_mirror_data/
+experiments/_mirror_data_resolved/
+
 # --- Other experiments: local data + numeric artifacts (keep README/code/*.md) ---
 experiments/exp03_retrieval_quality/data/
 experiments/exp03_retrieval_quality/results/*.json

@@ -1,0 +1,101 @@
+{
+  "dataset": "TRUTHFULQA",
+  "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
+  "n": 5,
+  "methods": [
+    {
+      "method_key": "llm",
+      "method": "LLM",
+      "retrieval": "none",
+      "injection": "none",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.2324,
+      "correct": 0,
+      "total": 5
+    },
+    {
+      "method_key": "rag",
+      "method": "RAG",
+      "retrieval": "ANN",
+      "injection": "prompt",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.0,
+      "correct": 0,
+      "total": 5
+    },
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.2862,
+      "correct": 0,
+      "total": 5
+    },
+    {
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "retrieval": "ANN",
+      "injection": "KV",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.0,
+      "correct": 0,
+      "total": 5
+    },
+    {
+      "method_key": "kvi",
+      "method": "KVI",
+      "retrieval": "graph",
+      "injection": "KV + prompt",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.2611,
+      "correct": 0,
+      "total": 5
+    }
+  ],
+  "paths": {
+    "predictions": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b/predictions.jsonl",
+    "results_md": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b/results.md",
+    "results_csv": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b/results.csv"
+  },
+  "statistics": {
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_vs_llm": {
+        "p_value": 1.0
+      },
+      "kvi_vs_rag": {
+        "p_value": 1.0
+      },
+      "kvi_vs_graphrag": {
+        "p_value": 1.0
+      },
+      "kvi_vs_kv_prefix": {
+        "p_value": 1.0
+      }
+    }
+  }
+}

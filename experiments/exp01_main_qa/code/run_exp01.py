@@ -124,6 +124,7 @@ def _run_graph(
     max_new_tokens: int,
     timeout_s: int,
     service_url: str,
+    force_cpu: bool = False,
     openqa_mode: bool = True,
     kvi_minimal_prompt: bool = False,
     kvi_max_kv_triples: int = 3,
@@ -164,7 +165,12 @@ def _run_graph(
     if service_url.strip():
         return _run_json_service(url=service_url, endpoint="/infer/graph", argv=argv, timeout_s=timeout_s)
     cmd = [sys.executable, str(repo_root / "scripts" / "run_graph_inference.py")] + argv
-    return _run_json_cmd(cmd, cwd=repo_root, timeout_s=timeout_s)
+    env = dict(os.environ)
+    if bool(force_cpu):
+        # Prevent the graph-side subprocess from using GPU when VRAM is occupied.
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        cmd += ["--device", "cpu", "--dtype", "float32"]
+    return _run_json_cmd(cmd, cwd=repo_root, timeout_s=timeout_s, env=env)
 
 
 def _run_kvi2_runtime(
@@ -333,6 +339,11 @@ def main() -> None:
         action="store_true",
         help="Force ANN-side runtime (RAG/KV Prefix via run_kvi2_runtime_test) to run on CPU (avoid GPU OOM when a resident model occupies VRAM).",
     )
+    p.add_argument(
+        "--graph_force_cpu",
+        action="store_true",
+        help="Force GRAPH-side runtime (LLM/GraphRAG/KVI via run_graph_inference) to run on CPU (avoid GPU OOM).",
+    )
     p.add_argument("--bootstrap_samples", type=int, default=1000)
     p.add_argument("--permutation_samples", type=int, default=2000)
     p.add_argument("--random_seed", type=int, default=42)
@@ -498,6 +509,7 @@ def main() -> None:
                     max_new_tokens=int(args.max_new_tokens),
                     timeout_s=int(args.timeout_s),
                     service_url=str(args.inference_service_url or ""),
+                    force_cpu=bool(args.graph_force_cpu),
                     openqa_mode=bool(args.openqa_mode),
                     kvi_minimal_prompt=False,
                 )
@@ -512,6 +524,7 @@ def main() -> None:
                     max_new_tokens=int(args.max_new_tokens),
                     timeout_s=int(args.timeout_s),
                     service_url=str(args.inference_service_url or ""),
+                    force_cpu=bool(args.graph_force_cpu),
                     openqa_mode=bool(args.openqa_mode),
                     kvi_minimal_prompt=bool(args.kvi_minimal_prompt),
                     kvi_max_kv_triples=int(args.kvi_max_kv_triples),

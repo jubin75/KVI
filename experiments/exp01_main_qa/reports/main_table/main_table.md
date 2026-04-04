@@ -18,20 +18,6 @@
 | MedHopQA_n40 (EM [CI95]) | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 10.0 [2.5, 20.0] | 0.0 [0.0, 0.0] | 12.5 [2.5, 25.0] |
 | MedHopQA_official N=342 (EM [CI95]) | 0.0 [0.0, 0.0] | 0.3 [0.0, 0.9] | 13.5 [9.9, 17.0] | 0.6 [0.0, 1.5] | 33.3 [28.7, 38.0] |
 
-### MedHopQA_official N=342 — auxiliary ID metrics (analysis only; primary metric remains EM)
-
-**Valid-ID Rate** = predictions equal to exactly one `DB\d+` (no surrounding text). **Extract-then-EM** = first `DB\d+` in output matched to gold.
-
-| Method | Qwen Valid-ID (%) | Qwen Extract-then-EM (%) | Mistral Valid-ID (%) | Mistral Extract-then-EM (%) |
-|---|---:|---:|---:|---:|
-| LLM | 0.0 | 0.0 | 0.0 | 0.0 |
-| RAG | 91.8 | 0.0 | 0.0 | 0.0 |
-| GraphRAG | 0.0 | 36.8 | 0.0 | 11.7 |
-| KV Prefix | 0.0 | 0.0 | 0.0 | 0.0 |
-| KVI | 0.0 | 36.5 | 63.7 | 33.3 |
-
-Also: `experiments/exp01_main_qa/reports/main_table/medhop_official_id_diagnostics.md`.
-
 ### MedHopQA_n40 vs MedHopQA_official — 构造差异与对 GraphRAG / KVI 的非对称影响
 
 | 维度 | MedHopQA_n40 | MedHopQA_official (N=342) | 对 GraphRAG 的典型影响 | 对 KVI 的典型影响 |
@@ -57,7 +43,7 @@ Also: `experiments/exp01_main_qa/reports/main_table/medhop_official_id_diagnosti
   (3) **Lower engineering cost**: existing scripts already rewrite MedHop queries to ID form and enforce single-ID output, which supports reliable large-batch table generation.  
   This is an engineering/evaluation choice for Exp01, not a KVI-only requirement.
 - **Why MedHop RAG/KV Prefix are 0.0 (with examples)**: This split evaluates strict partner-ID extraction. Gold answers are exact IDs such as `DB04844`/`DB00677`, while ANN-only outputs are often malformed or non-atomic, e.g. `DB1221` (wrong ID), `DB0977` (echo-like wrong ID), `DB0563 is involved in ...` (extra text), or long noisy generations in KV Prefix. Under ID-level EM/F1, these count as incorrect.
-- **Reviewer-facing diagnostics for EM=0**: see `experiments/exp01_main_qa/reports/main_table/medhop_official_id_diagnostics.md` with two auxiliary metrics: **Valid-ID Rate** (`^DB\\d+$` only) and **Extract-then-EM** (first `DB\\d+` extracted then scored vs gold). Main table metric remains EM.
+- **MedHopQA here is relation completion with strict output format**: For Exp01, MedHopQA is evaluated as an ID-based relation-completion task. Prompts require the model to output **only one** partner DrugBank ID in the exact `DB`+digits form (e.g. `DB04844`) and nothing else; generations that include extra text or multiple IDs are counted as incorrect under EM.
 - **Are MedHop answers all `DB...` strings here?**: Yes. In this benchmark file (`medhop_eval.jsonl`), all 40/40 gold answers follow the `DB`+digits pattern, and prompts explicitly require `Answer with only the partner entity DB id`.
 - **Why GraphRAG/KVI are stronger on this split**: This task is relation-centered (`interacts_with DBxxxx`) and aligns with graph traversal/evidence grounding. Graph pipelines more often surface the correct partner entity ID from relation evidence, while ANN-only pipelines rely on freer generation and are less robust to strict ID-format output constraints.
 - **Panel B artifact path**: Per-dataset runs and the machine-readable aggregate live under `experiments/exp01_main_qa/results/main_table_mistral7b_v0_3/` (and sibling `multihop_hotpot_n120_fullmethods_mistral7b_v0_3/`, `nq_smoke100_fullmethods_mistral7b_v0_3/`, `medhop_n40_fullmethods_mistral7b_v0_3/`). **Git 入库的 Mistral 表副本**：`experiments/exp01_main_qa/reports/main_table_mistral7b_v0_3/main_table.md`.

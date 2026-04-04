@@ -1,0 +1,83 @@
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 218, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 86, in main
+    bins = _prepare(root, ds_jsonl, int(args.max_examples))
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 28, in _prepare
+    ds = load_dataset("tencent/CL-bench", split="train")
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/load.py", line 1688, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/load.py", line 1315, in load_dataset_builder
+    dataset_module = dataset_module_factory(
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/load.py", line 1207, in dataset_module_factory
+    raise e1 from None
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/load.py", line 1182, in dataset_module_factory
+    ).get_module()
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/load.py", line 598, in get_module
+    standalone_yaml_path = cached_path(
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/datasets/utils/file_utils.py", line 180, in cached_path
+    ).resolve_path(url_or_filename)
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/hf_file_system.py", line 353, in resolve_path
+    repo_and_revision_exist, err = self._repo_and_revision_exist(repo_type, repo_id, revision)
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/hf_file_system.py", line 261, in _repo_and_revision_exist
+    self._api.repo_info(
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/hf_api.py", line 3146, in repo_info
+    return method(
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/hf_api.py", line 3010, in dataset_info
+    hf_raise_for_status(r)
+  File "/home/zd/dev/KVI/KVI/lib/python3.10/site-packages/huggingface_hub/utils/_http.py", line 880, in hf_raise_for_status
+    raise _format(HfHubHTTPError, message, response) from e
+huggingface_hub.errors.HfHubHTTPError: (Request ID: Root=1-69cbd1d7-4909848502b2bc694c20479a;98f5b768-99ca-46f8-979e-4aa31a2bf84d)
+
+429 Too Many Requests: you have reached your 'api' rate limit.
+Retry after 29 seconds (0/500 requests remaining in current 300s window).
+Url: https://hf-mirror.com/api/datasets/tencent/CL-bench/revision/b28a5832a09b0d96c0cf4c22e90d7c60ede25b80.
+We had to rate limit your IP (172.64.215.16). To continue using our service, create a HF account or login to your existing account, and make sure you pass a HF_TOKEN if you're using the API.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 220, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 88, in main
+    bins = _prepare(root, ds_jsonl, int(args.max_examples))
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 33, in _prepare
+    ex = json.loads(line)
+  File "/usr/local/lib/python3.10/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+  File "/usr/local/lib/python3.10/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+  File "/usr/local/lib/python3.10/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 22464 (char 22463)
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 221, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 89, in main
+    bins = _prepare(root, ds_jsonl, int(args.max_examples))
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 33, in _prepare
+    ex = json.loads(line)
+  File "/usr/local/lib/python3.10/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+  File "/usr/local/lib/python3.10/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+  File "/usr/local/lib/python3.10/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 22464 (char 22463)
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 221, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 89, in main
+    bins = _prepare(root, ds_jsonl, int(args.max_examples))
+  File "/home/zd/dev/KVI/experiments/exp07_clbench_longcontext/code/run_exp07_clbench_proxy.py", line 33, in _prepare
+    ex = json.loads(line)
+  File "/usr/local/lib/python3.10/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+  File "/usr/local/lib/python3.10/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+  File "/usr/local/lib/python3.10/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 22464 (char 22463)
+Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 121 examples [00:00, 1065.07 examples/s]Generating train split: 1353 examples [00:00, 6098.00 examples/s]Generating train split: 1899 examples [00:00, 5928.84 examples/s]

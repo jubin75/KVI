@@ -1,0 +1,16 @@
+## Experiment 2 — Hallucination Reduction (Proxy)
+
+Hallucination Rate (%) = `100 - relaxed EM`.
+
+| Dataset | Method | EM (%) | Hallucination Rate (%) |
+|---|---|---:|---:|
+| truthfulqa | LLM | 0.0 | 100.0 |
+| truthfulqa | RAG | 0.0 | 100.0 |
+| truthfulqa | GraphRAG | 0.0 | 100.0 |
+| truthfulqa | KV Prefix | 0.0 | 100.0 |
+| truthfulqa | KVI | 0.0 | 100.0 |
+| fever | LLM | 0.0 | 100.0 |
+| fever | RAG | 100.0 | 0.0 |
+| fever | GraphRAG | 60.0 | 40.0 |
+| fever | KV Prefix | 60.0 | 40.0 |
+| fever | KVI | 20.0 | 80.0 |

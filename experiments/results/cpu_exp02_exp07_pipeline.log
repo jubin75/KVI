@@ -1,0 +1,179 @@
+[2026-04-03T11:32:43+08:00] ======== start cpu pipeline (CUDA_VISIBLE_DEVICES=empty) resident=http://127.0.0.1:18888 ========
+[2026-04-03T11:32:43+08:00] SMOKE exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888 --truthfulqa_max 40 --fever_max 40 --limit 5
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 23, in _run_exp01_with_graph_fallback
+    _run(cmd, root)
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 14, in _run
+    raise RuntimeError(f"cmd failed: {' '.join(cmd)}\nstdout:\n{p.stdout[-2000:]}\nstderr:\n{p.stderr[-2000:]}")
+RuntimeError: cmd failed: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py --dataset /home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl --dataset_name TRUTHFULQA --model /home/zd/dev/KVI/models/Qwen2.5-7B-Instruct --graph_index /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/graph_index.json --triple_kvbank_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/triple_kvbank --graph_sentences_jsonl /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/sentences.tagged.jsonl --ann_kv_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences --ann_sentences_jsonl /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/sentences.tagged.jsonl --ann_semantic_type_specs /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar/semantic_type_specs.json --ann_pattern_index_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar --ann_sidecar_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar --methods llm,rag,graphrag,kv_prefix,kvi --out_dir /home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b --timeout_s 600 --bootstrap_samples 1000 --permutation_samples 2000 --inference_service_url http://127.0.0.1:18888 --ann_inference_service_url http://127.0.0.1:18888 --limit 5
+stdout:
+
+stderr:
+ocal/lib/python3.10/socket.py", line 845, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 103, in _run_json_service
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+  File "/usr/local/lib/python3.10/urllib/request.py", line 216, in urlopen
+    return opener.open(url, data, timeout)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 519, in open
+    response = self._open(req, data)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 536, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "/usr/local/lib/python3.10/urllib/request.py", line 496, in _call_chain
+    result = func(*args)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 1377, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 1351, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 713, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 501, in main
+    out_gr_rag = _run_graph(
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 166, in _run_graph
+    return _run_json_service(url=service_url, endpoint="/infer/graph", argv=argv, timeout_s=timeout_s)
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 106, in _run_json_service
+    raise RuntimeError(f"Service call failed endpoint={endpoint}: {e}") from e
+RuntimeError: Service call failed endpoint=/infer/graph: <urlopen error [Errno 111] Connection refused>
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 256, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 227, in main
+    _run_exp01_with_graph_fallback(cmd, root)
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 39, in _run_exp01_with_graph_fallback
+    _run(fallback_cmd, root)
+  File "/home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py", line 14, in _run
+    raise RuntimeError(f"cmd failed: {' '.join(cmd)}\nstdout:\n{p.stdout[-2000:]}\nstderr:\n{p.stderr[-2000:]}")
+RuntimeError: cmd failed: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py --dataset /home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl --dataset_name TRUTHFULQA --model /home/zd/dev/KVI/models/Qwen2.5-7B-Instruct --graph_index /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/graph_index.json --triple_kvbank_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/triple_kvbank --graph_sentences_jsonl /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/sentences.tagged.jsonl --ann_kv_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences --ann_sentences_jsonl /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/sentences.tagged.jsonl --ann_semantic_type_specs /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar/semantic_type_specs.json --ann_pattern_index_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar --ann_sidecar_dir /home/zd/dev/KVI/experiments/exp02_hallucination/artifacts/truthfulqa/kvbank_sentences/pattern_sidecar --methods llm,rag --out_dir /home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b --timeout_s 600 --bootstrap_samples 1000 --permutation_samples 2000 --inference_service_url http://127.0.0.1:18888 --ann_inference_service_url http://127.0.0.1:18888 --limit 5
+stdout:
+
+stderr:
+ocal/lib/python3.10/socket.py", line 845, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 103, in _run_json_service
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+  File "/usr/local/lib/python3.10/urllib/request.py", line 216, in urlopen
+    return opener.open(url, data, timeout)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 519, in open
+    response = self._open(req, data)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 536, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+  File "/usr/local/lib/python3.10/urllib/request.py", line 496, in _call_chain
+    result = func(*args)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 1377, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+  File "/usr/local/lib/python3.10/urllib/request.py", line 1351, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 713, in <module>
+    main()
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 501, in main
+    out_gr_rag = _run_graph(
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 166, in _run_graph
+    return _run_json_service(url=service_url, endpoint="/infer/graph", argv=argv, timeout_s=timeout_s)
+  File "/home/zd/dev/KVI/experiments/exp01_main_qa/code/run_exp01.py", line 106, in _run_json_service
+    raise RuntimeError(f"Service call failed endpoint={endpoint}: {e}") from e
+RuntimeError: Service call failed endpoint=/infer/graph: <urlopen error [Errno 111] Connection refused>
+
+[2026-04-03T11:33:29+08:00] FAILED: SMOKE exp02 (see /home/zd/dev/KVI/experiments/results/cpu_exp02_exp07_pipeline.log)
+[2026-04-03T17:17:18+08:00] ======== start cpu pipeline (CUDA_VISIBLE_DEVICES=empty) resident=http://127.0.0.1:18888 ========
+[2026-04-03T17:17:18+08:00] SMOKE exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888 --truthfulqa_max 40 --fever_max 40 --limit 5
+{
+  "note": "Hallucination Rate here is proxy: 100 - relaxed EM.",
+  "rows": [
+    {
+      "dataset": "truthfulqa",
+      "method_key": "llm",
+      "method": "LLM",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "rag",
+      "method": "RAG",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi",
+      "method": "KVI",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "llm",
+      "method": "LLM",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "rag",
+      "method": "RAG",
+      "em": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "em": 60.0,
+      "hallucination_rate": 40.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "em": 60.0,
+      "hallucination_rate": 40.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kvi",
+      "method": "KVI",
+      "em": 20.0,
+      "hallucination_rate": 80.0
+    }
+  ]
+}
+[2026-04-03T17:27:43+08:00] OK: SMOKE exp02
+[2026-04-03T17:27:43+08:00] FULL exp02: /home/zd/dev/KVI/KVI/bin/python -u /home/zd/dev/KVI/experiments/exp02_hallucination/code/run_exp02_hallucination.py --build_device cpu --resident_url http://127.0.0.1:18888

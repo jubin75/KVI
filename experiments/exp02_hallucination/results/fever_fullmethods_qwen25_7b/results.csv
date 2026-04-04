@@ -1,0 +1,6 @@
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean
+LLM,none,none,0.0,0.0,0.0,0.0
+RAG,ANN,prompt,100.0,100.0,100.0,0.3
+GraphRAG,graph,prompt,60.0,20.0,100.0,0.0
+KV Prefix,ANN,KV,60.0,20.0,100.0,0.1
+KVI,graph,KV + prompt,20.0,0.0,60.0,0.0
