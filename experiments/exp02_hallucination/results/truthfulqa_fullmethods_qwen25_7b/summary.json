@@ -1,67 +1,67 @@
 {
   "dataset": "TRUTHFULQA",
   "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
-  "n": 5,
+  "n": 500,
   "methods": [
     {
       "method_key": "llm",
       "method": "LLM",
       "retrieval": "none",
       "injection": "none",
-      "em": 0.0,
-      "em_ci95_lo": 0.0,
-      "em_ci95_hi": 0.0,
-      "f1_mean": 0.2324,
-      "correct": 0,
-      "total": 5
+      "em": 5.0,
+      "em_ci95_lo": 3.2,
+      "em_ci95_hi": 7.0,
+      "f1_mean": 0.1761,
+      "correct": 25,
+      "total": 500
     },
     {
       "method_key": "rag",
       "method": "RAG",
       "retrieval": "ANN",
       "injection": "prompt",
-      "em": 0.0,
-      "em_ci95_lo": 0.0,
-      "em_ci95_hi": 0.0,
-      "f1_mean": 0.0,
-      "correct": 0,
-      "total": 5
+      "em": 7.4,
+      "em_ci95_lo": 5.0,
+      "em_ci95_hi": 9.6,
+      "f1_mean": 0.1345,
+      "correct": 37,
+      "total": 500
     },
     {
       "method_key": "graphrag",
       "method": "GraphRAG",
       "retrieval": "graph",
       "injection": "prompt",
-      "em": 0.0,
-      "em_ci95_lo": 0.0,
-      "em_ci95_hi": 0.0,
-      "f1_mean": 0.2862,
-      "correct": 0,
-      "total": 5
+      "em": 17.8,
+      "em_ci95_lo": 14.6,
+      "em_ci95_hi": 21.2,
+      "f1_mean": 0.195,
+      "correct": 89,
+      "total": 500
     },
     {
       "method_key": "kv_prefix",
       "method": "KV Prefix",
       "retrieval": "ANN",
       "injection": "KV",
-      "em": 0.0,
-      "em_ci95_lo": 0.0,
-      "em_ci95_hi": 0.0,
-      "f1_mean": 0.0,
-      "correct": 0,
-      "total": 5
+      "em": 3.8,
+      "em_ci95_lo": 2.2,
+      "em_ci95_hi": 5.6,
+      "f1_mean": 0.0161,
+      "correct": 19,
+      "total": 500
     },
     {
       "method_key": "kvi",
       "method": "KVI",
       "retrieval": "graph",
       "injection": "KV + prompt",
-      "em": 0.0,
-      "em_ci95_lo": 0.0,
-      "em_ci95_hi": 0.0,
-      "f1_mean": 0.2611,
-      "correct": 0,
-      "total": 5
+      "em": 11.8,
+      "em_ci95_lo": 9.0,
+      "em_ci95_hi": 14.6,
+      "f1_mean": 0.1151,
+      "correct": 59,
+      "total": 500
     }
   ],
   "paths": {
@@ -85,16 +85,16 @@
     "random_seed": 42,
     "significance": {
       "kvi_vs_llm": {
-        "p_value": 1.0
+        "p_value": 0.0004997501249375312
       },
       "kvi_vs_rag": {
-        "p_value": 1.0
+        "p_value": 0.010994502748625687
       },
       "kvi_vs_graphrag": {
-        "p_value": 1.0
+        "p_value": 0.0004997501249375312
       },
       "kvi_vs_kv_prefix": {
-        "p_value": 1.0
+        "p_value": 0.0004997501249375312
       }
     }
   }

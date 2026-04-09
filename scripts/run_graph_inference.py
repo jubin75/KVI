@@ -81,6 +81,19 @@ def _classify_intent(query: str) -> str:
     return max(scores, key=lambda k: scores[k])
 
 
+def _is_fever_claim_prompt(prompt: str) -> bool:
+    """True for Exp02 FEVER JSONL: Claim: \"...\" plus veracity-label instructions."""
+    p = (prompt or "").strip()
+    if p.startswith("Claim:"):
+        return True
+    low = p.lower()
+    return (
+        "supports" in low
+        and "refutes" in low
+        and ("not enough info" in low or "not enough information" in low)
+    )
+
+
 _DB_ID_RE = re.compile(r"DB\d+", re.IGNORECASE)
 
 
@@ -659,6 +672,7 @@ def main() -> None:
         and bool(args.enable_kvi)
         and assembled_kv is not None
     )
+    fever_claim_qa = use_openqa and _is_fever_claim_prompt(args.prompt)
 
     if use_openqa:
         prompt_parts: list[str] = []
@@ -676,20 +690,38 @@ def main() -> None:
             )
             prompt_parts.append(f"Evidence (brief):\n{thin}")
         prompt_parts.append(f"Question: {args.prompt}")
-        prompt_parts.append(
-            "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase)."
-        )
-        full_prompt = "\n\n".join(prompt_parts)
-        if use_kvi_minimal:
-            system_msg = (
-                "You are a careful assistant for open-domain question answering. "
-                "Ground answers in the brief evidence when helpful; answer concisely."
+        if fever_claim_qa:
+            prompt_parts.append(
+                "Reply with exactly one line containing only one of: SUPPORTS, REFUTES, NOT ENOUGH INFO. "
+                "No markdown, images, explanations, or other words."
             )
+            if use_kvi_minimal:
+                system_msg = (
+                    "You verify claims against brief evidence. "
+                    "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+                )
+            else:
+                system_msg = (
+                    "You verify claims against evidence. "
+                    "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+                )
         else:
-            system_msg = (
-                "You are a careful assistant for open-domain question answering. "
-                "Ground answers in the provided evidence when it is present."
+            prompt_parts.append(
+                "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase)."
             )
+            full_prompt = "\n\n".join(prompt_parts)
+            if use_kvi_minimal:
+                system_msg = (
+                    "You are a careful assistant for open-domain question answering. "
+                    "Ground answers in the brief evidence when helpful; answer concisely."
+                )
+            else:
+                system_msg = (
+                    "You are a careful assistant for open-domain question answering. "
+                    "Ground answers in the provided evidence when it is present."
+                )
+        if fever_claim_qa:
+            full_prompt = "\n\n".join(prompt_parts)
     elif use_kvi_minimal:
         prompt_parts = []
         if entity_context:
@@ -815,11 +847,15 @@ def main() -> None:
         )
 
     # ---- 9. Generate baseline (no evidence, no KV) ----
-    base_system = (
-        "You are a helpful assistant."
-        if use_openqa
-        else "你是一个医学专业助手。"
-    )
+    if use_openqa:
+        base_system = (
+            "You verify claims. Reply with exactly one line: SUPPORTS, REFUTES, or NOT ENOUGH INFO. "
+            "No markdown or explanations."
+            if fever_claim_qa
+            else "You are a helpful assistant."
+        )
+    else:
+        base_system = "你是一个医学专业助手。"
     base_messages = [
         {"role": "system", "content": base_system},
         {"role": "user", "content": args.prompt},

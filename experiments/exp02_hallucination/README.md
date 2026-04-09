@@ -1,5 +1,37 @@
 # Experiment 02 — Hallucination (proxy metrics)
 
+## 实验方式与 KVI 分析目标（速查）
+
+后续若在 Exp02 上做 **KVI 提升**，默认以此为准：**同时对照 TruthfulQA 与 FEVER**，从两套结果里归纳能改进 KVI 的方向（提示、检索与 KV、超参、结构等），而不是只优化其中一集并把另一集带崩。
+
+### 管线与规模
+
+| 项目 | 约定 |
+|------|------|
+| 主流程 | `run_exp02_hallucination.py` → 各数据 `artifacts/<name>/` → `run_exp01.py` |
+| 对比方法 | `llm,rag,graphrag,kv_prefix,kvi`（五方法） |
+| 默认规模 | TruthfulQA **500**、FEVER **1000**；实际 **`n`** 以 `results/*/summary.json` 与 `data/dataset_manifest.json` 为准 |
+| Graph 侧推理 | 常驻 **`http://127.0.0.1:18888`**（`--resident_url`） |
+| ANN（RAG / KV Prefix） | 默认 **本机 CPU**：`--ann_inference_service_url` 为空且 **`--ann_force_cpu`**；若显式 **`--ann_via_resident`** 则与 graph 共用同一 resident |
+| 已有数据与工件、不重复编译 | **`--skip_mirror_and_prepare --reuse_artifacts`**（见 `run_exp02_fast_once.sh`） |
+| 评测断点续跑 | Exp02 传 **`--resume_eval`** → 透传 `run_exp01.py` 的 **`--resume`**（校验 `predictions.jsonl` 前缀后追加） |
+| SSH 下 FEVER-only + 起 resident | `code/run_fever_gpu_detached.sh`（已含 **grace** 与 **`--resume_eval`**） |
+| 本机 resident 已就绪、仅续跑 FEVER | `code/run_fever_resume_eval.sh` |
+
+### 读结果时的指标
+
+- **TruthfulQA**：表中 **relaxed EM** 是 **proxy**，不是官方 MC；对外对比宜另接 MC1/MC2 或官方脚本（见下文「社区口径」）。  
+- **FEVER**：除 proxy EM 外，务必看 **`fever_label_accuracy`**（三分类标签，更接近 veracity 任务）。  
+- **Graph/KVI 提示**：`scripts/run_graph_inference.py` 对 FEVER 式题干（如以 `Claim:` 起头且含三标签说明）会用 **单行 SUPPORTS / REFUTES / NOT ENOUGH INFO** 的收紧说明；TruthfulQA 仍为开放式英文说明。**同一 `predictions.jsonl` 内若混有「续跑前后」或「删文件重跑前后」的行，模板可能不一致**——论文级统一口径可删 `predictions.jsonl` 后全量重跑（**不要** `--resume_eval`）。
+
+### 分析主线
+
+1. 在两套数据集上对比 **KVI 与其余方法**（尤其 **GraphRAG**）。  
+2. 归类错误：**格式与标签**、**检索/KV 是否偏离**、**证据与生成不一致**、**过长或跑题生成** 等。  
+3. 提出改动时区分：更偏 **任务模板**（对 FEVER 友好可能对 TQA 无用）与更偏 **机制**（如 KV 选择与注入），并计划在 **两集上交叉验证**。
+
+---
+
 ## 全量规模与后台任务
 
 - **默认全量**（`run_exp02_hallucination.py` 未传 `--limit` 时）  
@@ -10,6 +42,36 @@
 - **日志**：主进程 stdout/stderr → `results/exp02_pipeline_v2.log`；督导一行行记录 → `results/exp02_supervisor.log`（`*.log` 已 `.gitignore`，仅存本地）。
 
 判断「后台是否还在跑」：本机存在 `run_exp02_autoresume.sh` / `run_exp02_hallucination.py` 进程，且 TruthfulQA 或 FEVER 管线（如 `triple_kv_compiler.py`）在跑，即全量流水线尚未收尾。
+
+### 快速一次性跑完（推荐）
+
+若 **`data/dataset_manifest.json` 已是 500+1000** 且 **`artifacts/*` 已编译过图与 triple KV**，不要用 autoresume 从头反复编译。先**停掉** `run_exp02_autoresume.sh` 与旧的 `run_exp02_hallucination.py`，再起常驻 **18888**，然后：
+
+```bash
+# 日志：results/exp02_fast_run.log
+nohup experiments/exp02_hallucination/code/run_exp02_fast_once.sh >> experiments/exp02_hallucination/results/exp02_fast_run.log 2>&1 &
+```
+
+等价参数：`--skip_mirror_and_prepare --reuse_artifacts`（见 `run_exp02_hallucination.py`）。仍会跑 **两遍** `run_exp01`（500 + 1000 条 × 五方法），耗主要取决于推理，不再重复 CPU 编译 KV。
+
+可选：只跑某一数据集，例如 `--only_datasets fever`（另一数据集会从已有 `summary.json` 并入 `hallucination_proxy_summary.json`）。
+
+### SSH 断线仍跑（推荐：FEVER 补跑 + GPU0）
+
+常驻的 **`/health` 在模型未载入前就会返回 200**，若立刻开跑容易 **`RemoteDisconnected` / `Connection refused`**。脚本 **`code/run_fever_gpu_detached.sh`** 会先起 resident、轮询 health，再 **`sleep 45`**（可用环境变量 **`RESIDENT_READY_GRACE_SEC`** 改），最后 **`exec` 跑 FEVER-only Exp02**，整段挂在 **nohup** 上，**与 SSH 会话脱钩**：
+
+```bash
+cd ~/dev/KVI
+nohup bash experiments/exp02_hallucination/code/run_fever_gpu_detached.sh \
+  </dev/null \
+  >> experiments/exp02_hallucination/results/exp02_fever_gpu_orchestrator_outer.log 2>&1 &
+```
+
+- 编排日志：`results/exp02_fever_gpu_orchestrator.log`  
+- 常驻日志：`experiments/results/resident_18888_gpu.log`  
+- FEVER 评测输出：`results/exp02_fever_gpu.log`  
+
+断线后用 `pgrep -af 'run_fever_gpu_detached|run_exp02_hallucination|resident_infer'` 与 `wc -l results/fever_fullmethods_qwen25_7b/predictions.jsonl` 自查。
 
 ---
 

@@ -158,6 +158,9 @@ def _run_graph(
         ]
     if openqa_mode:
         argv += ["--openqa_mode"]
+    # Instruct models (e.g. Qwen2.5-*-Instruct) expect chat_template-wrapped prompts; without it,
+    # graph-side generation often degenerates (spurious punctuation between tokens, off-task text).
+    argv += ["--use_chat_template"]
     if kvi_minimal_prompt and enable_kvi:
         argv += ["--kvi_minimal_prompt"]
     if enable_kvi and kvi_reconcile_no_kv_decode:
