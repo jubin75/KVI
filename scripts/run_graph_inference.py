@@ -48,7 +48,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +141,52 @@ def _tokenize_chinese(text: str) -> set[str]:
     for w in re.findall(r"\b\d{2,8}\b", text):
         tokens.add(w)
     return tokens
+
+
+def _openqa_evidence_grounding_key(pred: str, support: str) -> tuple:
+    """
+    Lexicographic compare for open-domain English QA: higher token overlap with
+    evidence/support wins; then shorter decode wins. Used when DrugBank IDs are absent.
+    """
+    st = _tokenize_chinese(support or "")
+    pt = _tokenize_chinese(pred or "")
+    if not st:
+        return (0, -min(len(pred or ""), 1_000_000))
+    overlap = len(pt & st)
+    return (overlap, -min(len(pred or ""), 1_000_000))
+
+
+def _pre_grounding_clean_openqa_decode(text: str) -> str:
+    """Strip common degeneracy patterns before sentence grounding (KVI + English openqa)."""
+    t = str(text or "").strip()
+    if not t:
+        return t
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t)
+    t = re.sub(r"https?://\S+", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"!{3,}", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _sanitize_two_stage_openqa_final(
+    text: str, *, max_chars: int = 320, max_sentences: int = 2
+) -> str:
+    """Post-decode cleanup for two-stage KVI finalize: keep concise factual output."""
+    t = _pre_grounding_clean_openqa_decode(text)
+    if not t:
+        return t
+    t = t.replace("!", "")
+    t = re.sub(r"\.{2,}", ".", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    # Keep at most the first N sentence-like spans.
+    parts = [x.strip() for x in re.split(r"(?<=[.?])\s+", t) if x.strip()]
+    if max_sentences > 0 and len(parts) > max_sentences:
+        t = " ".join(parts[:max_sentences]).strip()
+    if len(t) > max_chars:
+        t = t[:max_chars].rsplit(" ", 1)[0].strip()
+    if t and not t.endswith((".", "?", "!")):
+        t += "."
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +318,32 @@ def _has_url(text: str) -> bool:
     return bool(_URL_PATTERN.search(text))
 
 
+def _norm_text_for_match(text: str) -> str:
+    t = str(text or "").lower()
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _load_oracle_map(path: str) -> Dict[str, Dict[str, Any]]:
+    p = Path(path)
+    out: Dict[str, Dict[str, Any]] = {}
+    if not p.exists():
+        return out
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        qid = str(obj.get("id") or "").strip()
+        if not qid:
+            continue
+        out[qid] = obj
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Simple grounding filter (token-overlap based)
 # ---------------------------------------------------------------------------
@@ -349,6 +421,18 @@ def main() -> None:
     p.add_argument("--local_files_only", action="store_true")
     p.add_argument("--max_new_tokens", type=int, default=256)
     p.add_argument("--max_evidence", type=int, default=10)
+    p.add_argument(
+        "--text_search_min_score",
+        type=float,
+        default=0.05,
+        help="Min query-token overlap for hybrid text-search hits over sentences.jsonl (lower = more recall).",
+    )
+    p.add_argument(
+        "--max_openqa_evidence_sentences",
+        type=int,
+        default=8,
+        help="In --openqa_mode (non-FEVER), cap ranked evidence sentences in the prompt; 0 = no cap.",
+    )
     p.add_argument("--max_hops", type=int, default=2)
     p.add_argument("--device", default="auto")
     p.add_argument("--dtype", default="float16")
@@ -371,6 +455,29 @@ def main() -> None:
         help="If --enable_kvi and KV assembled: run a second decode on the same prompt without past_key_values, "
         "then pick KV vs no-KV output by which cites more DrugBank IDs present in entity+full evidence block.",
     )
+    p.add_argument(
+        "--kvi_kvprefix_style_prompt",
+        action="store_true",
+        help="If --enable_kvi and KV assembled in openqa_mode: use KV Prefix-like compact prompt "
+        "(question + concise answer guard, no evidence/entity text in user prompt).",
+    )
+    p.add_argument(
+        "--kvi_disable_kv_injection",
+        action="store_true",
+        help="If --enable_kvi: assemble and audit triple KV as usual, but DO NOT inject it as past_key_values. "
+        "Use for ablation to isolate the effect of KV injection vs prompt-only GraphRAG path.",
+    )
+    p.add_argument(
+        "--kvi_two_stage_kv_then_evidence",
+        action="store_true",
+        help="If --enable_kvi in openqa_mode (non-FEVER): stage-1 draft uses KV injection without evidence text; "
+        "stage-2 final answer uses stage-1 draft + evidence prompt without KV injection.",
+    )
+    p.add_argument("--audit_jsonl", default="", help="Optional JSONL path to append retrieval/DRM/prompt audit records.")
+    p.add_argument("--audit_query_id", default="", help="Optional query/example id for audit joins.")
+    p.add_argument("--audit_method_key", default="", help="Optional method key tag in audit record (e.g., graphrag, kvi).")
+    p.add_argument("--audit_oracle_jsonl", default="", help="Optional oracle evidence JSONL ({id, gold_evidence_texts[]}) for recall checks.")
+    p.add_argument("--audit_only", action="store_true", help="Run retrieval/DRM/prompt audit only; skip model loading and generation.")
     args = p.parse_args()
 
     # ---- 1. Load graph ----
@@ -415,13 +522,20 @@ def main() -> None:
     # (e.g., URLs, references, sentences not extracted as triples).
     text_search_results: list[dict] = []
     sentences_jsonl_path = Path(args.sentences_jsonl) if args.sentences_jsonl else None
+    ts_min_score = float(getattr(args, "text_search_min_score", 0.05) or 0.05)
+    # TruthfulQA-style English open QA: require stronger lexical overlap so hybrid search
+    # does not flood the prompt with weakly related sentences (hurts MC proxy + KVI).
+    if bool(getattr(args, "openqa_mode", False)) and not _is_fever_claim_prompt(args.prompt):
+        ts_min_score = max(ts_min_score, 0.11)
     if sentences_jsonl_path and sentences_jsonl_path.exists():
         text_search_results = _text_search(
             args.prompt, sentences_jsonl_path,
             max_results=args.max_evidence,
+            min_score=ts_min_score,
         )
         print(
-            f"[graphC] text_search: {len(text_search_results)} hits from {sentences_jsonl_path.name}",
+            f"[graphC] text_search: {len(text_search_results)} hits from {sentences_jsonl_path.name} "
+            f"(min_score={ts_min_score:.3f})",
             file=sys.stderr,
         )
     else:
@@ -520,9 +634,8 @@ def main() -> None:
         kv_injection_debug["reason"] = "no_kvbank_dir" if not triple_kvbank_dir else "dir_not_found"
         print(f"[graphC] Triple KV injection disabled ({kv_injection_debug['reason']})", file=sys.stderr)
 
-    # ---- 5. Load LLM ----
+    # ---- 5. Runtime device/dtype for optional KV assembly ----
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -535,19 +648,6 @@ def main() -> None:
         "float32": torch.float32,
     }
     dtype = dtype_map.get(args.dtype, torch.float16)
-
-    print(f"[graphC] Loading model: {args.model} → {device}", file=sys.stderr)
-    tok_kwargs: dict = {"use_fast": True, "trust_remote_code": True}
-    model_kwargs: dict = {"torch_dtype": dtype, "trust_remote_code": True}
-    if args.local_files_only:
-        tok_kwargs["local_files_only"] = True
-        model_kwargs["local_files_only"] = True
-
-    tokenizer = AutoTokenizer.from_pretrained(args.model, **tok_kwargs)
-    model_kwargs.setdefault("attn_implementation", "eager")
-    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
-    model.to(device).eval()
-    print("[graphC] Model loaded", file=sys.stderr)
 
     # ---- 6. DRM Scoring → Relation Gating → KV Budget → Assembly ----
     #
@@ -664,63 +764,92 @@ def main() -> None:
         evidence_with_scores.append((et, score))
     evidence_with_scores.sort(key=lambda x: x[1], reverse=True)
     ranked_evidence_texts = [et for et, _s in evidence_with_scores]
+    use_openqa = bool(getattr(args, "openqa_mode", False))
+    fever_claim_qa = use_openqa and _is_fever_claim_prompt(args.prompt)
+    max_oe = int(getattr(args, "max_openqa_evidence_sentences", 8) or 0)
+    if use_openqa and not fever_claim_qa and max_oe > 0 and len(ranked_evidence_texts) > max_oe:
+        ranked_evidence_texts = ranked_evidence_texts[:max_oe]
     evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
 
-    use_openqa = bool(getattr(args, "openqa_mode", False))
     use_kvi_minimal = (
         bool(getattr(args, "kvi_minimal_prompt", False))
         and bool(args.enable_kvi)
         and assembled_kv is not None
     )
-    fever_claim_qa = use_openqa and _is_fever_claim_prompt(args.prompt)
 
     if use_openqa:
         prompt_parts: list[str] = []
+        kvprefix_style_prompt = (
+            bool(getattr(args, "kvi_kvprefix_style_prompt", False))
+            and bool(args.enable_kvi)
+            and assembled_kv is not None
+            and not fever_claim_qa
+        )
+        if kvprefix_style_prompt:
+            prompt_parts.append(f"Question: {args.prompt}")
+            prompt_parts.append(
+                "Answer in concise English (1-2 sentences), plain text only. "
+                "Stay strictly on the asked aspect, avoid unrelated expansions, "
+                "and avoid markdown/images/code."
+            )
+            full_prompt = "\n\n".join(prompt_parts)
+            system_msg = (
+                "You are a careful assistant for open-domain question answering. "
+                "Use injected knowledge as primary grounding, answer directly in plain text, "
+                "and do not invent unsupported facts."
+            )
+        else:
         # Keep entity context whenever present (including KVI minimal). Stripping
         # entity+evidence while KV is only in past_key_values caused degenerate
         # outputs on MedHop official (kvituned sweep).
-        if entity_context:
-            prompt_parts.append(f"Entity context:\n{entity_context}")
-        if not use_kvi_minimal:
-            prompt_parts.append(f"Evidence:\n{evidence_block}")
-        elif ranked_evidence_texts:
-            k_tail = min(3, len(ranked_evidence_texts))
-            thin = "\n".join(
-                f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts[:k_tail])
-            )
-            prompt_parts.append(f"Evidence (brief):\n{thin}")
-        prompt_parts.append(f"Question: {args.prompt}")
-        if fever_claim_qa:
-            prompt_parts.append(
-                "Reply with exactly one line containing only one of: SUPPORTS, REFUTES, NOT ENOUGH INFO. "
-                "No markdown, images, explanations, or other words."
-            )
-            if use_kvi_minimal:
-                system_msg = (
-                    "You verify claims against brief evidence. "
-                    "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+            if entity_context:
+                prompt_parts.append(f"Entity context:\n{entity_context}")
+            if not use_kvi_minimal:
+                prompt_parts.append(f"Evidence:\n{evidence_block}")
+            elif ranked_evidence_texts:
+                k_tail = min(3, len(ranked_evidence_texts))
+                thin = "\n".join(
+                    f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts[:k_tail])
                 )
+                prompt_parts.append(f"Evidence (brief):\n{thin}")
+            prompt_parts.append(f"Question: {args.prompt}")
+            if fever_claim_qa:
+                prompt_parts.append(
+                    "Reply with exactly one line containing only one of: SUPPORTS, REFUTES, NOT ENOUGH INFO. "
+                    "No markdown, images, explanations, or other words."
+                )
+                if use_kvi_minimal:
+                    system_msg = (
+                        "You verify claims against brief evidence. "
+                        "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+                    )
+                else:
+                    system_msg = (
+                        "You verify claims against evidence. "
+                        "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+                    )
             else:
-                system_msg = (
-                    "You verify claims against evidence. "
-                    "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+                prompt_parts.append(
+                    "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase). "
+                    "Use only the evidence and entity context above; do not invent facts or cite unseen sources. "
+                    "Do not output markdown, images, or code. "
+                    "Start with the direct factual answer in one sentence, then stop. "
+                    "If the evidence is insufficient to answer, say so in one short sentence."
                 )
-        else:
-            prompt_parts.append(
-                "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase)."
-            )
-            full_prompt = "\n\n".join(prompt_parts)
-            if use_kvi_minimal:
-                system_msg = (
-                    "You are a careful assistant for open-domain question answering. "
-                    "Ground answers in the brief evidence when helpful; answer concisely."
-                )
-            else:
-                system_msg = (
-                    "You are a careful assistant for open-domain question answering. "
-                    "Ground answers in the provided evidence when it is present."
-                )
-        if fever_claim_qa:
+                if use_kvi_minimal:
+                    system_msg = (
+                        "You are a careful assistant for open-domain question answering. "
+                        "Ground answers in the brief evidence when helpful; answer concisely in plain text. "
+                        "Give one direct factual sentence first and avoid hedging filler. "
+                        "Do not invent facts; do not use markdown or images."
+                    )
+                else:
+                    system_msg = (
+                        "You are a careful assistant for open-domain question answering. "
+                        "Ground answers in the provided evidence when it is present; use plain text only. "
+                        "Give one direct factual sentence first and avoid hedging filler. "
+                        "Do not invent facts, URLs, or citations that are not in the evidence or entity context."
+                    )
             full_prompt = "\n\n".join(prompt_parts)
     elif use_kvi_minimal:
         prompt_parts = []
@@ -749,7 +878,135 @@ def main() -> None:
         full_prompt = "\n\n".join(prompt_parts)
         system_msg = "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
 
+    if bool(getattr(args, "audit_only", False)):
+        result_json = {
+            "diagnosis_result": "",
+            "diagnosis_result_raw": "",
+            "base_llm_result": "",
+            "graph_debug": gr.debug,
+            "evidence_texts": evidence_texts,
+            "evidence_source": evidence_source,
+            "entity_context": entity_context,
+            "intent": intent,
+            "grounding_report": {},
+            "kv_injection_debug": kv_injection_debug,
+            "verbatim_evidence": verbatim_evidence,
+            "openqa_mode": bool(getattr(args, "openqa_mode", False)),
+            "kvi_minimal_prompt": bool(
+                getattr(args, "kvi_minimal_prompt", False)
+                and bool(args.enable_kvi)
+                and assembled_kv is not None
+            ),
+            "kvi_reconcile_debug": None,
+        }
+        # Reuse shared audit writer path by falling through the same audit block.
+        # Keep prompt variables in scope for prompt-channel checks.
+        full_prompt_local = full_prompt
+        full_prompt = full_prompt_local  # noqa: F841
+        # ---- 12. Optional retrieval/DRM/prompt audit ----
+        audit_path = str(getattr(args, "audit_jsonl", "") or "").strip()
+        if audit_path:
+            oracle_hits: Dict[str, Any] = {
+                "available": False,
+                "oracle_count": 0,
+                "retrieval_hit_count": 0,
+                "drm_hit_count": 0,
+                "prompt_hit_count": 0,
+            }
+            qid = str(getattr(args, "audit_query_id", "") or "").strip()
+            oracle_path = str(getattr(args, "audit_oracle_jsonl", "") or "").strip()
+            if qid and oracle_path:
+                oracle_map = _load_oracle_map(oracle_path)
+                o = oracle_map.get(qid)
+                if o:
+                    gold_texts = [str(x).strip() for x in (o.get("gold_evidence_texts") or []) if str(x).strip()]
+                    gold_norm = [_norm_text_for_match(x) for x in gold_texts]
+                    retrieval_pool = [_norm_text_for_match(x) for x in evidence_texts]
+                    prompt_pool = [_norm_text_for_match(x) for x in ranked_evidence_texts]
+                    drm_pool: List[str] = []
+                    for it in (kv_injection_debug.get("drm_scores") or []):
+                        if isinstance(it, dict):
+                            drm_pool.append(_norm_text_for_match(it.get("provenance") or ""))
+                    def _hit_count(pool: List[str]) -> int:
+                        n = 0
+                        for g in gold_norm:
+                            if g and any((g in p) or (p in g) for p in pool if p):
+                                n += 1
+                        return n
+                    rh = _hit_count(retrieval_pool)
+                    dh = _hit_count(drm_pool)
+                    ph = _hit_count(prompt_pool)
+                    oracle_hits = {
+                        "available": True,
+                        "oracle_count": len(gold_norm),
+                        "retrieval_hit_count": rh,
+                        "drm_hit_count": dh,
+                        "prompt_hit_count": ph,
+                        "retrieval_hit_any": rh > 0,
+                        "drm_hit_any": dh > 0,
+                        "prompt_hit_any": ph > 0,
+                    }
+            prompt_norm = _norm_text_for_match(full_prompt)
+            prompt_contains = 0
+            for ev in ranked_evidence_texts:
+                evn = _norm_text_for_match(ev)
+                if evn and evn in prompt_norm:
+                    prompt_contains += 1
+            prompt_ratio = (float(prompt_contains) / float(len(ranked_evidence_texts))) if ranked_evidence_texts else 0.0
+            audit_rec = {
+                "query_id": str(getattr(args, "audit_query_id", "") or ""),
+                "method_key": str(getattr(args, "audit_method_key", "") or ("kvi" if args.enable_kvi else "graphrag")),
+                "enable_kvi": bool(args.enable_kvi),
+                "kvi_minimal_prompt": bool(
+                    getattr(args, "kvi_minimal_prompt", False)
+                    and bool(args.enable_kvi)
+                    and assembled_kv is not None
+                ),
+                "question": str(args.prompt or ""),
+                "retrieval": {
+                    "graph_evidence_texts": graph_evidence_texts,
+                    "text_search_results": text_search_results,
+                    "merged_evidence_texts": evidence_texts,
+                },
+                "drm": {
+                    "drm_threshold": kv_injection_debug.get("drm_threshold"),
+                    "drm_scores": kv_injection_debug.get("drm_scores"),
+                    "drm_passed": kv_injection_debug.get("drm_passed"),
+                    "gated_count": kv_injection_debug.get("gated_count"),
+                    "selected_triples": kv_injection_debug.get("selected_triples"),
+                },
+                "prompt_channel": {
+                    "ranked_evidence_texts": ranked_evidence_texts,
+                    "evidence_block_raw": evidence_block,
+                    "prompt_contains_evidence_count": prompt_contains,
+                    "prompt_contains_evidence_ratio": round(prompt_ratio, 4),
+                    "prompt_len_chars": len(full_prompt),
+                },
+                "oracle_hits": oracle_hits,
+            }
+            try:
+                ap = Path(audit_path)
+                ap.parent.mkdir(parents=True, exist_ok=True)
+                with ap.open("a", encoding="utf-8") as af:
+                    af.write(json.dumps(audit_rec, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+        print(json.dumps(result_json, ensure_ascii=False))
+        sys.exit(0)
+
     # ---- 8. Generate (graph + evidence + KV injection) ----
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    print(f"[graphC] Loading model: {args.model} → {device}", file=sys.stderr)
+    tok_kwargs: dict = {"use_fast": True, "trust_remote_code": True}
+    model_kwargs: dict = {"torch_dtype": dtype, "trust_remote_code": True}
+    if args.local_files_only:
+        tok_kwargs["local_files_only"] = True
+        model_kwargs["local_files_only"] = True
+    tokenizer = AutoTokenizer.from_pretrained(args.model, **tok_kwargs)
+    model_kwargs.setdefault("attn_implementation", "eager")
+    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
+    model.to(device).eval()
+    print("[graphC] Model loaded", file=sys.stderr)
     def _build_input(messages: list[dict]) -> str:
         if args.use_chat_template:
             apply_fn = getattr(tokenizer, "apply_chat_template", None)
@@ -759,6 +1016,24 @@ def main() -> None:
                 except Exception:
                     pass
         return messages[-1]["content"]
+
+    two_stage_enabled = (
+        bool(getattr(args, "kvi_two_stage_kv_then_evidence", False))
+        and bool(args.enable_kvi)
+        and bool(getattr(args, "openqa_mode", False))
+        and not fever_claim_qa
+        and assembled_kv is not None
+    )
+    if two_stage_enabled:
+        full_prompt = (
+            f"Question: {args.prompt}\n\n"
+            "Draft an initial answer in 1-2 concise English sentences. "
+            "Plain text only."
+        )
+        system_msg = (
+            "You are a careful assistant for open-domain question answering. "
+            "Use injected structured knowledge as primary grounding and avoid unsupported claims."
+        )
 
     main_messages = [
         {"role": "system", "content": system_msg},
@@ -773,10 +1048,14 @@ def main() -> None:
         "no_repeat_ngram_size": 6,
         "repetition_penalty": 1.15,
     }
+    if bool(getattr(args, "openqa_mode", False)) and bool(args.enable_kvi) and not fever_claim_qa:
+        generate_kwargs["repetition_penalty"] = 1.22
+        generate_kwargs["no_repeat_ngram_size"] = 8
 
     # Inject triple KV as past_key_values if available.
     # Transformers 5.x requires Cache object (legacy tuple is rejected).
-    if assembled_kv is not None:
+    disable_kv_injection = bool(getattr(args, "kvi_disable_kv_injection", False)) and bool(args.enable_kvi)
+    if assembled_kv is not None and not disable_kv_injection:
         pkv_for_generate = assembled_kv
         try:
             from transformers.cache_utils import DynamicCache  # type: ignore
@@ -806,17 +1085,64 @@ def main() -> None:
         generate_kwargs["past_key_values"] = pkv_for_generate
         print("[graphC] Generating with triple KV injection", file=sys.stderr)
     else:
-        print("[graphC] Generating without KV injection", file=sys.stderr)
+        if assembled_kv is not None and disable_kv_injection:
+            print("[graphC] KV assembled but injection disabled (ablation)", file=sys.stderr)
+        else:
+            print("[graphC] Generating without KV injection", file=sys.stderr)
 
     with torch.no_grad():
         output_ids = model.generate(**inputs, **generate_kwargs)
     new_ids = output_ids[0][inputs["input_ids"].shape[1] :]
     answer = tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+    stage1_draft = answer
+    if bool(getattr(args, "openqa_mode", False)) and bool(args.enable_kvi) and not fever_claim_qa:
+        answer = _pre_grounding_clean_openqa_decode(answer)
+        stage1_draft = _pre_grounding_clean_openqa_decode(stage1_draft)
     print(f"[graphC] Generated answer ({len(answer)} chars)", file=sys.stderr)
+
+    if two_stage_enabled:
+        stage2_parts: list[str] = [f"Question: {args.prompt}"]
+        if stage1_draft.strip():
+            stage2_parts.append(f"Stage-1 draft:\n{stage1_draft.strip()}")
+        if ranked_evidence_texts:
+            stage2_parts.append(
+                "Evidence:\n" + "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
+            )
+        stage2_parts.append(
+            "Produce the FINAL answer as plain English in 1-2 short sentences. "
+            "Do not use exclamation marks, markdown, lists, URLs, or code. "
+            "Ground every claim in Evidence; delete unsupported parts of the draft. "
+            "Prefer direct factual wording over hedging. "
+            "If Evidence is insufficient, reply with one short sentence stating insufficient evidence."
+        )
+        stage2_prompt = "\n\n".join(stage2_parts)
+        stage2_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict fact-checker. Prioritize evidence consistency over draft phrasing. "
+                    "Output only the final concise answer."
+                ),
+            },
+            {"role": "user", "content": stage2_prompt},
+        ]
+        stage2_input = _build_input(stage2_messages)
+        stage2_inputs = tokenizer(stage2_input, return_tensors="pt").to(device)
+        stage2_kwargs = {k: v for k, v in generate_kwargs.items() if k != "past_key_values"}
+        stage2_kwargs["max_new_tokens"] = min(72, int(args.max_new_tokens))
+        with torch.no_grad():
+            stage2_ids = model.generate(**stage2_inputs, **stage2_kwargs)
+        stage2_new = stage2_ids[0][stage2_inputs["input_ids"].shape[1] :]
+        answer = tokenizer.decode(stage2_new, skip_special_tokens=True).strip()
+        answer = _sanitize_two_stage_openqa_final(answer)
+        if not answer.strip():
+            answer = _sanitize_two_stage_openqa_final(stage1_draft)
+        print(f"[graphC] Two-stage finalize answer ({len(answer)} chars)", file=sys.stderr)
 
     kvi_reconcile_debug = None
     if (
-        bool(args.enable_kvi)
+        not two_stage_enabled
+        and bool(args.enable_kvi)
         and assembled_kv is not None
         and bool(getattr(args, "kvi_reconcile_no_kv_decode", False))
     ):
@@ -828,13 +1154,22 @@ def main() -> None:
             out_plain = model.generate(**inputs, **gen_plain)
         plain_new = out_plain[0][inputs["input_ids"].shape[1] :]
         answer_plain = tokenizer.decode(plain_new, skip_special_tokens=True).strip()
-        k_kv = _drugbank_id_grounding_key(answer, support_for_score)
-        k_pl = _drugbank_id_grounding_key(answer_plain, support_for_score)
-        # Prefer the no-KV decode when it is at least as evidence-grounded (ties → GraphRAG-like path).
+        if bool(getattr(args, "openqa_mode", False)) and not fever_claim_qa:
+            answer_plain = _pre_grounding_clean_openqa_decode(answer_plain)
         picked = "kv"
-        if k_pl >= k_kv:
-            answer = answer_plain
-            picked = "no_kv"
+        if fever_claim_qa:
+            k_kv = _drugbank_id_grounding_key(answer, support_for_score)
+            k_pl = _drugbank_id_grounding_key(answer_plain, support_for_score)
+            if k_pl >= k_kv:
+                answer = answer_plain
+                picked = "no_kv"
+        else:
+            k_kv = _openqa_evidence_grounding_key(answer, support_for_score)
+            k_pl = _openqa_evidence_grounding_key(answer_plain, support_for_score)
+            # Prefer KV when ties; only switch when plain evidence-overlap is strictly higher.
+            if k_pl > k_kv:
+                answer = answer_plain
+                picked = "no_kv"
         kvi_reconcile_debug = {
             "picked": picked,
             "key_kv": list(k_kv),
@@ -910,6 +1245,7 @@ def main() -> None:
     result_json = {
         "diagnosis_result": grounded_text,
         "diagnosis_result_raw": answer,
+        "diagnosis_stage1_draft": stage1_draft if two_stage_enabled else "",
         "base_llm_result": base_answer,
         "graph_debug": gr.debug,
         "evidence_texts": evidence_texts,
@@ -927,6 +1263,96 @@ def main() -> None:
         ),
         "kvi_reconcile_debug": kvi_reconcile_debug,
     }
+
+    # ---- 12. Optional retrieval/DRM/prompt audit ----
+    audit_path = str(getattr(args, "audit_jsonl", "") or "").strip()
+    if audit_path:
+        oracle_hits: Dict[str, Any] = {
+            "available": False,
+            "oracle_count": 0,
+            "retrieval_hit_count": 0,
+            "drm_hit_count": 0,
+            "prompt_hit_count": 0,
+        }
+        qid = str(getattr(args, "audit_query_id", "") or "").strip()
+        oracle_path = str(getattr(args, "audit_oracle_jsonl", "") or "").strip()
+        if qid and oracle_path:
+            oracle_map = _load_oracle_map(oracle_path)
+            o = oracle_map.get(qid)
+            if o:
+                gold_texts = [str(x).strip() for x in (o.get("gold_evidence_texts") or []) if str(x).strip()]
+                gold_norm = [_norm_text_for_match(x) for x in gold_texts]
+                retrieval_pool = [_norm_text_for_match(x) for x in evidence_texts]
+                prompt_pool = [_norm_text_for_match(x) for x in ranked_evidence_texts]
+                drm_pool: List[str] = []
+                for it in (kv_injection_debug.get("drm_scores") or []):
+                    if isinstance(it, dict):
+                        drm_pool.append(_norm_text_for_match(it.get("provenance") or ""))
+                def _hit_count(pool: List[str]) -> int:
+                    n = 0
+                    for g in gold_norm:
+                        if g and any((g in p) or (p in g) for p in pool if p):
+                            n += 1
+                    return n
+                rh = _hit_count(retrieval_pool)
+                dh = _hit_count(drm_pool)
+                ph = _hit_count(prompt_pool)
+                oracle_hits = {
+                    "available": True,
+                    "oracle_count": len(gold_norm),
+                    "retrieval_hit_count": rh,
+                    "drm_hit_count": dh,
+                    "prompt_hit_count": ph,
+                    "retrieval_hit_any": rh > 0,
+                    "drm_hit_any": dh > 0,
+                    "prompt_hit_any": ph > 0,
+                }
+
+        prompt_norm = _norm_text_for_match(full_prompt)
+        prompt_contains = 0
+        for ev in ranked_evidence_texts:
+            evn = _norm_text_for_match(ev)
+            if evn and evn in prompt_norm:
+                prompt_contains += 1
+        prompt_ratio = (float(prompt_contains) / float(len(ranked_evidence_texts))) if ranked_evidence_texts else 0.0
+        audit_rec = {
+            "query_id": str(getattr(args, "audit_query_id", "") or ""),
+            "method_key": str(getattr(args, "audit_method_key", "") or ("kvi" if args.enable_kvi else "graphrag")),
+            "enable_kvi": bool(args.enable_kvi),
+            "kvi_minimal_prompt": bool(
+                getattr(args, "kvi_minimal_prompt", False)
+                and bool(args.enable_kvi)
+                and assembled_kv is not None
+            ),
+            "question": str(args.prompt or ""),
+            "retrieval": {
+                "graph_evidence_texts": graph_evidence_texts,
+                "text_search_results": text_search_results,
+                "merged_evidence_texts": evidence_texts,
+            },
+            "drm": {
+                "drm_threshold": kv_injection_debug.get("drm_threshold"),
+                "drm_scores": kv_injection_debug.get("drm_scores"),
+                "drm_passed": kv_injection_debug.get("drm_passed"),
+                "gated_count": kv_injection_debug.get("gated_count"),
+                "selected_triples": kv_injection_debug.get("selected_triples"),
+            },
+            "prompt_channel": {
+                "ranked_evidence_texts": ranked_evidence_texts,
+                "evidence_block_raw": evidence_block,
+                "prompt_contains_evidence_count": prompt_contains,
+                "prompt_contains_evidence_ratio": round(prompt_ratio, 4),
+                "prompt_len_chars": len(full_prompt),
+            },
+            "oracle_hits": oracle_hits,
+        }
+        try:
+            ap = Path(audit_path)
+            ap.parent.mkdir(parents=True, exist_ok=True)
+            with ap.open("a", encoding="utf-8") as af:
+                af.write(json.dumps(audit_rec, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
     print(json.dumps(result_json, ensure_ascii=False))
 
 

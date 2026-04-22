@@ -1,0 +1,75 @@
+{
+  "note": "Hallucination proxy: TruthfulQA = 100 - relaxed EM; FEVER = 100 - fever_label_accuracy (parsed label vs gold).",
+  "rows": [
+    {
+      "dataset": "truthfulqa",
+      "method_key": "llm",
+      "method": "LLM",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "rag",
+      "method": "RAG",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi",
+      "method": "KVI",
+      "em": 0.0,
+      "hallucination_rate": 100.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "llm",
+      "method": "LLM",
+      "em": 38.3,
+      "hallucination_rate": 69.1
+    },
+    {
+      "dataset": "fever",
+      "method_key": "rag",
+      "method": "RAG",
+      "em": 92.6,
+      "hallucination_rate": 7.5
+    },
+    {
+      "dataset": "fever",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "em": 73.0,
+      "hallucination_rate": 31.2
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "em": 74.3,
+      "hallucination_rate": 27.7
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kvi",
+      "method": "KVI",
+      "em": 89.3,
+      "hallucination_rate": 10.7
+    }
+  ]
+}

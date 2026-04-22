@@ -1837,6 +1837,7 @@ def main() -> None:
         if tok is None or model is None:
             raise SystemExit("Simple pipeline requires model/tokenizer")
         user_prompt = str(args.prompt)
+        is_english_prompt = bool(re.search(r"[A-Za-z]", user_prompt))
         base_prompt = KVI2Runtime._format_prompt(tok, user_prompt, use_chat_template=bool(args.use_chat_template))
         base_answer = MultiStepInjector._greedy_generate_with_past_prefix(
             model=model,
@@ -1893,11 +1894,18 @@ def main() -> None:
         # We want a prose answer (no bullets) in this debug mode.
         # Primary path uses KV injection. If injected output is low-quality (e.g. gibberish),
         # we enable a dual-channel rescue pass (Prompt evidence channel) for stability.
-        prose_guard = (
-            "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
-            "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
-            "回答必须严格与证据一致，不要编造。"
-        )
+        if is_english_prompt:
+            prose_guard = (
+                "\n\nAnswer in concise English (1-2 sentences), plain text only."
+                " Stay strictly on the asked aspect, and avoid unrelated expansions."
+                " Keep claims grounded in injected knowledge; if unsupported, say so briefly."
+            )
+        else:
+            prose_guard = (
+                "\n\n请用自然语言中文段落回答（1-2段），不要使用项目符号或编号列表。"
+                "【范围约束】只回答用户问题涉及的维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
+                "回答必须严格与证据一致，不要编造。"
+            )
 
         specs = _load_semantic_type_specs_any(pattern_index_dir=str(args.pattern_index_dir), semantic_type_specs_path=str(args.semantic_type_specs))
 
@@ -2065,7 +2073,11 @@ def main() -> None:
                         + "\n【证据一致性】不得补充注入知识未支持的具体事实；如无法从注入知识确定，请明确说明“无法从注入知识确定”。"
                     )
                 step_prompt = (
-                    prompt_for_user + prose_guard + intent_guard + (extra_guard or "") + ("\n\n" + generated if generated.strip() else "")
+                    prompt_for_user
+                    + prose_guard
+                    + ("" if is_english_prompt else intent_guard)
+                    + (extra_guard or "")
+                    + ("\n\n" + generated if generated.strip() else "")
                 ).strip()
                 step_prompt = KVI2Runtime._format_prompt(tok, step_prompt, use_chat_template=bool(args.use_chat_template))
                 chunk = MultiStepInjector._greedy_generate_with_past_prefix(
@@ -2174,15 +2186,23 @@ def main() -> None:
                     deny_terms.extend([str(x) for x in (v.get("terms") or []) if str(x).strip()])
             deny_terms = list(dict.fromkeys([t for t in deny_terms if t]))
             deny_line = f"\n【禁止扩展】禁止提及：{', '.join(deny_terms)}。" if deny_terms else ""
-            regen_guard = (
-                "\n\n【检测到上轮回答存在违规】请重写答案：\n"
-                "1) 严格禁止输出未经注入 sentence 原文出现的括号扩写（例如 SFTSV（...））。\n"
-                "2) 只回答用户问题涉及维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
-                "【症状严格规则】若问题是“症状/临床表现”，只允许列出注入知识原文中出现过的症状/体征/实验室异常词组，不得新增其他症状名。\n"
-                "3) 先列出“注入知识明确支持的要点”（用短句/逗号分隔）。\n"
-                "4) 若注入知识未覆盖某些细节，请仅说明“注入知识未覆盖该细节/证据不足”，不要直接放弃回答。"
-                + deny_line
-            )
+            if is_english_prompt:
+                regen_guard = (
+                    "\n\nDetected policy/grounding issues in previous answer. Rewrite with these rules:\n"
+                    "1) Keep only facts supported by injected knowledge.\n"
+                    "2) Stay on the asked aspect; avoid unrelated expansions.\n"
+                    "3) If coverage is insufficient, say 'insufficient evidence' briefly."
+                )
+            else:
+                regen_guard = (
+                    "\n\n【检测到上轮回答存在违规】请重写答案：\n"
+                    "1) 严格禁止输出未经注入 sentence 原文出现的括号扩写（例如 SFTSV（...））。\n"
+                    "2) 只回答用户问题涉及维度；不要扩展到症状/治疗/地区分布等其他维度，除非用户明确问到。\n"
+                    "【症状严格规则】若问题是“症状/临床表现”，只允许列出注入知识原文中出现过的症状/体征/实验室异常词组，不得新增其他症状名。\n"
+                    "3) 先列出“注入知识明确支持的要点”（用短句/逗号分隔）。\n"
+                    "4) 若注入知识未覆盖某些细节，请仅说明“注入知识未覆盖该细节/证据不足”，不要直接放弃回答。"
+                    + deny_line
+                )
             injected_round1, steps1 = _run_once(prompt_for_user=user_prompt, extra_guard=regen_guard)
             ev_texts1 = _gather_ev_texts(steps1)
             violations1 = _detect_violations(
@@ -2212,36 +2232,14 @@ def main() -> None:
             entity_priming_texts=_ep_texts_simple,
         )
 
-        # Dual-channel rescue: if KV-injected answer quality collapses (gibberish),
-        # switch to prompt evidence channel for readable grounded output.
-        if _is_low_quality_text(injected_final):
-            ev_for_rescue = ev_texts_final or _gather_ev_texts(steps0)
-            if ev_for_rescue:
-                ev_block = "\n".join([f"- {str(t)}" for t in ev_for_rescue if str(t).strip()])
-                rescue_prompt = (
-                    str(user_prompt).strip()
-                    + "\n\n### 已检索证据（请严格基于以下证据回答）：\n"
-                    + ev_block
-                    + "\n\n### 要求：\n"
-                    + "1. 用自然语言中文回答，覆盖证据中的核心事实。\n"
-                    + "2. 不要输出乱码、符号串、代码片段或无关语言混杂内容。\n"
-                    + "3. 若证据不足，请明确说明“证据不足”。"
-                )
-                rescue_prompt = KVI2Runtime._format_prompt(tok, rescue_prompt, use_chat_template=bool(args.use_chat_template))
-                rescued = MultiStepInjector._greedy_generate_with_past_prefix(
-                    model=model,
-                    tokenizer=tok,
-                    prompt=rescue_prompt,
-                    device=device,
-                    past_key_values=None,
-                    max_new_tokens=128,
-                    no_repeat_ngram_size=6,
-                    repetition_penalty=1.15,
-                ).strip()
-                if not _is_low_quality_text(rescued):
-                    injected_final = rescued
-                    dual_channel_rescue_used = 1
-                    dual_channel_rescue_reason = "low_quality_injected_answer"
+        # Keep SIMPLE as strict KV-channel-only decoding path.
+        # Do not auto-fallback to prompt-evidence rescue (modeA-like behavior).
+        # If output is clearly broken, fall back to baseline answer from the same
+        # user prompt (still no injected-evidence text channel).
+        if _is_low_quality_text(injected_final) and not _is_low_quality_text(base_answer):
+            injected_final = str(base_answer or "").strip()
+            dual_channel_rescue_used = 1
+            dual_channel_rescue_reason = "fallback_to_baseline_no_kv"
 
         out_simple = {
             "pipeline": "simple",

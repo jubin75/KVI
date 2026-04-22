@@ -1,0 +1,95 @@
+{
+  "dataset": "TRUTHFULQA",
+  "dataset_path": "experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
+  "n": 100,
+  "methods": [
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 9.0,
+      "em_ci95_lo": 4.0,
+      "em_ci95_hi": 15.0,
+      "f1_mean": 0.2161,
+      "correct": 9,
+      "total": 100,
+      "truthfulqa_mc1_proxy": 0.65,
+      "truthfulqa_mc2_proxy": 0.542,
+      "truthfulqa_mc_valid_n": 100
+    },
+    {
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "retrieval": "ANN",
+      "injection": "KV",
+      "em": 2.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 5.0,
+      "f1_mean": 0.1175,
+      "correct": 2,
+      "total": 100,
+      "truthfulqa_mc1_proxy": 0.52,
+      "truthfulqa_mc2_proxy": 0.4648,
+      "truthfulqa_mc_valid_n": 100
+    },
+    {
+      "method_key": "kvi",
+      "method": "KVI",
+      "retrieval": "graph",
+      "injection": "KV + prompt",
+      "em": 1.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 3.0,
+      "f1_mean": 0.2483,
+      "correct": 1,
+      "total": 100,
+      "truthfulqa_mc1_proxy": 0.48,
+      "truthfulqa_mc2_proxy": 0.4878,
+      "truthfulqa_mc_valid_n": 100
+    }
+  ],
+  "paths": {
+    "predictions": "experiments/exp02_hallucination/results/truthfulqa_kvi_optimize_D_v2_pre100_20260419_145354/predictions.jsonl",
+    "results_md": "experiments/exp02_hallucination/results/truthfulqa_kvi_optimize_D_v2_pre100_20260419_145354/results.md",
+    "results_csv": "experiments/exp02_hallucination/results/truthfulqa_kvi_optimize_D_v2_pre100_20260419_145354/results.csv"
+  },
+  "statistics": {
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "truthfulqa_kvi_tuned_overrides": true,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 500,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 1000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_vs_graphrag": {
+        "p_value": 0.007992007992007992
+      },
+      "kvi_vs_kv_prefix": {
+        "p_value": 1.0
+      }
+    },
+    "truthfulqa_mc_note": "truthfulqa_mc1_proxy / truthfulqa_mc2_proxy are proxy metrics. likelihood_proxy mode scores options by average token log-prob under base model conditioned on question + method answer. Not identical to official TruthfulQA MC1/MC2 pipeline. For method kvi: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened grounded KVI decode (diagnosis_result). Legacy `injected` uses full ANN injected_answer for KVI MC1 when kv_prefix is co-run. TruthfulQA can apply tuned KVI runtime overrides unless disabled for controlled ablations. Stored predictions / EM / F1 are unchanged.",
+    "truthfulqa_mc_mode": "likelihood_proxy",
+    "truthfulqa_kvi_mc1_answer": "grounded",
+    "kvi_truthfulqa_runtime_overrides": {
+      "kvi_max_kv_triples": 4,
+      "kvi_drm_threshold": 0.05,
+      "kvi_top_k_relations": 4,
+      "truthfulqa_kvi_minimal_prompt": true,
+      "truthfulqa_kvi_reconcile": true,
+      "kvi_max_new_tokens_effective": 96,
+      "kvi_reconcile_no_kv_decode_effective": true,
+      "kvi_mc_likelihood_shorten_max_chars": 384,
+      "kvi_use_grounded_answer_for_eval": true
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "dataset": "TRUTHFULQA",
+  "dataset_path": "experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
+  "n": 10,
+  "methods": [
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.1752,
+      "correct": 0,
+      "total": 10,
+      "truthfulqa_mc1_proxy": 0.8,
+      "truthfulqa_mc2_proxy": 0.5904,
+      "truthfulqa_mc_valid_n": 10
+    }
+  ],
+  "paths": {
+    "predictions": "experiments/exp02_hallucination/results/truthfulqa_smoke10_graphrag_only_v2/predictions.jsonl",
+    "results_md": "experiments/exp02_hallucination/results/truthfulqa_smoke10_graphrag_only_v2/results.md",
+    "results_csv": "experiments/exp02_hallucination/results/truthfulqa_smoke10_graphrag_only_v2/results.csv"
+  },
+  "statistics": {
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "truthfulqa_kvi_tuned_overrides": true,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {},
+    "truthfulqa_mc_note": "truthfulqa_mc1_proxy / truthfulqa_mc2_proxy are proxy metrics. likelihood_proxy mode scores options by average token log-prob under base model conditioned on question + method answer. Not identical to official TruthfulQA MC1/MC2 pipeline. For method kvi: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened grounded KVI decode (diagnosis_result). Legacy `injected` uses full ANN injected_answer for KVI MC1 when kv_prefix is co-run. TruthfulQA can apply tuned KVI runtime overrides unless disabled for controlled ablations. Stored predictions / EM / F1 are unchanged.",
+    "truthfulqa_mc_mode": "likelihood_proxy",
+    "truthfulqa_kvi_mc1_answer": "grounded"
+  }
+}

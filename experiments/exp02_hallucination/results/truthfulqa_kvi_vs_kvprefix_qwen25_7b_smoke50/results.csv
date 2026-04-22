@@ -1,0 +1,3 @@
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean,TQA MC1 Proxy,TQA MC2 Proxy,TQA MC Valid N
+KV Prefix,ANN,KV,2.0,0.0,6.0,0.1,0.680,0.532,50
+KVI,graph,KV + prompt,2.0,0.0,6.0,0.1,0.640,0.528,50

@@ -1,0 +1,4 @@
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean,TQA MC1 Proxy,TQA MC2 Proxy,TQA MC Valid N
+GraphRAG,graph,prompt,18.4,15.2,21.6,0.3,0.642,0.527,500
+KV Prefix,ANN,KV,3.2,1.8,4.8,0.1,0.462,0.435,500
+KVI,graph,KV + prompt,10.2,7.6,13.0,0.3,0.556,0.490,500

@@ -1,0 +1,25 @@
+{
+  "total_rows": 20,
+  "methods": {
+    "graphrag": {
+      "rows": 10,
+      "oracle_rows": 0,
+      "retrieval_hit_any_rate": 0.0,
+      "drm_hit_any_rate": 0.0,
+      "prompt_hit_any_rate": 0.0,
+      "failure_breakdown": {
+        "NO_ORACLE": 10
+      }
+    },
+    "kvi": {
+      "rows": 10,
+      "oracle_rows": 0,
+      "retrieval_hit_any_rate": 0.0,
+      "drm_hit_any_rate": 0.0,
+      "prompt_hit_any_rate": 0.0,
+      "failure_breakdown": {
+        "NO_ORACLE": 10
+      }
+    }
+  }
+}

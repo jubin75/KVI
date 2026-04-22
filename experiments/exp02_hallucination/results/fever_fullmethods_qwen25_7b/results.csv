@@ -1,0 +1,6 @@
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean,FEVER Label Acc,FEVER CI Lo,FEVER CI Hi
+LLM,none,none,38.3,35.2,41.2,0.2,30.9,28.0,33.7
+RAG,ANN,prompt,92.6,91.0,94.1,0.3,92.5,90.9,94.1
+GraphRAG,graph,prompt,73.0,70.4,76.0,0.6,68.8,66.1,72.0
+KV Prefix,ANN,KV,74.3,71.7,76.8,0.3,72.3,69.6,75.1
+KVI,graph,KV + prompt,89.3,87.3,91.2,0.9,89.3,87.3,91.2

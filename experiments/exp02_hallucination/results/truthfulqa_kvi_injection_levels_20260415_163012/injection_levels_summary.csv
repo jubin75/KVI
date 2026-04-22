@@ -1,0 +1,5 @@
+kvi_level,mc1_proxy,mc2_proxy,graphrag_mc2,kvprefix_mc2,delta_vs_graphrag,delta_vs_kvprefix,summary_json
+0,0.6800,0.5406,0.5522,0.5029,-0.0116,0.0377,/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_kvi_injection_levels_20260415_163012/level_0/summary.json
+2,0.6800,0.5405,0.5522,0.5053,-0.0117,0.0352,/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_kvi_injection_levels_20260415_163012/level_2/summary.json
+4,0.6800,0.5405,0.5522,0.5109,-0.0117,0.0296,/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_kvi_injection_levels_20260415_163012/level_4/summary.json
+6,0.6800,0.5405,0.5522,0.5068,-0.0117,0.0337,/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_kvi_injection_levels_20260415_163012/level_6/summary.json

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="390" viewBox="0 0 1320 390">
+  <rect width="100%" height="100%" fill="#fafafa"/>
+  <text x="660" y="17" text-anchor="middle" font-size="14" font-weight="700" font-family="system-ui, sans-serif" fill="#111111">Hallucination rate by method (unified proxy metrics, 3 panels)</text>
+  <text x="220.0" y="44.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">TruthfulQA — MC1 proxy</text>
+    <text x="248.0" y="364.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(26.0,193.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Hallucination Rate (%)</text>
+    <line x1="80.0" y1="324.0" x2="416.0" y2="324.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="328.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="80.0" y1="258.5" x2="416.0" y2="258.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="262.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="80.0" y1="193.0" x2="416.0" y2="193.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="197.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="80.0" y1="127.5" x2="416.0" y2="127.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="131.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <line x1="80.0" y1="62.0" x2="416.0" y2="62.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="66.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">100</text>
+    <rect x="83.8" y="230.7" width="41.7" height="93.3" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="104.7" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="104.7" y="226.7" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">35.6%</text>
+    <rect x="151.0" y="251.7" width="41.7" height="72.3" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="171.9" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="171.9" y="247.7" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">27.6%</text>
+    <rect x="218.2" y="283.1" width="41.7" height="40.9" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="239.1" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="239.1" y="279.1" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">15.6%</text>
+    <rect x="285.4" y="315.6" width="41.7" height="8.4" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="306.3" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="306.3" y="311.6" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">3.2%</text>
+    <rect x="352.6" y="265.8" width="41.7" height="58.2" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="373.5" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="373.5" y="261.8" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">22.2%</text>
+  <text x="660.0" y="44.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">TruthfulQA — MC2 proxy</text>
+    <text x="688.0" y="364.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(466.0,193.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Hallucination Rate (%)</text>
+    <line x1="520.0" y1="324.0" x2="856.0" y2="324.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="512.0" y="328.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="520.0" y1="258.5" x2="856.0" y2="258.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="512.0" y="262.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="520.0" y1="193.0" x2="856.0" y2="193.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="512.0" y="197.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="520.0" y1="127.5" x2="856.0" y2="127.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="512.0" y="131.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <line x1="520.0" y1="62.0" x2="856.0" y2="62.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="512.0" y="66.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">100</text>
+    <rect x="523.8" y="158.6" width="41.7" height="165.4" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="544.7" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="544.7" y="154.6" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">63.1%</text>
+    <rect x="591.0" y="163.9" width="41.7" height="160.1" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="611.9" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="611.9" y="159.9" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">61.1%</text>
+    <rect x="658.2" y="205.3" width="41.7" height="118.7" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="679.1" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="679.1" y="201.3" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">45.3%</text>
+    <rect x="725.4" y="76.4" width="41.7" height="247.6" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="746.3" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="746.3" y="72.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">94.5%</text>
+    <rect x="792.6" y="204.4" width="41.7" height="119.6" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="813.5" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="813.5" y="200.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">45.7%</text>
+  <text x="1100.0" y="44.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">FEVER — Label accuracy</text>
+    <text x="1128.0" y="364.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(906.0,193.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Hallucination Rate (%)</text>
+    <line x1="960.0" y1="324.0" x2="1296.0" y2="324.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="952.0" y="328.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="960.0" y1="258.5" x2="1296.0" y2="258.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="952.0" y="262.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="960.0" y1="193.0" x2="1296.0" y2="193.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="952.0" y="197.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="960.0" y1="127.5" x2="1296.0" y2="127.5" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="952.0" y="131.5" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <line x1="960.0" y1="62.0" x2="1296.0" y2="62.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="952.0" y="66.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">100</text>
+    <rect x="963.8" y="143.0" width="41.7" height="181.0" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="984.7" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="984.7" y="139.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">69.1%</text>
+    <rect x="1031.0" y="304.4" width="41.7" height="19.6" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="1051.9" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="1051.9" y="300.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">7.5%</text>
+    <rect x="1098.2" y="242.3" width="41.7" height="81.7" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="1119.1" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="1119.1" y="238.3" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">31.2%</text>
+    <rect x="1165.4" y="251.4" width="41.7" height="72.6" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="1186.3" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="1186.3" y="247.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">27.7%</text>
+    <rect x="1232.6" y="296.0" width="41.7" height="28.0" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="1253.5" y="338.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="1253.5" y="292.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">10.7%</text>
+</svg>

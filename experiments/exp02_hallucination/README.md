@@ -1,5 +1,7 @@
 # Experiment 02 — Hallucination (proxy metrics)
 
+**当前优先的实验约定（按日期滚动更新，含 audit 冒烟参数与命令骨架）**：见 [`LATEST_EXPERIMENT_REQUIREMENTS.md`](./LATEST_EXPERIMENT_REQUIREMENTS.md)。
+
 ## 实验方式与 KVI 分析目标（速查）
 
 后续若在 Exp02 上做 **KVI 提升**，默认以此为准：**同时对照 TruthfulQA 与 FEVER**，从两套结果里归纳能改进 KVI 的方向（提示、检索与 KV、超参、结构等），而不是只优化其中一集并把另一集带崩。
@@ -77,7 +79,7 @@ nohup bash experiments/exp02_hallucination/code/run_fever_gpu_detached.sh \
 
 ## 当前图中的「幻觉率」是什么（与社区口径的差异）
 
-流水线末尾写的是 **Hallucination Rate (proxy) = 100 − relaxed EM**（见 `run_exp02_hallucination.py` 写 `hallucination_proxy_summary.json` 的注释）。
+`run_exp02_hallucination.py` 写出的 **`hallucination_proxy_summary.json`** 中：**TruthfulQA** 为 **`100 − relaxed EM`**，**FEVER** 为 **`100 − fever_label_accuracy`**（见该 JSON 的 `note` 与脚本内注释）。
 
 - **relaxed EM**（`experiments/exp01_main_qa/code/metrics.py`）：SQuAD 风格归一化后，**任一条 gold 是否作为子串出现在模型整段输出中**（并对 `yes`/`no` 有少量扩展）。适合长段生成的 Hotpot/NQ 风格 QA，**不是** TruthfulQA 或 FEVER 官方主表口径。  
 - **应对齐的社区/官方口径（建议写论文或对外对比时使用）**  
@@ -90,10 +92,13 @@ nohup bash experiments/exp02_hallucination/code/run_fever_gpu_detached.sh \
    - `run_exp01.py` 在 `--dataset_name FEVER` 时额外计算 **标签准确率**：在模型全文里找 **首次出现** 的 `SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO`（`metrics.parse_fever_label`），与 `prepare_exp02_datasets.py` 写入的 gold 比较。  
    - 见 `results/fever_fullmethods_qwen25_7b/summary.json` 中每方法的 **`fever_label_accuracy`**、**`fever_label_ci95_*`**；逐题见 `predictions.jsonl` 的 **`fever_label_em`**。  
    - 比 **relaxed EM** 更接近共享任务的 **veracity 标签**口径；**仍不是**带证据提交的官方 scorer。  
-2. **TruthfulQA（第二步，待做）**  
-   - 接入 **MC 题目格式**（MC1/MC2）或 TruthfulQA **官方评测脚本**；依赖与数据格式改动更多，排在 FEVER 之后。
+2. **TruthfulQA（第二步，已接入）**  
+   - `prepare_exp02_datasets.py` 现已支持把 `multiple_choice` 的 `mc1_targets` / `mc2_targets`（若本地或在线可读）并入 `truthfulqa_eval.jsonl`。  
+   - 若 `multiple_choice` 不可用，会从 generation split 的 `correct_answers/incorrect_answers` 自建 MC targets，保证覆盖率。  
+   - `run_exp01.py` 现已输出 `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`，默认 `--truthfulqa_mc_mode likelihood_proxy`（对候选选项做对数似然打分）。  
+   - 注意：该实现比纯字符串匹配更接近 MC 口径，但仍记为 **proxy**，与官方 TruthfulQA 发布链路并非逐项完全等价。
 
-Exp02 的 **`hallucination_proxy_summary.json` / 柱状图** 仍为 **`100 − relaxed EM`**；读 FEVER 的「社区友好」指标时请直接看 **`fever_label_accuracy`**（或可后续加第二张图）。`plot_hallucination_proxy_bars.py` 对 TruthfulQA 一栏也仍应标注 **proxy**。
+Exp02 的 **`hallucination_proxy_summary.json`**（由 `run_exp02_hallucination.py` 写出）口径是：**TruthfulQA = `100 − relaxed EM`**，**FEVER = `100 − fever_label_accuracy`**（与 JSON 内 `note` 一致）。因此 **同一文件里两套任务的「幻觉率」不可横向类比**：TruthfulQA 这一列往往极高（长生成里很难子串命中参考句），并不代表 FEVER 上模型更「诚实」。论文主图若要与 FEVER 并列、且 TruthfulQA 希望接近社区 MC 语义，请用下面的 **`results/summary.json` + 三栏图**（MC1 / MC2 / FEVER label）。
 
 ---
 
@@ -154,43 +159,96 @@ Exp02 的 **`hallucination_proxy_summary.json` / 柱状图** 仍为 **`100 − r
 
 **绝对路径（本机）**：`/home/zd/dev/KVI/experiments/exp02_hallucination/results/`
 
+### 当前已跑结果（TruthfulQA + FEVER）
+
+> 口径说明：下表 EM 为 `relaxed EM`；Exp02 的 hallucination rate 为 `100 - relaxed EM`（proxy）。
+
+| Dataset | Method | EM (%) | 95% CI | F1 Mean | Proxy Hallucination (%) |
+|---|---|---:|---:|---:|---:|
+| TruthfulQA | LLM | 5.0 | [3.2, 7.0] | 0.176 | 95.0 |
+| TruthfulQA | RAG | 7.4 | [5.0, 9.6] | 0.135 | 92.6 |
+| TruthfulQA | GraphRAG | 17.8 | [14.6, 21.2] | 0.195 | 82.2 |
+| TruthfulQA | KV Prefix | 3.8 | [2.2, 5.6] | 0.016 | 96.2 |
+| TruthfulQA | KVI | 11.8 | [9.0, 14.6] | 0.115 | 88.2 |
+| FEVER | LLM | 38.3 | [35.2, 41.2] | 0.173 | 61.7 |
+| FEVER | RAG | 92.6 | [91.0, 94.1] | 0.288 | 7.4 |
+| FEVER | GraphRAG | 73.0 | [70.4, 76.0] | 0.576 | 27.0 |
+| FEVER | KV Prefix | 74.3 | [71.7, 76.8] | 0.312 | 25.7 |
+| FEVER | KVI | 89.3 | [87.3, 91.2] | 0.893 | 10.7 |
+
+FEVER 额外标签指标（更接近 veracity 任务）：
+
+| FEVER Method | FEVER Label Accuracy (%) | 95% CI |
+|---|---:|---:|
+| LLM | 30.9 | [28.0, 33.7] |
+| RAG | 92.5 | [90.9, 94.1] |
+| GraphRAG | 68.8 | [66.1, 72.0] |
+| KV Prefix | 72.3 | [69.6, 75.1] |
+| KVI | 89.3 | [87.3, 91.2] |
+
+对应文件：
+
+- `results/truthfulqa_fullmethods_qwen25_7b/summary.json`
+- `results/fever_fullmethods_qwen25_7b/summary.json`
+- `results/hallucination_proxy_summary.json`
+
 ### 表格与原始指标
 
 | 内容 | 路径 |
 |------|------|
 | 跨数据集汇总（代理指标） | `results/hallucination_proxy_summary.json`、`hallucination_proxy_summary.md`（跑完 `run_exp02_hallucination.py` 后生成；**无则**可用下面两个 `summary.json` 手搓图） |
-| TruthfulQA 逐方法 EM / F1 / CI | `results/truthfulqa_fullmethods_qwen25_7b/summary.json`、`results.md`、`results.csv` |
+| TruthfulQA 逐方法 EM / F1 / CI（以及 `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`） | `results/truthfulqa_fullmethods_qwen25_7b/summary.json`、`results.md`、`results.csv` |
 | FEVER 同上 + **标签准确率** `fever_label_accuracy` | `results/fever_fullmethods_qwen25_7b/summary.json`、`results.md`、`results.csv` |
 | 逐题预测 | 各数据集目录下 `predictions.jsonl` |
 
 ### 发表论文用的矢量图（SVG，可插 LaTeX / Word）
 
+**两栏 vs 三栏（不要混用文件）**
+
+| 图 | 栏数 | TruthfulQA 口径 | FEVER 口径 |
+|----|------|-----------------|------------|
+| `hallucination_proxy_bars_paper.svg` | **2** | `100 − relaxed EM`（子串 proxy，柱子常 **80–96%**） | `100 − fever_label_accuracy`（与 `hallucination_proxy_summary.json` 一致） |
+| `hallucination_proxy_three_panel_paper.svg` 或 `unified_hallucination_bars.svg` | **3** | 左两栏：`100 − MC1 / MC2 likelihood proxy` | 右栏：`100 − fever_label_accuracy` |
+
+三栏数据来自跑完 Exp02 后生成的 **`results/summary.json`**（与 `hallucination_proxy_summary.json` 不同：后者 TruthfulQA 仍是 relaxed EM）。
+
 脚本：`experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py`
 
 ```bash
-# 推荐：全量跑完后有 hallucination_proxy_summary.json 时
+# 推荐：一次生成 paper 两栏 + 三栏 + 可选拆分图（需已有 results/summary.json）
 python3 experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py \
   --paper \
-  --fever_label_figure
+  --three_panel_unified \
+  --fever_label_figure \
+  --truthfulqa_mc_figure
 
-# 或仅从两个 summary.json 生成（无 proxy 汇总文件时）
+# 或仅从两个 per-dataset summary.json 生成（无 hallucination_proxy_summary.json 时）
 python3 experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py \
   --truthfulqa_summary experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b/summary.json \
   --fever_summary experiments/exp02_hallucination/results/fever_fullmethods_qwen25_7b/summary.json \
   --paper \
-  --fever_label_figure
+  --three_panel_unified \
+  --fever_label_figure \
+  --truthfulqa_mc_figure
 ```
+
+（三栏也可单独用 `code/plot_unified_hallucination_bars.py` 写出 `unified_hallucination_bars.svg`，样式略简；与 `--three_panel_unified` 使用同一 `results/summary.json`。）
 
 | 输出文件 | 用途 |
 |----------|------|
-| **`hallucination_proxy_bars_paper.svg`** | **论文优先**：白底、Helvetica、图注说明「100 − relaxed EM（proxy）」 |
+| **`hallucination_proxy_three_panel_paper.svg`** | **论文并列主图推荐**：三栏统一口径（TQA MC1 + TQA MC2 + FEVER label → 幻觉率） |
+| `hallucination_proxy_three_panel.svg` | 同左，非 `paper` 样式 |
+| `unified_hallucination_bars.svg` | 与上同类三栏（`plot_unified_hallucination_bars.py`） |
+| **`hallucination_proxy_bars_paper.svg`** | **仅两栏**：左 TQA **relaxed EM**（易显「虚高」）、右 FEVER label；图注已写明差异 |
 | `hallucination_proxy_bars.svg` | 屏幕预览 / 非印刷 |
 | **`fever_label_accuracy_bars_paper.svg`** | FEVER **三分类标签准确率**（需 `summary.json` 含 `fever_label_accuracy`；老结果需重跑 `run_exp01.py`） |
 | `fever_label_accuracy_bars.svg` | 同左，非 `paper` 样式 |
+| **`truthfulqa_mc_proxy_bars_paper.svg`** | TruthfulQA **MC1/MC2 proxy**（来自 `truthfulqa_mc*_proxy`，非官方 MC 脚本分） |
+| `truthfulqa_mc_proxy_bars.svg` | 同左，非 `paper` 样式 |
 
 **PDF**：编辑部常要 PDF/EPS。可用 Inkscape（`inkscape file.svg --export-filename=file.pdf`）或 `rsvg-convert -f pdf -o file.pdf file.svg` 从 **SVG** 转换，保持矢量。
 
-**图中要写清的表述**：TruthfulQA 子图对应的是 **relaxed EM 的代理**，不是官方 MC；FEVER 子图若用 proxy 同上；若另附 **`fever_label_accuracy`** 图，更接近 **共享任务 veracity 标签**口径（仍非带证据的官方 scorer）。
+**图中要写清的表述**：两栏图中 **TruthfulQA = relaxed EM 代理**，与 **MC1/MC2** 或人类评测不是同一数字；三栏图中 TruthfulQA 为 **likelihood MC proxy**。FEVER 侧以 **标签准确率** 为主；仍非带证据的官方 fever-scorer。
 
 另：`*.html` 仅为浏览器预览，投稿一般用 **SVG/PDF**。
 

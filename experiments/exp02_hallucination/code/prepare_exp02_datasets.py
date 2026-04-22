@@ -25,6 +25,11 @@ def main() -> None:
     p.add_argument("--truthfulqa_max", type=int, default=500)
     p.add_argument("--fever_max", type=int, default=1000)
     p.add_argument("--streaming", action="store_true")
+    p.add_argument(
+        "--offline_only",
+        action="store_true",
+        help="Use local mirrored parquet files only (no HF network fallback).",
+    )
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -32,13 +37,13 @@ def main() -> None:
     mirror_data_root = Path(args.mirror_data_root)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # TruthfulQA (retry for transient HF limits)
+    # TruthfulQA generation split (retry for transient HF limits)
     last_err = None
     ds_t = None
     local_truth = mirror_root / "truthful_qa_generation_val.parquet"
     if local_truth.exists():
         ds_t = load_dataset("parquet", data_files=str(local_truth), split="train")
-    else:
+    elif not args.offline_only:
         for i in range(6):
             try:
                 ds_t = load_dataset("truthful_qa", "generation", split="validation", streaming=bool(args.streaming))
@@ -47,7 +52,48 @@ def main() -> None:
                 last_err = e
                 time.sleep(15 * (i + 1))
     if ds_t is None:
+        if args.offline_only:
+            raise RuntimeError(
+                f"offline_only is set but missing local TruthfulQA generation parquet: {local_truth}"
+            )
         raise RuntimeError(f"Failed loading truthful_qa after retries: {last_err}")
+
+    # Optional TruthfulQA multiple-choice targets (for MC proxy/offline alignment).
+    ds_t_mc = None
+    local_truth_mc_candidates = [
+        mirror_root / "truthful_qa_multiple_choice_val.parquet",
+        mirror_data_root / "truthful_qa/multiple_choice/validation-00000-of-00001.parquet",
+    ]
+    local_truth_mc = next((p for p in local_truth_mc_candidates if p.exists()), None)
+    if local_truth_mc is not None:
+        try:
+            ds_t_mc = load_dataset("parquet", data_files=str(local_truth_mc), split="train")
+        except Exception:
+            ds_t_mc = None
+    if ds_t_mc is None and (not args.offline_only):
+        # best-effort online fallback; many environments are rate-limited/forbidden.
+        for i in range(3):
+            try:
+                ds_t_mc = load_dataset("truthful_qa", "multiple_choice", split="validation", streaming=bool(args.streaming))
+                break
+            except Exception:
+                time.sleep(10 * (i + 1))
+
+    mc_by_question: Dict[str, Dict[str, Any]] = {}
+    if ds_t_mc is not None:
+        for ex in ds_t_mc:
+            q = str(ex.get("question") or "").strip()
+            if not q:
+                continue
+            mc1 = ex.get("mc1_targets")
+            mc2 = ex.get("mc2_targets")
+            row: Dict[str, Any] = {}
+            if isinstance(mc1, dict):
+                row["mc1_targets"] = mc1
+            if isinstance(mc2, dict):
+                row["mc2_targets"] = mc2
+            if row:
+                mc_by_question[q] = row
     t_rows: List[Dict[str, Any]] = []
     for i, ex in enumerate(ds_t):
         q = str(ex.get("question") or "").strip()
@@ -61,15 +107,34 @@ def main() -> None:
                     answers.append(s)
         if not q or not answers:
             continue
-        t_rows.append(
-            {
-                "id": f"truthfulqa_{i}",
-                "question": q,
-                "answer": answers[0],
-                "answers": answers,
-                "dataset": "TruthfulQA",
-            }
-        )
+        row: Dict[str, Any] = {
+            "id": f"truthfulqa_{i}",
+            "question": q,
+            "answer": answers[0],
+            "answers": answers,
+            "dataset": "TruthfulQA",
+        }
+        # Always build MC-style targets from generation split as fallback.
+        incorrect = ex.get("incorrect_answers")
+        if isinstance(corr, list) and isinstance(incorrect, list):
+            cands: List[str] = []
+            labels: List[int] = []
+            for s in corr:
+                t = str(s or "").strip()
+                if t and t not in cands:
+                    cands.append(t)
+                    labels.append(1)
+            for s in incorrect:
+                t = str(s or "").strip()
+                if t and t not in cands:
+                    cands.append(t)
+                    labels.append(0)
+            if cands and any(labels):
+                row["mc1_targets"] = {"choices": cands, "labels": labels}
+                row["mc2_targets"] = {"choices": cands, "labels": labels}
+        if q in mc_by_question:
+            row.update(mc_by_question[q])
+        t_rows.append(row)
         if args.truthfulqa_max and len(t_rows) >= int(args.truthfulqa_max):
             break
 
@@ -83,7 +148,7 @@ def main() -> None:
     local_fever = next((p for p in local_fever_candidates if p.exists()), None)
     if local_fever is not None:
         ds_f = load_dataset("parquet", data_files=str(local_fever), split="train")
-    else:
+    elif not args.offline_only:
         fever_candidates = [
             ("pietrolesci/fever", None, "validation"),
             ("SetFit/fever", None, "validation"),
@@ -104,6 +169,11 @@ def main() -> None:
             if ds_f is not None:
                 break
     if ds_f is None:
+        if args.offline_only:
+            raise RuntimeError(
+                "offline_only is set but local FEVER parquet not found under mirror roots. "
+                f"Checked: {[str(x) for x in local_fever_candidates]}"
+            )
         raise RuntimeError(
             "Failed loading FEVER from local mirror and fallback candidates. "
             "Try: python3 /home/zd/dev/KVI/experiments/code/download_mirror_datasets.py "
@@ -150,6 +220,7 @@ def main() -> None:
 
     manifest = {
         "counts": {"truthfulqa": len(t_rows), "fever": len(f_rows)},
+        "truthfulqa_mc_targets_covered": int(sum(1 for r in t_rows if isinstance(r.get("mc1_targets"), dict) and isinstance(r.get("mc2_targets"), dict))),
         "outputs": {"truthfulqa": str(t_path), "fever": str(f_path)},
     }
     (out_dir / "dataset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

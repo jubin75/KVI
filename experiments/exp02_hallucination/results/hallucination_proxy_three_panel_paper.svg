@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="410" viewBox="0 0 1320 410">
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="660" y="17" text-anchor="middle" font-size="13" font-weight="700" font-family="Helvetica, Arial, sans-serif" fill="#111111">Hallucination rate by method (unified proxy metrics, 3 panels)</text>
+  <text x="220.0" y="44.0" text-anchor="middle" font-size="14" font-weight="600" font-family="Helvetica, Arial, sans-serif" fill="#111111">TruthfulQA — MC1 proxy</text>
+    <text x="248.0" y="372.0" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Method</text>
+    <text transform="translate(26.0,197.0) rotate(-90)" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Hallucination Rate (%)</text>
+    <line x1="80.0" y1="332.0" x2="416.0" y2="332.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="72.0" y="336.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">0</text>
+    <line x1="80.0" y1="264.5" x2="416.0" y2="264.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="72.0" y="268.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">25</text>
+    <line x1="80.0" y1="197.0" x2="416.0" y2="197.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="72.0" y="201.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">50</text>
+    <line x1="80.0" y1="129.5" x2="416.0" y2="129.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="72.0" y="133.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">75</text>
+    <line x1="80.0" y1="62.0" x2="416.0" y2="62.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="72.0" y="66.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">100</text>
+    <rect x="83.8" y="235.9" width="41.7" height="96.1" rx="2" fill="#1f77b4" opacity="1"/>
+    <text x="104.7" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">LLM</text>
+    <text x="104.7" y="231.9" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">35.6%</text>
+    <rect x="151.0" y="257.5" width="41.7" height="74.5" rx="2" fill="#ff7f0e" opacity="1"/>
+    <text x="171.9" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">RAG</text>
+    <text x="171.9" y="253.5" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">27.6%</text>
+    <rect x="218.2" y="289.9" width="41.7" height="42.1" rx="2" fill="#2ca02c" opacity="1"/>
+    <text x="239.1" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">GraphRAG</text>
+    <text x="239.1" y="285.9" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">15.6%</text>
+    <rect x="285.4" y="323.4" width="41.7" height="8.6" rx="2" fill="#d62728" opacity="1"/>
+    <text x="306.3" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KV Prefix</text>
+    <text x="306.3" y="319.4" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">3.2%</text>
+    <rect x="352.6" y="272.1" width="41.7" height="59.9" rx="2" fill="#9467bd" opacity="1"/>
+    <text x="373.5" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KVI</text>
+    <text x="373.5" y="268.1" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">22.2%</text>
+  <text x="660.0" y="44.0" text-anchor="middle" font-size="14" font-weight="600" font-family="Helvetica, Arial, sans-serif" fill="#111111">TruthfulQA — MC2 proxy</text>
+    <text x="688.0" y="372.0" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Method</text>
+    <text transform="translate(466.0,197.0) rotate(-90)" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Hallucination Rate (%)</text>
+    <line x1="520.0" y1="332.0" x2="856.0" y2="332.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="512.0" y="336.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">0</text>
+    <line x1="520.0" y1="264.5" x2="856.0" y2="264.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="512.0" y="268.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">25</text>
+    <line x1="520.0" y1="197.0" x2="856.0" y2="197.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="512.0" y="201.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">50</text>
+    <line x1="520.0" y1="129.5" x2="856.0" y2="129.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="512.0" y="133.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">75</text>
+    <line x1="520.0" y1="62.0" x2="856.0" y2="62.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="512.0" y="66.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">100</text>
+    <rect x="523.8" y="161.5" width="41.7" height="170.5" rx="2" fill="#1f77b4" opacity="1"/>
+    <text x="544.7" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">LLM</text>
+    <text x="544.7" y="157.5" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">63.1%</text>
+    <rect x="591.0" y="167.0" width="41.7" height="165.0" rx="2" fill="#ff7f0e" opacity="1"/>
+    <text x="611.9" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">RAG</text>
+    <text x="611.9" y="163.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">61.1%</text>
+    <rect x="658.2" y="209.7" width="41.7" height="122.3" rx="2" fill="#2ca02c" opacity="1"/>
+    <text x="679.1" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">GraphRAG</text>
+    <text x="679.1" y="205.7" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">45.3%</text>
+    <rect x="725.4" y="76.8" width="41.7" height="255.2" rx="2" fill="#d62728" opacity="1"/>
+    <text x="746.3" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KV Prefix</text>
+    <text x="746.3" y="72.8" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">94.5%</text>
+    <rect x="792.6" y="208.7" width="41.7" height="123.3" rx="2" fill="#9467bd" opacity="1"/>
+    <text x="813.5" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KVI</text>
+    <text x="813.5" y="204.7" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">45.7%</text>
+  <text x="1100.0" y="44.0" text-anchor="middle" font-size="14" font-weight="600" font-family="Helvetica, Arial, sans-serif" fill="#111111">FEVER — Label accuracy</text>
+    <text x="1128.0" y="372.0" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Method</text>
+    <text transform="translate(906.0,197.0) rotate(-90)" text-anchor="middle" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#222222">Hallucination Rate (%)</text>
+    <line x1="960.0" y1="332.0" x2="1296.0" y2="332.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="952.0" y="336.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">0</text>
+    <line x1="960.0" y1="264.5" x2="1296.0" y2="264.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="952.0" y="268.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">25</text>
+    <line x1="960.0" y1="197.0" x2="1296.0" y2="197.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="952.0" y="201.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">50</text>
+    <line x1="960.0" y1="129.5" x2="1296.0" y2="129.5" stroke="#dddddd" stroke-width="1"/>
+    <text x="952.0" y="133.5" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">75</text>
+    <line x1="960.0" y1="62.0" x2="1296.0" y2="62.0" stroke="#dddddd" stroke-width="1"/>
+    <text x="952.0" y="66.0" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333333">100</text>
+    <rect x="963.8" y="145.4" width="41.7" height="186.6" rx="2" fill="#1f77b4" opacity="1"/>
+    <text x="984.7" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">LLM</text>
+    <text x="984.7" y="141.4" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">69.1%</text>
+    <rect x="1031.0" y="311.8" width="41.7" height="20.2" rx="2" fill="#ff7f0e" opacity="1"/>
+    <text x="1051.9" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">RAG</text>
+    <text x="1051.9" y="307.8" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">7.5%</text>
+    <rect x="1098.2" y="247.8" width="41.7" height="84.2" rx="2" fill="#2ca02c" opacity="1"/>
+    <text x="1119.1" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">GraphRAG</text>
+    <text x="1119.1" y="243.8" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">31.2%</text>
+    <rect x="1165.4" y="257.2" width="41.7" height="74.8" rx="2" fill="#d62728" opacity="1"/>
+    <text x="1186.3" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KV Prefix</text>
+    <text x="1186.3" y="253.2" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">27.7%</text>
+    <rect x="1232.6" y="303.1" width="41.7" height="28.9" rx="2" fill="#9467bd" opacity="1"/>
+    <text x="1253.5" y="346.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">KVI</text>
+    <text x="1253.5" y="299.1" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#111111">10.7%</text>
+  <text x="660" y="404" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#555555">TruthfulQA: 100 − MC1/MC2 likelihood proxy (not official MC). FEVER: 100 − veracity label accuracy.</text>
+</svg>

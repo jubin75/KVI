@@ -1,0 +1,125 @@
+{
+  "note": "Unified Hallucination Rate (%): TruthfulQA uses 100 - MC proxy (MC1/MC2); FEVER uses 100 - fever_label_accuracy.",
+  "rows": [
+    {
+      "dataset": "truthfulqa",
+      "method_key": "llm",
+      "method": "LLM",
+      "metric_source": "mc1_proxy",
+      "score_percent": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "llm",
+      "method": "LLM",
+      "metric_source": "mc2_proxy",
+      "score_percent": 66.86,
+      "hallucination_rate": 33.14
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "rag",
+      "method": "RAG",
+      "metric_source": "mc1_proxy",
+      "score_percent": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "rag",
+      "method": "RAG",
+      "metric_source": "mc2_proxy",
+      "score_percent": 73.07,
+      "hallucination_rate": 26.93
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "metric_source": "mc1_proxy",
+      "score_percent": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "metric_source": "mc2_proxy",
+      "score_percent": 78.06,
+      "hallucination_rate": 21.94
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "metric_source": "mc1_proxy",
+      "score_percent": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "metric_source": "mc2_proxy",
+      "score_percent": 63.45,
+      "hallucination_rate": 36.55
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi",
+      "method": "KVI",
+      "metric_source": "mc1_proxy",
+      "score_percent": 100.0,
+      "hallucination_rate": 0.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi",
+      "method": "KVI",
+      "metric_source": "mc2_proxy",
+      "score_percent": 69.2,
+      "hallucination_rate": 30.8
+    },
+    {
+      "dataset": "fever",
+      "method_key": "llm",
+      "method": "LLM",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 30.9,
+      "hallucination_rate": 69.1
+    },
+    {
+      "dataset": "fever",
+      "method_key": "rag",
+      "method": "RAG",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 92.5,
+      "hallucination_rate": 7.5
+    },
+    {
+      "dataset": "fever",
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 68.8,
+      "hallucination_rate": 31.2
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 72.3,
+      "hallucination_rate": 27.7
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kvi",
+      "method": "KVI",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 89.3,
+      "hallucination_rate": 10.7
+    }
+  ]
+}

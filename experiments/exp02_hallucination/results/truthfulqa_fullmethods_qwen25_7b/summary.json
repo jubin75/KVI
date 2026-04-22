@@ -1,67 +1,82 @@
 {
   "dataset": "TRUTHFULQA",
   "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
-  "n": 500,
+  "n": 25,
   "methods": [
     {
       "method_key": "llm",
       "method": "LLM",
       "retrieval": "none",
       "injection": "none",
-      "em": 5.0,
-      "em_ci95_lo": 3.2,
-      "em_ci95_hi": 7.0,
-      "f1_mean": 0.1761,
-      "correct": 25,
-      "total": 500
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.2111,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.48,
+      "truthfulqa_mc2_proxy": 0.5018,
+      "truthfulqa_mc_valid_n": 25
     },
     {
       "method_key": "rag",
       "method": "RAG",
       "retrieval": "ANN",
       "injection": "prompt",
-      "em": 7.4,
-      "em_ci95_lo": 5.0,
-      "em_ci95_hi": 9.6,
-      "f1_mean": 0.1345,
-      "correct": 37,
-      "total": 500
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.0929,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.6,
+      "truthfulqa_mc2_proxy": 0.5138,
+      "truthfulqa_mc_valid_n": 25
     },
     {
       "method_key": "graphrag",
       "method": "GraphRAG",
       "retrieval": "graph",
       "injection": "prompt",
-      "em": 17.8,
-      "em_ci95_lo": 14.6,
-      "em_ci95_hi": 21.2,
-      "f1_mean": 0.195,
-      "correct": 89,
-      "total": 500
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.3407,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.72,
+      "truthfulqa_mc2_proxy": 0.56,
+      "truthfulqa_mc_valid_n": 25
     },
     {
       "method_key": "kv_prefix",
       "method": "KV Prefix",
       "retrieval": "ANN",
       "injection": "KV",
-      "em": 3.8,
-      "em_ci95_lo": 2.2,
-      "em_ci95_hi": 5.6,
-      "f1_mean": 0.0161,
-      "correct": 19,
-      "total": 500
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.0551,
+      "correct": 0,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.72,
+      "truthfulqa_mc2_proxy": 0.5478,
+      "truthfulqa_mc_valid_n": 25
     },
     {
       "method_key": "kvi",
       "method": "KVI",
       "retrieval": "graph",
       "injection": "KV + prompt",
-      "em": 11.8,
-      "em_ci95_lo": 9.0,
-      "em_ci95_hi": 14.6,
-      "f1_mean": 0.1151,
-      "correct": 59,
-      "total": 500
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.5149,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.8,
+      "truthfulqa_mc2_proxy": 0.5614,
+      "truthfulqa_mc_valid_n": 25
     }
   ],
   "paths": {
@@ -85,17 +100,26 @@
     "random_seed": 42,
     "significance": {
       "kvi_vs_llm": {
-        "p_value": 0.0004997501249375312
+        "p_value": 1.0
       },
       "kvi_vs_rag": {
-        "p_value": 0.010994502748625687
+        "p_value": 1.0
       },
       "kvi_vs_graphrag": {
-        "p_value": 0.0004997501249375312
+        "p_value": 1.0
       },
       "kvi_vs_kv_prefix": {
-        "p_value": 0.0004997501249375312
+        "p_value": 0.4897551224387806
       }
+    },
+    "truthfulqa_mc_note": "truthfulqa_mc1_proxy / truthfulqa_mc2_proxy are proxy metrics. likelihood_proxy mode scores options by average token log-prob under base model conditioned on question + method answer. Not identical to official TruthfulQA MC1/MC2 pipeline. For method kvi: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened grounded KVI decode (diagnosis_result). Legacy `injected` uses full ANN injected_answer for KVI MC1 when kv_prefix is co-run. Stored predictions / EM / F1 are unchanged.",
+    "truthfulqa_mc_mode": "likelihood_proxy",
+    "truthfulqa_kvi_mc1_answer": "grounded",
+    "kvi_truthfulqa_runtime_overrides": {
+      "kvi_max_kv_triples": 6,
+      "kvi_drm_threshold": 0.032,
+      "kvi_top_k_relations": 4,
+      "kvi_use_grounded_answer_for_eval": true
     }
   }
 }

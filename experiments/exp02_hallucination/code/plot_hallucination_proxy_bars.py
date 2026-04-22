@@ -47,7 +47,7 @@ def _rates_by_dataset(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]
 
 def _build_from_summaries(truthfulqa_summary: Path, fever_summary: Path) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    for ds_key, path, name in [
+    for ds_key, path, _name in [
         ("truthfulqa", truthfulqa_summary, "TruthfulQA"),
         ("fever", fever_summary, "FEVER"),
     ]:
@@ -55,13 +55,21 @@ def _build_from_summaries(truthfulqa_summary: Path, fever_summary: Path) -> List
         for m in summ.get("methods", []):
             mk = str(m.get("method_key") or "")
             em = float(m.get("em") or 0.0)
+            if ds_key == "fever" and m.get("fever_label_accuracy") is not None:
+                try:
+                    fla = float(m["fever_label_accuracy"])
+                    hall = round(100.0 - fla, 4)
+                except (TypeError, ValueError):
+                    hall = round(100.0 - em, 4)
+            else:
+                hall = round(100.0 - em, 4)
             rows.append(
                 {
                     "dataset": ds_key,
                     "method_key": mk,
                     "method": str(m.get("method") or mk),
                     "em": em,
-                    "hallucination_rate": round(100.0 - em, 4),
+                    "hallucination_rate": hall,
                 }
             )
     return rows
@@ -153,7 +161,8 @@ def build_svg(rows: List[Dict[str, Any]], *, paper: bool = False) -> str:
     bg = "#ffffff" if paper else "#fafafa"
     ff = "Helvetica, Arial, sans-serif" if paper else "system-ui, sans-serif"
     cap = (
-        "Metric: hallucination proxy = 100 − relaxed EM (substring match; not TruthfulQA official)."
+        "TruthfulQA: 100 − relaxed EM (substring match; not official MC). "
+        "FEVER: 100 − veracity label accuracy (SUPPORTS / REFUTES / NOT ENOUGH INFO)."
         if paper
         else ""
     )
@@ -180,7 +189,7 @@ def build_svg(rows: List[Dict[str, Any]], *, paper: bool = False) -> str:
     cap_el = ""
     if paper and cap:
         cap_el = f'\n  <text x="{W / 2:.0f}" y="{H - 6:.0f}" text-anchor="middle" font-size="9" font-family="{ff}" fill="#555555">{cap}</text>'
-    title_main = "Exp02 — Hallucination proxy (100 − relaxed EM)"
+    title_main = "Hallucination rate by method (proxy metrics)"
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
   <rect width="100%" height="100%" fill="{bg}"/>
@@ -203,7 +212,7 @@ def build_svg_fever_label_accuracy(fever_summary: Path, *, paper: bool = False) 
         )
     max_rate = min(100.0, max(acc.values()) * 1.08 + 5 if acc else 100.0)
     max_rate = max(max_rate, 20.0)
-    W, H = 640, 360 if not paper else 640, 380
+    W, H = (640, 380) if paper else (640, 360)
     pw, ph = W - 48, H - (52 if paper else 44)
     bg = "#ffffff" if paper else "#fafafa"
     ff = "Helvetica, Arial, sans-serif" if paper else "system-ui, sans-serif"
@@ -229,8 +238,172 @@ def build_svg_fever_label_accuracy(fever_summary: Path, *, paper: bool = False) 
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
   <rect width="100%" height="100%" fill="{bg}"/>
-  <text x="{W / 2:.0f}" y="18" text-anchor="middle" font-size="{"13" if paper else "14"}" font-weight="700" font-family="{ff}" fill="#111111">Exp02 — FEVER label accuracy</text>
+  <text x="{W / 2:.0f}" y="18" text-anchor="middle" font-size="{"13" if paper else "14"}" font-weight="700" font-family="{ff}" fill="#111111">FEVER veracity label accuracy</text>
   {panel}{cap_el}
+</svg>'''
+
+
+def build_svg_truthfulqa_mc_proxy(truthfulqa_summary: Path, *, paper: bool = False) -> str:
+    summ = json.loads(truthfulqa_summary.read_text(encoding="utf-8"))
+    mc1: Dict[str, float] = {mk: 0.0 for mk, _ in METHOD_ORDER}
+    mc2: Dict[str, float] = {mk: 0.0 for mk, _ in METHOD_ORDER}
+    found = False
+    for m in summ.get("methods", []):
+        mk = str(m.get("method_key") or "")
+        if mk in mc1 and "truthfulqa_mc1_proxy" in m and "truthfulqa_mc2_proxy" in m:
+            mc1[mk] = 100.0 * float(m["truthfulqa_mc1_proxy"])
+            mc2[mk] = 100.0 * float(m["truthfulqa_mc2_proxy"])
+            found = True
+    if not found:
+        raise ValueError(
+            f"No truthfulqa_mc1_proxy/truthfulqa_mc2_proxy fields in {truthfulqa_summary}; rerun run_exp01.py on TRUTHFULQA."
+        )
+    max_rate = max(20.0, min(100.0, max(max(mc1.values()), max(mc2.values())) * 1.12 + 5))
+    W, H = (960, 390) if paper else (960, 360)
+    bg = "#ffffff" if paper else "#fafafa"
+    ff = "Helvetica, Arial, sans-serif" if paper else "system-ui, sans-serif"
+    left = _svg_panel(
+        title="TruthfulQA — MC1 (proxy, %)",
+        rates=mc1,
+        x0=8,
+        y0=28,
+        panel_w=W / 2 - 16,
+        panel_h=H - (52 if paper else 40),
+        max_rate=max_rate,
+        paper=paper,
+        y_axis_label="MC1 Proxy (%)",
+    )
+    right = _svg_panel(
+        title="TruthfulQA — MC2 (proxy, %)",
+        rates=mc2,
+        x0=W / 2 + 4,
+        y0=28,
+        panel_w=W / 2 - 16,
+        panel_h=H - (52 if paper else 40),
+        max_rate=max_rate,
+        paper=paper,
+        y_axis_label="MC2 Proxy (%)",
+    )
+    cap = (
+        "Proxy metrics: option likelihood conditioned on question + method answer; not official TruthfulQA script."
+        if paper
+        else ""
+    )
+    cap_el = ""
+    if paper and cap:
+        cap_el = f'\n  <text x="{W / 2:.0f}" y="{H - 6:.0f}" text-anchor="middle" font-size="9" font-family="{ff}" fill="#555555">{cap}</text>'
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <rect width="100%" height="100%" fill="{bg}"/>
+  <text x="{W / 2:.0f}" y="18" text-anchor="middle" font-size="{"13" if paper else "14"}" font-weight="700" font-family="{ff}" fill="#111111">TruthfulQA multiple-choice likelihood proxy</text>
+  {left}
+  {right}{cap_el}
+</svg>'''
+
+
+def _rates_three_panel_from_unified_summary(path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
+    """Load results/summary.json produced for the unified 3-panel figure (MC1 / MC2 / FEVER label)."""
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    rows = obj.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError(f"Invalid unified summary (no rows): {path}")
+    fever: Dict[str, float] = {}
+    tqa_mc1: Dict[str, float] = {}
+    tqa_mc2: Dict[str, float] = {}
+    for r in rows:
+        ds = str(r.get("dataset") or "")
+        mk = str(r.get("method_key") or "")
+        src = str(r.get("metric_source") or "")
+        if not mk:
+            continue
+        try:
+            h = float(r.get("hallucination_rate") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if ds == "fever" and src == "fever_label_accuracy":
+            fever[mk] = h
+        elif ds == "truthfulqa" and src == "mc1_proxy":
+            tqa_mc1[mk] = h
+        elif ds == "truthfulqa" and src == "mc2_proxy":
+            tqa_mc2[mk] = h
+    if not fever or not tqa_mc1 or not tqa_mc2:
+        raise ValueError(
+            f"{path} missing fever_label_accuracy / mc1_proxy / mc2_proxy rows; "
+            "regenerate summary.json or run plot_unified_hallucination_bars data pipeline."
+        )
+    return tqa_mc1, tqa_mc2, fever
+
+
+def build_svg_three_panel_unified(unified_summary: Path, *, paper: bool = False) -> str:
+    """One figure: TruthfulQA MC1 & MC2 proxy hallucination + FEVER label-based hallucination (same metrics as summary.json)."""
+    mc1, mc2, fever = _rates_three_panel_from_unified_summary(unified_summary)
+    all_rates = [mc1[mk] for mk, _ in METHOD_ORDER if mk in mc1]
+    all_rates += [mc2[mk] for mk, _ in METHOD_ORDER if mk in mc2]
+    all_rates += [fever[mk] for mk, _ in METHOD_ORDER if mk in fever]
+    max_rate = max(all_rates) if all_rates else 100.0
+    max_rate = min(100.0, max(max_rate * 1.08, 10.0))
+
+    W, H = (1320, 410) if paper else (1320, 390)
+    gap = 16.0
+    side_margin = 8.0
+    pw = (W - side_margin * 2 - 2 * gap) / 3.0
+    ph = H - (56 if paper else 44)
+    bg = "#ffffff" if paper else "#fafafa"
+    ff = "Helvetica, Arial, sans-serif" if paper else "system-ui, sans-serif"
+    cap = (
+        "TruthfulQA: 100 − MC1/MC2 likelihood proxy (not official MC). "
+        "FEVER: 100 − veracity label accuracy."
+        if paper
+        else ""
+    )
+    x1 = side_margin
+    x2 = side_margin + pw + gap
+    x3 = side_margin + 2 * (pw + gap)
+    y0 = 26.0
+    p1 = _svg_panel(
+        title="TruthfulQA — MC1 proxy",
+        rates=mc1,
+        x0=x1,
+        y0=y0,
+        panel_w=pw,
+        panel_h=ph,
+        max_rate=max_rate,
+        paper=paper,
+        y_axis_label="Hallucination Rate (%)",
+    )
+    p2 = _svg_panel(
+        title="TruthfulQA — MC2 proxy",
+        rates=mc2,
+        x0=x2,
+        y0=y0,
+        panel_w=pw,
+        panel_h=ph,
+        max_rate=max_rate,
+        paper=paper,
+        y_axis_label="Hallucination Rate (%)",
+    )
+    p3 = _svg_panel(
+        title="FEVER — Label accuracy",
+        rates=fever,
+        x0=x3,
+        y0=y0,
+        panel_w=pw,
+        panel_h=ph,
+        max_rate=max_rate,
+        paper=paper,
+        y_axis_label="Hallucination Rate (%)",
+    )
+    cap_el = ""
+    if paper and cap:
+        cap_el = f'\n  <text x="{W / 2:.0f}" y="{H - 6:.0f}" text-anchor="middle" font-size="9" font-family="{ff}" fill="#555555">{cap}</text>'
+    title_main = "Hallucination rate by method (unified proxy metrics, 3 panels)"
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <rect width="100%" height="100%" fill="{bg}"/>
+  <text x="{W / 2:.0f}" y="17" text-anchor="middle" font-size="{"13" if paper else "14"}" font-weight="700" font-family="{ff}" fill="#111111">{title_main}</text>
+  {p1}
+  {p2}
+  {p3}{cap_el}
 </svg>'''
 
 
@@ -241,7 +414,7 @@ def build_html(svg_body: str) -> str:
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"/>
-  <title>Exp02 Hallucination Rate</title>
+  <title>Hallucination rate (proxy benchmarks)</title>
   <style> body {{ margin: 24px; font-family: system-ui, sans-serif; background: #f5f5f5; }} </style>
 </head>
 <body>
@@ -274,17 +447,38 @@ def main() -> None:
         action="store_true",
         help="Also write fever_label_accuracy_bars.svg from fever summary (requires fever_label_accuracy in JSON)",
     )
+    p.add_argument(
+        "--truthfulqa_mc_figure",
+        action="store_true",
+        help="Also write truthfulqa_mc_proxy_bars.svg from truthfulqa summary (requires truthfulqa_mc1_proxy/mc2 fields).",
+    )
+    p.add_argument(
+        "--three_panel_unified",
+        action="store_true",
+        help="Also write 3-panel figure (TruthfulQA MC1 + MC2 + FEVER label hallucination) from unified summary.json.",
+    )
+    p.add_argument(
+        "--unified_summary_json",
+        default="",
+        help="Path to results/summary.json for --three_panel_unified (default: <out_dir>/summary.json).",
+    )
     args = p.parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    fever_path = Path(str(args.fever_summary).strip()) if str(args.fever_summary).strip() else out_dir / "fever_fullmethods_qwen25_7b" / "summary.json"
+    tqa_path = Path(str(args.truthfulqa_summary).strip()) if str(args.truthfulqa_summary).strip() else out_dir / "truthfulqa_fullmethods_qwen25_7b" / "summary.json"
+
     if str(args.truthfulqa_summary).strip() and str(args.fever_summary).strip():
-        rows = _build_from_summaries(Path(args.truthfulqa_summary), Path(args.fever_summary))
+        rows = _build_from_summaries(tqa_path, fever_path)
     else:
         path = Path(args.summary_json)
         if not path.exists():
             raise SystemExit(f"Missing {path}; pass --truthfulqa_summary and --fever_summary or run Exp02 first.")
         rows = _load_proxy_json(path)
+        # FEVER panel: prefer label-accuracy-based hallucination when per-method summaries exist
+        if fever_path.exists():
+            rows = _build_from_summaries(tqa_path, fever_path)
 
     out: Dict[str, Any] = {"ok": True}
     svg_screen = build_svg(rows, paper=False)
@@ -298,7 +492,6 @@ def main() -> None:
         (out_dir / "hallucination_proxy_bars_paper.html").write_text(build_html(svg_p), encoding="utf-8")
         out["hallucination_proxy_bars_paper_svg"] = str(out_dir / "hallucination_proxy_bars_paper.svg")
 
-    fever_path = Path(str(args.fever_summary).strip()) if str(args.fever_summary).strip() else out_dir / "fever_fullmethods_qwen25_7b" / "summary.json"
     if args.fever_label_figure:
         try:
             fl = build_svg_fever_label_accuracy(fever_path, paper=False)
@@ -310,6 +503,30 @@ def main() -> None:
                 out["fever_label_accuracy_bars_paper_svg"] = str(out_dir / "fever_label_accuracy_bars_paper.svg")
         except Exception as e:
             out["fever_label_error"] = str(e)
+    if args.truthfulqa_mc_figure:
+        try:
+            tqa = build_svg_truthfulqa_mc_proxy(tqa_path, paper=False)
+            (out_dir / "truthfulqa_mc_proxy_bars.svg").write_text(tqa, encoding="utf-8")
+            out["truthfulqa_mc_proxy_bars_svg"] = str(out_dir / "truthfulqa_mc_proxy_bars.svg")
+            if args.paper:
+                tqap = build_svg_truthfulqa_mc_proxy(tqa_path, paper=True)
+                (out_dir / "truthfulqa_mc_proxy_bars_paper.svg").write_text(tqap, encoding="utf-8")
+                out["truthfulqa_mc_proxy_bars_paper_svg"] = str(out_dir / "truthfulqa_mc_proxy_bars_paper.svg")
+        except Exception as e:
+            out["truthfulqa_mc_error"] = str(e)
+
+    if args.three_panel_unified:
+        uni_path = Path(str(args.unified_summary_json).strip()) if str(args.unified_summary_json).strip() else out_dir / "summary.json"
+        try:
+            svg3 = build_svg_three_panel_unified(uni_path, paper=False)
+            (out_dir / "hallucination_proxy_three_panel.svg").write_text(svg3, encoding="utf-8")
+            out["hallucination_proxy_three_panel_svg"] = str(out_dir / "hallucination_proxy_three_panel.svg")
+            if args.paper:
+                svg3p = build_svg_three_panel_unified(uni_path, paper=True)
+                (out_dir / "hallucination_proxy_three_panel_paper.svg").write_text(svg3p, encoding="utf-8")
+                out["hallucination_proxy_three_panel_paper_svg"] = str(out_dir / "hallucination_proxy_three_panel_paper.svg")
+        except Exception as e:
+            out["three_panel_unified_error"] = str(e)
 
     print(json.dumps(out, ensure_ascii=False, indent=2))
 

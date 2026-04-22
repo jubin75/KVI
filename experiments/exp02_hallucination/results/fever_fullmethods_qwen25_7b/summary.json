@@ -1,0 +1,126 @@
+{
+  "dataset": "FEVER",
+  "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/fever_eval.jsonl",
+  "n": 1000,
+  "methods": [
+    {
+      "method_key": "llm",
+      "method": "LLM",
+      "retrieval": "none",
+      "injection": "none",
+      "em": 38.3,
+      "em_ci95_lo": 35.2,
+      "em_ci95_hi": 41.2,
+      "f1_mean": 0.1729,
+      "correct": 383,
+      "total": 1000,
+      "fever_label_accuracy": 30.9,
+      "fever_label_ci95_lo": 28.0,
+      "fever_label_ci95_hi": 33.7,
+      "fever_label_correct": 309
+    },
+    {
+      "method_key": "rag",
+      "method": "RAG",
+      "retrieval": "ANN",
+      "injection": "prompt",
+      "em": 92.6,
+      "em_ci95_lo": 91.0,
+      "em_ci95_hi": 94.1,
+      "f1_mean": 0.2884,
+      "correct": 926,
+      "total": 1000,
+      "fever_label_accuracy": 92.5,
+      "fever_label_ci95_lo": 90.9,
+      "fever_label_ci95_hi": 94.1,
+      "fever_label_correct": 925
+    },
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 73.0,
+      "em_ci95_lo": 70.4,
+      "em_ci95_hi": 76.0,
+      "f1_mean": 0.5759,
+      "correct": 730,
+      "total": 1000,
+      "fever_label_accuracy": 68.8,
+      "fever_label_ci95_lo": 66.1,
+      "fever_label_ci95_hi": 72.0,
+      "fever_label_correct": 688
+    },
+    {
+      "method_key": "kv_prefix",
+      "method": "KV Prefix",
+      "retrieval": "ANN",
+      "injection": "KV",
+      "em": 74.3,
+      "em_ci95_lo": 71.7,
+      "em_ci95_hi": 76.8,
+      "f1_mean": 0.3124,
+      "correct": 743,
+      "total": 1000,
+      "fever_label_accuracy": 72.3,
+      "fever_label_ci95_lo": 69.6,
+      "fever_label_ci95_hi": 75.1,
+      "fever_label_correct": 723
+    },
+    {
+      "method_key": "kvi",
+      "method": "KVI",
+      "retrieval": "graph",
+      "injection": "KV + prompt",
+      "em": 89.3,
+      "em_ci95_lo": 87.3,
+      "em_ci95_hi": 91.2,
+      "f1_mean": 0.893,
+      "correct": 893,
+      "total": 1000,
+      "fever_label_accuracy": 89.3,
+      "fever_label_ci95_lo": 87.3,
+      "fever_label_ci95_hi": 91.2,
+      "fever_label_correct": 893
+    }
+  ],
+  "paths": {
+    "predictions": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_fullmethods_qwen25_7b/predictions.jsonl",
+    "results_md": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_fullmethods_qwen25_7b/results.md",
+    "results_csv": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_fullmethods_qwen25_7b/results.csv"
+  },
+  "statistics": {
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_vs_llm": {
+        "p_value": 0.0004997501249375312,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_vs_rag": {
+        "p_value": 0.0069965017491254375,
+        "fever_label_p_value": 0.0079960019990005
+      },
+      "kvi_vs_graphrag": {
+        "p_value": 0.0004997501249375312,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_vs_kv_prefix": {
+        "p_value": 0.0004997501249375312,
+        "fever_label_p_value": 0.0004997501249375312
+      }
+    },
+    "fever_label_metric": "First match in output of SUPPORTS | REFUTES | NOT ENOUGH INFO (case-insensitive); compare to gold label. Closer to FEVER shared-task label accuracy than relaxed EM."
+  }
+}

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="100%" height="100%" fill="#fafafa"/>
+  <text x="320" y="18" text-anchor="middle" font-size="14" font-weight="700" font-family="system-ui, sans-serif" fill="#111111">FEVER veracity label accuracy</text>
+  <text x="320.0" y="46.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">FEVER — Veracity label accuracy</text>
+    <text x="348.0" y="336.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(42.0,180.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Accuracy (%)</text>
+    <line x1="96.0" y1="296.0" x2="600.0" y2="296.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="88.0" y="300.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="96.0" y1="238.0" x2="600.0" y2="238.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="88.0" y="242.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="96.0" y1="180.0" x2="600.0" y2="180.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="88.0" y="184.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="96.0" y1="122.0" x2="600.0" y2="122.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="88.0" y="126.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <line x1="96.0" y1="64.0" x2="600.0" y2="64.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="88.0" y="68.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">100</text>
+    <rect x="101.7" y="224.3" width="62.5" height="71.7" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="133.0" y="310.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="133.0" y="220.3" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">30.9%</text>
+    <rect x="202.5" y="81.4" width="62.5" height="214.6" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="233.8" y="310.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="233.8" y="77.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">92.5%</text>
+    <rect x="303.3" y="136.4" width="62.5" height="159.6" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="334.6" y="310.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="334.6" y="132.4" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">68.8%</text>
+    <rect x="404.1" y="128.3" width="62.5" height="167.7" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="435.4" y="310.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="435.4" y="124.3" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">72.3%</text>
+    <rect x="504.9" y="88.8" width="62.5" height="207.2" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="536.2" y="310.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="536.2" y="84.8" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">89.3%</text>
+</svg>

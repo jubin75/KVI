@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360">
+  <rect width="100%" height="100%" fill="#fafafa"/>
+  <text x="480" y="18" text-anchor="middle" font-size="14" font-weight="700" font-family="system-ui, sans-serif" fill="#111111">TruthfulQA multiple-choice likelihood proxy</text>
+  <text x="240.0" y="46.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">TruthfulQA — MC1 (proxy, %)</text>
+    <text x="268.0" y="340.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(26.0,182.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">MC1 Proxy (%)</text>
+    <line x1="80.0" y1="300.0" x2="456.0" y2="300.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="304.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="80.0" y1="227.9" x2="456.0" y2="227.9" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="231.9" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="80.0" y1="155.8" x2="456.0" y2="155.8" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="159.8" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="80.0" y1="83.7" x2="456.0" y2="83.7" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="72.0" y="87.7" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <rect x="84.3" y="165.0" width="46.6" height="135.0" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="107.6" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="107.6" y="161.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">46.8%</text>
+    <rect x="159.5" y="154.1" width="46.6" height="145.9" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="182.8" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="182.8" y="150.1" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">50.6%</text>
+    <rect x="234.7" y="102.2" width="46.6" height="197.8" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="258.0" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="258.0" y="98.2" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">68.6%</text>
+    <rect x="309.9" y="124.7" width="46.6" height="175.3" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="333.2" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="333.2" y="120.7" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">60.8%</text>
+    <rect x="385.1" y="113.1" width="46.6" height="186.9" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="408.4" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="408.4" y="109.1" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">64.8%</text>
+  <text x="716.0" y="46.0" text-anchor="middle" font-size="15" font-weight="600" font-family="system-ui, sans-serif" fill="#1a1a1a">TruthfulQA — MC2 (proxy, %)</text>
+    <text x="744.0" y="340.0" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">Method</text>
+    <text transform="translate(502.0,182.0) rotate(-90)" text-anchor="middle" font-size="12" font-family="system-ui, sans-serif" fill="#444444">MC2 Proxy (%)</text>
+    <line x1="556.0" y1="300.0" x2="932.0" y2="300.0" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="548.0" y="304.0" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">0</text>
+    <line x1="556.0" y1="227.9" x2="932.0" y2="227.9" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="548.0" y="231.9" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">25</text>
+    <line x1="556.0" y1="155.8" x2="932.0" y2="155.8" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="548.0" y="159.8" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">50</text>
+    <line x1="556.0" y1="83.7" x2="932.0" y2="83.7" stroke="#e8e8e8" stroke-width="1"/>
+    <text x="548.0" y="87.7" text-anchor="end" font-size="10" font-family="system-ui, sans-serif" fill="#666666">75</text>
+    <rect x="560.3" y="171.2" width="46.6" height="128.8" rx="2" fill="#c94c4c" opacity="0.92"/>
+    <text x="583.6" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">LLM</text>
+    <text x="583.6" y="167.2" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">44.6%</text>
+    <rect x="635.5" y="167.2" width="46.6" height="132.8" rx="2" fill="#d97b2a" opacity="0.92"/>
+    <text x="658.8" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">RAG</text>
+    <text x="658.8" y="163.2" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">46.1%</text>
+    <rect x="710.7" y="144.8" width="46.6" height="155.2" rx="2" fill="#c9a227" opacity="0.92"/>
+    <text x="734.0" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">GraphRAG</text>
+    <text x="734.0" y="140.8" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">53.8%</text>
+    <rect x="785.9" y="153.7" width="46.6" height="146.3" rx="2" fill="#2a8f9d" opacity="0.92"/>
+    <text x="809.2" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KV Prefix</text>
+    <text x="809.2" y="149.7" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">50.7%</text>
+    <rect x="861.1" y="150.1" width="46.6" height="149.9" rx="2" fill="#3d6ab5" opacity="0.92"/>
+    <text x="884.4" y="314.0" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">KVI</text>
+    <text x="884.4" y="146.1" text-anchor="middle" font-size="9" font-family="system-ui, sans-serif" fill="#333333">52.0%</text>
+</svg>

@@ -1,6 +1,6 @@
-Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean
-LLM,none,none,5.0,3.2,7.0,0.2
-RAG,ANN,prompt,7.4,5.0,9.6,0.1
-GraphRAG,graph,prompt,17.8,14.6,21.2,0.2
-KV Prefix,ANN,KV,3.8,2.2,5.6,0.0
-KVI,graph,KV + prompt,11.8,9.0,14.6,0.1
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean,TQA MC1 Proxy,TQA MC2 Proxy,TQA MC Valid N
+LLM,none,none,8.0,0.0,20.0,0.2,0.480,0.502,25
+RAG,ANN,prompt,8.0,0.0,20.0,0.1,0.600,0.514,25
+GraphRAG,graph,prompt,8.0,0.0,20.0,0.3,0.720,0.560,25
+KV Prefix,ANN,KV,0.0,0.0,0.0,0.1,0.720,0.548,25
+KVI,graph,KV + prompt,8.0,0.0,20.0,0.5,0.800,0.561,25
