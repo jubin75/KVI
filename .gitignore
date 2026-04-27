@@ -76,3 +76,6 @@ experiments/logs/
 docs/*
 !docs/*.png
 !docs/90_experiment_runbook_linux.md
+
+# --- Configs (do not commit) ---
+configs/
