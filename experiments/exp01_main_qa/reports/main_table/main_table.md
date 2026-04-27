@@ -3,7 +3,7 @@
 ### Panel A: Base LLM = Qwen2.5-7B-Instruct
 
 | Dataset | LLM | RAG | GraphRAG | KV Prefix | KVI |
-|---|---:|---:|---:|---:|---:|
+|---|---|---:|---:|---:|---:|---:|
 | HotpotQA (EM [CI95]) | 16.7 [10.0, 23.3] | 22.5 [15.0, 30.0] | 32.5 [24.2, 40.8] | 15.8 [9.2, 22.5] | 33.3 [25.0, 41.7] |
 | NQ (EM [CI95]) | 20.0 [13.0, 28.0] | 41.0 [30.0, 51.0] | 44.0 [34.0, 54.0] | 14.0 [7.0, 21.0] | 49.0 [39.0, 58.0] |
 | MedHopQA_n40 (EM [CI95]) | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 82.5 [70.0, 92.5] | 0.0 [0.0, 0.0] | 92.5 [82.5, 100.0] |
@@ -12,21 +12,21 @@
 ### Panel B: Base LLM = Mistral-7B-Instruct-v0.3
 
 | Dataset | LLM | RAG | GraphRAG | KV Prefix | KVI |
-|---|---:|---:|---:|---:|---:|
+|---|---|---:|---:|---:|---:|---:|
 | HotpotQA (EM [CI95]) | 30.8 [22.5, 39.2] | 36.7 [28.3, 45.8] | 38.3 [29.2, 46.7] | 16.7 [10.0, 24.2] | 40.8 [32.5, 49.2] |
 | NQ (EM [CI95]) | 34.0 [24.0, 43.0] | 63.0 [53.0, 73.0] | 67.0 [58.0, 76.0] | 17.0 [10.0, 24.0] | 67.0 [58.0, 76.0] |
 | MedHopQA_n40 (EM [CI95]) | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 10.0 [2.5, 20.0] | 0.0 [0.0, 0.0] | 12.5 [2.5, 25.0] |
 | MedHopQA_official N=342 (EM [CI95]) | 0.0 [0.0, 0.0] | 0.3 [0.0, 0.9] | 13.5 [9.9, 17.0] | 0.6 [0.0, 1.5] | 33.3 [28.7, 38.0] |
 
-### MedHopQA_n40 vs MedHopQA_official — 构造差异与对 GraphRAG / KVI 的非对称影响
+### MedHopQA_n40 vs MedHopQA_official — Construction differences and asymmetric impact on GraphRAG / KVI
 
-| 维度 | MedHopQA_n40 | MedHopQA_official (N=342) | 对 GraphRAG 的典型影响 | 对 KVI 的典型影响 |
+| Dimension | MedHopQA_n40 | MedHopQA_official (N=342) | Typical impact on GraphRAG | Typical impact on KVI |
 |------|--------------|---------------------------|-------------------------|-------------------|
-| **问句形式** | `interacts_with DBxxxx?` + 强 ID 输出约束 | 自然语言问句（仍要求伙伴 DrugBank ID） | 图锚点 `DBxxxx` 仍在；文本检索有时更易命中摘要式证据 | NL 与 triple 文本、DRM 打分词面 **对齐变弱**，易选入 **无关或次优** triple 做 KV |
-| **规模与语料** | 40 条，对应子图与句子规模小 | 342 条，全量 supports 切分约 **10⁵** 级句子 | 噪声上升相对温和；**单通道**「图 + 检索句」仍较稳 | 图与候选 triple 更密，**错误 KV 注入**与 **KV+长证据双通道竞争注意力** 的概率 **明显高于 n40** |
-| **三元组覆盖** | 与 n40 评测 id **强对齐** 的构建 | 部分样本仅 **1～2** 条 `interacts_with` 式 triple | 可主要靠 **sentence 检索** 补全可读证据 | KV **强依赖** triple 选择与编译；覆盖薄或选错时，**前缀注入直接伤害** 解码，GraphRAG 无此第二通道 |
+| **Query form** | `interacts_with DBxxxx?` + strong ID output constraint | Natural language query (still requires partner DrugBank ID) | Graph anchor `DBxxxx` still present; text retrieval sometimes more easily hits summary-style evidence | NL and triple text / DRM scoring lexical **alignment weakens**, easily selecting **irrelevant or suboptimal** triples for KV |
+| **Scale & corpus** | 40 samples, corresponding subgraph and sentence scale is small | 342 samples, full supports split yields ~**10⁵**-level sentences | Noise increase is relatively moderate; **single-channel** "graph + retrieved sentences" remains relatively stable | Graph and candidate triples are denser, probability of **incorrect KV injection** and **KV + long evidence dual-channel attention competition** is **significantly higher than n40** |
+| **Triple coverage** | Built with **strong alignment** to n40 eval IDs | Some samples have only **1–2** `interacts_with`-style triples | Can mainly rely on **sentence retrieval** to supplement readable evidence | KV **heavily depends** on triple selection and compilation; when coverage is thin or triples are wrong, **prefix injection directly harms** decoding, while GraphRAG has no such second channel |
 
-**归纳**：official 上 GraphRAG 仍主要是「证据进 prompt」；KVI 在同等证据上再叠加 **triple→KV 前缀**，在 **NL + 大图** 下更易 **选错 triple / 冲突 prompt**，故早期可出现 **GraphRAG 降幅小、KVI 降幅大**。当前表中 **Panel A / MedHopQA_official** 已更新为 **KVI 超过 GraphRAG** 的配置：基线 KVI 超参（`drm_threshold=0.05,max_kv_triples=3,top_k_relations=2`）+ **双解码重选**（`--kvi_reconcile_no_kv_decode`），机器可读指标见 Table Notes。
+**Summary**: On official, GraphRAG is still primarily "evidence into prompt"; KVI layers **triple→KV prefix** on top of the same evidence, and under **NL + large graph** it is more prone to **wrong triple selection / prompt conflict**, so early results can show **small drop for GraphRAG, large drop for KVI**. In the current table, **Panel A / MedHopQA_official** has been updated to a configuration where **KVI surpasses GraphRAG**: baseline KVI hyperparams (`drm_threshold=0.05,max_kv_triples=3,top_k_relations=2`) + **dual-decode reconciliation** (`--kvi_reconcile_no_kv_decode`); see Table Notes for machine-readable metrics.
 
 ### Table Notes (for paper text)
 
@@ -46,8 +46,8 @@
 - **MedHopQA here is relation completion with strict output format**: For Exp01, MedHopQA is evaluated as an ID-based relation-completion task. Prompts require the model to output **only one** partner DrugBank ID in the exact `DB`+digits form (e.g. `DB04844`) and nothing else; generations that include extra text or multiple IDs are counted as incorrect under EM.
 - **Are MedHop answers all `DB...` strings here?**: Yes. In this benchmark file (`medhop_eval.jsonl`), all 40/40 gold answers follow the `DB`+digits pattern, and prompts explicitly require `Answer with only the partner entity DB id`.
 - **Why GraphRAG/KVI are stronger on this split**: This task is relation-centered (`interacts_with DBxxxx`) and aligns with graph traversal/evidence grounding. Graph pipelines more often surface the correct partner entity ID from relation evidence, while ANN-only pipelines rely on freer generation and are less robust to strict ID-format output constraints.
-- **Panel B artifact path**: Per-dataset runs and the machine-readable aggregate live under `experiments/exp01_main_qa/results/main_table_mistral7b_v0_3/` (and sibling `multihop_hotpot_n120_fullmethods_mistral7b_v0_3/`, `nq_smoke100_fullmethods_mistral7b_v0_3/`, `medhop_n40_fullmethods_mistral7b_v0_3/`). **Git 入库的 Mistral 表副本**：`experiments/exp01_main_qa/reports/main_table_mistral7b_v0_3/main_table.md`.
-- **MedHop official-style split (external validity)**: Built from `medhop_raw` with natural-language questions, `short_answer` / `long_answer` / `supporting_facts` in `experiments/exp01_main_qa/data/medhop_official/`; documentation and field table（入库副本）: `experiments/exp01_main_qa/reports/supplementary_medhop_official.md`. Gold remains partner **DrugBank IDs** (same EM family as MedHop-ID); free-text drug names are not shipped in this release.
+- **Panel B artifact path**: Per-dataset runs and the machine-readable aggregate live under `experiments/exp01_main_qa/results/main_table_mistral7b_v0_3/` (and sibling `multihop_hotpot_n120_fullmethods_mistral7b_v0_3/`, `nq_smoke100_fullmethods_mistral7b_v0_3/`, `medhop_n40_fullmethods_mistral7b_v0_3/`). **Mistral table copy checked into Git**: `experiments/exp01_main_qa/reports/main_table_mistral7b_v0_3/main_table.md`.
+- **MedHop official-style split (external validity)**: Built from `medhop_raw` with natural-language questions, `short_answer` / `long_answer` / `supporting_facts` in `experiments/exp01_main_qa/data/medhop_official/`; documentation and field table (checked-in copy): `experiments/exp01_main_qa/reports/supplementary_medhop_official.md`. Gold remains partner **DrugBank IDs** (same EM family as MedHop-ID); free-text drug names are not shipped in this release.
 - **MedHopQA_official N=342 (Panel A + Panel B)**: Full Exp01 on `medhop_eval.jsonl` with dedicated model-specific artifacts. **Panel A Qwen GraphRAG/KVI** values correspond to `experiments/exp01_main_qa/results/medhop_official_kvi_reconcile_final/summary.json` (`relaxed` EM; `--methods graphrag,kvi`; KVI has `--kvi_reconcile_no_kv_decode`). **Panel B Mistral five-method values** correspond to `experiments/exp01_main_qa/results/medhop_official_fullmethods_mistral7b_v0_3/summary.json`.
 - **KVI reconcile note**: `--kvi_reconcile_no_kv_decode` runs a second decode without KV on the same prompt and heuristically picks the more evidence-grounded output; it is DB-ID-biased today (counts `DB\\d+` overlap with evidence) and should be generalized before applying to non-ID free-text QA.
-- **MedHopQA_official — KVI defaults in `run_medhop_official_full_background.sh`（调参后重跑）**：为减轻 NL+大图下的错误注入与双通道冲突，脚本默认 **`--kvi_drm_threshold 0.12`**（提高 DRM 门槛）、**`--kvi_max_kv_triples 2`**、**`--kvi_top_k_relations 1`**、**`--kvi_minimal_prompt`**；默认输出目录 **`medhop_official_fullmethods_qwen25_7b_kvituned/`**（避免与基线 `resume` 混写）。可用环境变量 `KVI_DRM_THRESHOLD`、`KVI_MAX_KV_TRIPLES`、`KVI_TOP_K_RELATIONS`、`KVI_MINIMAL_PROMPT`（0/1）、`MEDHOP_OFFICIAL_OUT` 覆盖。
+- **MedHopQA_official — KVI defaults in `run_medhop_official_full_background.sh` (re-run after parameter tuning)**: To reduce incorrect injection and dual-channel conflict under NL+large graph, the script defaults to **`--kvi_drm_threshold 0.12`** (raised DRM threshold), **`--kvi_max_kv_triples 2`**, **`--kvi_top_k_relations 1`**, **`--kvi_minimal_prompt`**; default output directory **`medhop_official_fullmethods_qwen25_7b_kvituned/`** (avoids overwriting baseline `resume` output). Can be overridden via environment variables `KVI_DRM_THRESHOLD`, `KVI_MAX_KV_TRIPLES`, `KVI_TOP_K_RELATIONS`, `KVI_MINIMAL_PROMPT` (0/1), `MEDHOP_OFFICIAL_OUT`.

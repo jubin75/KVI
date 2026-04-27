@@ -1,12 +1,12 @@
-# Linux(/home/jb/KVI) 实验 Runbook：数据集→训练→测试（可复制执行）
+# Linux(/home/jb/KVI) Experiment Runbook: Dataset → Training → Testing (Reproducible)
 
-> 约定：所有命令在 `/home/jb/KVI` 执行。  
-> 目标：你可以按本文从零跑通：PDF→raw context→blocks→KVBank→（可选）projector/gate 训练→单步/多步注入测试。  
-> **架构规范**：slot-aware schema 注入遵循 `docs/slot_enum.md`；schema code review 遵循 `docs/73_schema_code_review.md`。
+> Convention: All commands are executed under `/home/jb/KVI`.
+> Goal: Follow this runbook to go from scratch: PDF → raw context → blocks → KVBank → (optional) projector/gate training → single-step/multi-step injection testing.
+> **Architecture spec**: slot-aware schema injection follows `docs/slot_enum.md`; schema code review follows `docs/73_schema_code_review.md`.
 
-## 0) 安装依赖（Python + 系统包）
+## 0) Install Dependencies (Python + System Packages)
 
-### 0.1 Python 环境
+### 0.1 Python Environment
 
 ```bash
 cd /home/jb/KVI
@@ -16,85 +16,85 @@ python -m pip install -U pip
 pip install -r requirements.txt
 ```
 
-如果你用的是旧版 `transformers`，加载 Qwen2/DeepSeek 可能报：
-`Tokenizer class Qwen2Tokenizer does not exist ...`。建议升级：
+If you are using an older version of `transformers`, loading Qwen2/DeepSeek may produce:
+`Tokenizer class Qwen2Tokenizer does not exist ...`. Recommended upgrade:
 
 ```bash
 pip install -U "transformers>=4.41" accelerate safetensors tokenizers sentencepiece
 ```
 
-### 0.2 系统依赖（OCR）
+### 0.2 System Dependencies (OCR)
 
-如果你要处理扫描 PDF（OCR），需要安装 `tesseract`：
+If you need to process scanned PDFs (OCR), install `tesseract`:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y tesseract-ocr
 ```
 
-## 1) 数据构建（生产推荐）：PDF → raw_chunks(4096) → blocks(256) → KVBank
+## 1) Data Construction (Production Recommended): PDF → raw_chunks(4096) → blocks(256) → KVBank
 
-### 1.1 设置实验参数
+### 1.1 Set Experiment Parameters
 
 ```bash
-# 建议使用绝对路径；如果你已经 cd /home/jb/KVI，也可以用相对路径 ./pdfs
+# Absolute paths recommended; if you've cd /home/jb/KVI, relative ./pdfs also works
 export PDF_DIR="/home/jb/KVI/pdfs"
 export WORK_DIR="/home/jb/KVI/_exp_prod"
 export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
-# DeepSeek（知识含量过滤）
+# DeepSeek (knowledge density filtering)
 export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
 ```
 
-### 1.1.1（强烈推荐）专题库模式：以后统一“分库做数据集”
+### 1.1.1 (Highly Recommended) Topic-based Model: Use Separate KBs for Datasets Moving Forward
 
-> 结论：External KV injection 是高增益、低容错；**语料不相关/命中乱码块**会被注入放大。  
-> 所以我们推荐把“医学大库”拆成多个“专题库”（SFTSV、SARS‑CoV‑2 等），并且每次只加载/构建一个专题库。
+> Conclusion: External KV injection is high-gain, low-tolerance; **irrelevant corpora / noisy block hits** get amplified by injection.
+> Therefore we recommend splitting a "large medical corpus" into multiple "topic KBs" (SFTSV, SARS‑CoV‑2, etc.), and only load/build one topic KB at a time.
 
-这里有两条等价链路：
+There are two equivalent pipelines:
 
-- **推荐主线（更省心）**：`rebuild_topic_kvbank_from_config.py`  
-  一条命令完成：doc-level DeepSeek（摘要）筛选 → raw_chunks → blocks → KVBank（可选 split_tables）
-- **调试主线（可拆解）**：`build_topic_pdf_subset_deepseek.py` → `build_raw_context_from_pdfs.py` → `build_kvbank_from_pdf_dir_multistep.py`  
-  适合你逐段确认“筛选/抽取/切块/建库”哪一步出了问题
+- **Recommended mainline (more convenient)**: `rebuild_topic_kvbank_from_config.py`
+  One command completes: doc-level DeepSeek (abstract) filtering → raw_chunks → blocks → KVBank (optional split_tables)
+- **Debug mainline (decomposable)**: `build_topic_pdf_subset_deepseek.py` → `build_raw_context_from_pdfs.py` → `build_kvbank_from_pdf_dir_multistep.py`
+  Suitable for checking which step (filtering/extraction/chunking/KVBank construction) has a problem.
 
-两条链路的关系：
-- `rebuild_topic_kvbank_from_config.py` 本质上是把“调试主线”的步骤**串起来**（内部会调用 doc-filter，并直接调用 pipeline 函数生成 raw_chunks/blocks/KVBank）。
-- 所以：**结果等价**，只是 `rebuild` 更一键；三段式更容易定位问题。
+Relationship between the two pipelines:
+- `rebuild_topic_kvbank_from_config.py` essentially **chains** the "debug mainline" steps (internally calls doc-filter and directly invokes pipeline functions to produce raw_chunks/blocks/KVBank).
+- Therefore: **results are equivalent**; `rebuild` is more one-click; the three-stage approach is easier for pinpointing issues.
 
-### 1.1.2（你只需要改 config.json）专题库的配置文件位置与目录约定
+### 1.1.2 (You Only Need to Edit config.json) Topic Config File Locations and Directory Conventions
 
-> 约定：本 runbook 针对你的远程目录（flat layout）`/home/jb/KVI`。  
-> 如果你在另一个环境是 monorepo（repo root 下还有 `external_kv_injection/` 子目录），把下面的相对路径整体加上前缀即可。
+> Convention: This runbook targets your remote directory (flat layout) `/home/jb/KVI`.
+> If in another environment you have a monorepo (with `external_kv_injection/` subdirectory under the repo root), just prepend the relative paths below with that prefix.
 
-模板位置（远程 `/home/jb/KVI`）：
+Template locations (remote `/home/jb/KVI`):
 - `config/topics/SFTSV/config.json`
 - `config/topics/SARS2/config.json`
 
-推荐目录结构（你已经在采用）：
-- **专题源 PDF**（你人工整理/或放软链）：  
-  - SFTSV：`/home/jb/KVI/pdfs/sftsvpdf`（或 `/home/jb/KVI/pdfs/SFTSV`）  
-  - SARS2：`/home/jb/KVI/pdfs/sarspdf`（或 `/home/jb/KVI/pdfs/SARS2`）
-- **专题产物目录**：  
-  - SFTSV：`/home/jb/KVI/topics/SFTSV/`  
-  - SARS2：`/home/jb/KVI/topics/SARS2/`
+Recommended directory structure (already in use):
+- **Topic source PDFs** (manually organized or symlinked):
+  - SFTSV: `/home/jb/KVI/pdfs/sftsvpdf` (or `/home/jb/KVI/pdfs/SFTSV`)
+  - SARS2: `/home/jb/KVI/pdfs/sarspdf` (or `/home/jb/KVI/pdfs/SARS2`)
+- **Topic output directories**:
+  - SFTSV: `/home/jb/KVI/topics/SFTSV/`
+  - SARS2: `/home/jb/KVI/topics/SARS2/`
 
-重要提示（重复 PDF / 软链接 / results 写入方式）：
-- doc-level 筛选阶段默认 `mode=symlink`：`out_pdf_dir` 下会看到 **KEEP 的 PDF 软链接**，指向 `source_pdf_dir`（省磁盘、速度快）。
-- 如果目录里有同名 PDF：`dedupe_by_basename=true` 会跳过重复项，并在 results.jsonl 标记 `DUPLICATE/SKIP`。
-- **results_jsonl 默认是追加写**：方便保留历史记录。若你想每次重跑都得到“干净的一份结果”，在 config 的 `doc_filter` 里加：
+Important notes (duplicate PDFs / symlinks / results writing):
+- Doc-level filtering defaults to `mode=symlink`: under `out_pdf_dir` you'll see **KEEP PDF symlinks** pointing to `source_pdf_dir` (saves disk, faster).
+- If a directory has duplicate PDF names: `dedupe_by_basename=true` will skip duplicates and mark `DUPLICATE/SKIP` in results.jsonl.
+- **results_jsonl defaults to append mode**: convenient for preserving history. If you want a "clean result set" every rerun, add this in the `doc_filter` section of config:
   - `"overwrite_results": true`
 
-### 1.1.3（UI 工作流前置）PDF → raw_chunks → blocks.evidence.jsonl（Literature Import 数据准备）
+### 1.1.3 (UI Workflow Prerequisite) PDF → raw_chunks → blocks.evidence.jsonl (Literature Import Data Preparation)
 
-> 目标：为 KVI Console UI 的 **Literature Import → Build Graph** 功能准备数据。
-> Build Graph 需要 `blocks.evidence.jsonl` 才能编译完整的三元 KV Bank。
-> 如果 work_dir 下没有该文件，需要先跑以下两步。
+> Goal: Prepare data for the KVI Console UI's **Literature Import → Build Graph** feature.
+> Build Graph requires `blocks.evidence.jsonl` to compile a full triple KV Bank.
+> If the work dir does not contain this file, run the following two steps first.
 
 **Step 1: PDF → raw_chunks.jsonl**
 
-> 注意：`pdf_to_raw_context_chunks.py` 是库模块（无 CLI 入口），必须用 `python -c` 调用。
+> Note: `pdf_to_raw_context_chunks.py` is a library module (no CLI entrypoint); must be invoked via `python -c`.
 
 ```bash
 cd /home/jb/KVI
@@ -111,24 +111,24 @@ n = build_raw_context_chunks_from_pdf_dir(
 print(f'Done: {n} chunks written')
 "
 
-# 验证
+# Verify
 wc -l /home/jb/topics/SFTSV/work/raw_chunks.jsonl
 ```
 
-**Step 2: raw_chunks → blocks.evidence.jsonl（DeepSeek 抽取，约 5-15 分钟）**
+**Step 2: raw_chunks → blocks.evidence.jsonl (DeepSeek extraction, ~5-15 minutes)**
 
-> **`--topic_goal` 参数说明**：该文本会直接嵌入发给 DeepSeek 的 prompt（见 `src/llm_filter/extractive_evidence.py` 的 `USER_TEMPLATE`），
-> 作为抽取指引：DeepSeek 读每个 PDF 段落时，根据 topic_goal 判断是否保留（`keep=true/false`）以及抽取哪些证据句。
+> **`--topic_goal` parameter explanation**: This text is directly embedded into the prompt sent to DeepSeek (see `USER_TEMPLATE` in `src/llm_filter/extractive_evidence.py`),
+> serving as extraction guidance: when DeepSeek reads each PDF paragraph, it decides whether to keep (`keep=true/false`) and which evidence sentences to extract based on topic_goal.
 >
-> 冒号后的中文关键词**决定了 evidence 的覆盖面**：
-> - `传播途径` → 保留蜱叮咬、血液接触等相关句
-> - `临床症状` → 保留发热、血小板减少等描述
-> - `发病机制` → 保留免疫应答、细胞因子风暴等
-> - `治疗与预防` → 保留法维拉韦、对症治疗等
-> - 与所有关键词都无关的段落 → `keep=false`，跳过不抽取
+> The keywords after the colon **determine the coverage of evidence**:
+> - `transmission routes` → keeps sentences about tick bites, blood contact, etc.
+> - `clinical symptoms` → keeps descriptions like fever, thrombocytopenia
+> - `pathogenesis` → keeps descriptions like immune response, cytokine storm
+> - `treatment and prevention` → keeps mentions of favipiravir, symptomatic treatment
+> - Paragraphs unrelated to all keywords → `keep=false`, skipped without extraction
 >
-> **关键词越全面，DeepSeek 抽取的 evidence 覆盖面越广。**
-> 如果只写 `"SFTSV专题"`，可能会漏掉流行病学或治疗相关的 evidence。
+> **The more comprehensive the keywords, the broader the evidence coverage from DeepSeek extraction.**
+> If only `"SFTSV topic"` is specified, epidemiological or treatment-related evidence may be missed.
 
 ```bash
 cd /home/jb/KVI
@@ -138,24 +138,24 @@ python scripts/build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py \
   --out_jsonl /home/jb/topics/SFTSV/work/blocks.evidence.jsonl \
   --out_docs_meta_jsonl /home/jb/topics/SFTSV/work/docs.meta.jsonl \
   --kb_id SFTSV \
-  --topic_goal "建立关于SFTSV（发热伴血小板减少综合征）的专题知识库：传播途径、宿主媒介、流行病学、临床症状、发病机制、诊断要点、治疗与预防"
+  --topic_goal "Build a topic knowledge base for SFTSV (Severe Fever with Thrombocytopenia Syndrome): transmission routes, host vectors, epidemiology, clinical symptoms, pathogenesis, diagnostic points, treatment and prevention"
 
-# 验证
+# Verify
 wc -l /home/jb/topics/SFTSV/work/blocks.evidence.jsonl
 wc -l /home/jb/topics/SFTSV/work/docs.meta.jsonl
 ```
 
-完成后：
-- `blocks.evidence.jsonl`：PDF 抽取的完整 evidence（预计数百条）
-- `docs.meta.jsonl`：文档级元数据（标题、DOI、年份等）
-- UI Literature Import 页面可显示文档列表
-- **Build Graph 将从本 topic 下「全部 document」的 evidence 编译三元 KV Bank**（即整份 `blocks.evidence.jsonl` 的所有 block 都会参与抽取，不是单篇文档）。句子数量 = 该 topic 下所有 PDF 的 block 总数。详见 `docs/091_Build_Graph_Sentences_And_Extraction.md`。
+Upon completion:
+- `blocks.evidence.jsonl`: complete evidence extracted from PDFs (expected hundreds of entries)
+- `docs.meta.jsonl`: document-level metadata (title, DOI, year, etc.)
+- UI Literature Import page can display the document list
+- **Build Graph will compile a triple KV Bank from evidence of ALL documents in this topic** (i.e., all blocks in the entire `blocks.evidence.jsonl` participate in extraction, not from a single document). Sentence count = total blocks across all PDFs in this topic. See `docs/091_Build_Graph_Sentences_And_Extraction.md` for details.
 
-**其他 Topic 替换参数**：修改 `--pdf_dir` / `--out_jsonl` / `--topic_goal` 中的路径和目标描述即可。
+**Substituting parameters for other Topics**: Modify the paths and target descriptions in `--pdf_dir` / `--out_jsonl` / `--topic_goal`.
 
-### 1.2（推荐先做）快速验证：只跑 PDF → raw_chunks，确保抽取/解析正常
+### 1.2 (Recommended First) Quick Validation: Run Only PDF → raw_chunks to Ensure Extraction/Parsing Works
 
-如果这一步失败，说明是 PDF 抽取/OCR/依赖问题（不是 block 切分问题）。
+If this step fails, it indicates a PDF extraction/OCR/dependency issue (not a block segmentation issue).
 
 ```bash
 python scripts/build_raw_context_from_pdfs.py \
@@ -169,10 +169,10 @@ python scripts/build_raw_context_from_pdfs.py \
   --deepseek_model deepseek-chat
 ```
 
-### 1.2 一键构建 raw context + KVBank（表格优先 + DeepSeek 过滤）
+### 1.2 One-Click Build: raw context + KVBank (Table-First + DeepSeek Filtering)
 
-注意：如果开启 `--knowledge_filter`，会对**每个段落**调用一次 DeepSeek 接口（串行），因此在网络/限流情况下可能很慢、CPU/GPU 负载也会很低，这是正常的。
-建议首次验证链路时先不加 `--knowledge_filter`，确认 PDF 抽取与分块没问题后再开启过滤。
+Note: If `--knowledge_filter` is enabled, a DeepSeek API call is made for **each paragraph** (serial), which may be slow under network/rate-limiting conditions and CPU/GPU load will be low; this is normal.
+It is recommended to first verify the pipeline without `--knowledge_filter` to confirm PDF extraction and chunking work, then enable filtering later.
 
 ```bash
 python scripts/build_kvbank_from_pdf_dir_multistep.py \
@@ -190,11 +190,11 @@ python scripts/build_kvbank_from_pdf_dir_multistep.py \
   --deepseek_model deepseek-chat
 ```
 
-### 1.2.1（专题库）一键构建：SFTSV / SARS‑CoV‑2 两个专题 KVBank
+### 1.2.1 (Topic-based) One-Click Build: SFTSV / SARS‑CoV‑2 Two Topic KV Banks
 
-> 约定目录结构（推荐）：
-> - SFTSV：`$WORK_DIR/topics/sftsv/...`
-> - SARS‑CoV‑2：`$WORK_DIR/topics/sarscov2/...`
+> Recommended directory structure:
+> - SFTSV: `$WORK_DIR/topics/sftsv/...`
+> - SARS‑CoV‑2: `$WORK_DIR/topics/sarscov2/...`
 
 ```bash
 export WORK_DIR_TOPIC="$WORK_DIR/topics"
@@ -226,66 +226,65 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
   --shard_size 1024
 ```
 
-### 1.2.2（推荐主线）一条命令重建专题库：doc-level DS(abstract) → pipeline → KVBank
+### 1.2.2 (Recommended Mainline) One Command to Rebuild Topic KB: doc-level DS (abstract) → pipeline → KVBank
 
-> 你只需要改 config.json 里的：
-> - `goal`：建立专题库的目标（用户输入）
-> - `extract_tables`：是否抽取表格
-> - 路径：`source_pdf_dir / out_pdf_dir / build.work_dir`
+> You only need to modify in config.json:
+> - `goal`: the goal for building the topic KB (user input)
+> - `extract_tables`: whether to extract tables
+> - Paths: `source_pdf_dir / out_pdf_dir / build.work_dir`
 
 ```bash
-# SFTSV 专题库（输出目录：/home/jb/KVI/topics/SFTSV）
+# SFTSV topic KB (output dir: /home/jb/KVI/topics/SFTSV)
 python -u scripts/rebuild_topic_kvbank_from_config.py \
   --config config/topics/SFTSV/config.json
 
-# SARS2 专题库（输出目录：/home/jb/KVI/topics/SARS2）
+# SARS2 topic KB (output dir: /home/jb/KVI/topics/SARS2)
 python -u scripts/rebuild_topic_kvbank_from_config.py \
   --config config/topics/SARS2/config.json
 ```
 
-可选：从“完全干净”开始（仅删目标产物）
+Optional: Start from a completely clean state (delete only target artifacts)
 
-如果你想确保没有旧文件干扰（非必须），可以先删 evidence 相关两项再跑重建：
+If you want to ensure no old files interfere (not required), delete the two evidence-related items before rebuilding:
 
 ```bash
 rm -rf /home/jb/KVI/topics/SFTSV/work/kvbank_evidence
 rm -f /home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl
 ```
 
-完成后，如何判断成功（从头构建 + 双库，一共 6 个硬产物）：
-- `topics/<TOPIC>/doc_filter_results.jsonl`：doc-level 筛选记录（KEEP/DROP/UNCERTAIN）
-- `topics/<TOPIC>/pdfs/`：KEEP 的 PDF（默认软链）
-- `topics/<TOPIC>/work/raw_chunks.jsonl`、`topics/<TOPIC>/work/blocks.jsonl`
-- `topics/<TOPIC>/work/kvbank_blocks/manifest.json`（以及 `kvbank_tables/manifest.json` 若 `split_tables=true`）
-- `topics/<TOPIC>/work/blocks.evidence.jsonl`（DeepSeek 抽取式证据句，推荐从 raw_chunks 段落抽取）
-- `topics/<TOPIC>/work/kvbank_evidence/manifest.json`（evidence KVBank）
+Upon completion, how to judge success (full build from scratch + dual KB, 6 hard artifacts total):
+- `topics/<TOPIC>/doc_filter_results.jsonl`: doc-level filtering records (KEEP/DROP/UNCERTAIN)
+- `topics/<TOPIC>/pdfs/`: KEEP PDFs (default symlinked)
+- `topics/<TOPIC>/work/raw_chunks.jsonl`, `topics/<TOPIC>/work/blocks.jsonl`
+- `topics/<TOPIC>/work/kvbank_blocks/manifest.json` (and `kvbank_tables/manifest.json` if `split_tables=true`)
+- `topics/<TOPIC>/work/blocks.evidence.jsonl` (DeepSeek extractive evidence sentences, recommended to extract from raw_chunks paragraphs)
+- `topics/<TOPIC>/work/kvbank_evidence/manifest.json` (evidence KVBank)
 
-#### 1.2.2.1（新增，推荐）Evidence 版本：blocks.evidence + kvbank_evidence
+#### 1.2.2.1 (New, Recommended) Evidence Version: blocks.evidence + kvbank_evidence
 
-为了解决“raw block 噪声太大、知识碎片化导致注入退化”的问题，我们引入 **evidence-first 双库策略**：
+To address the problem of "raw block noise being too high and knowledge fragmentation causing injection degradation", we introduce the **evidence-first dual-bank strategy**:
 
-- **evidence 库**：DeepSeek **抽取式**证据句（extractive-only）→ `blocks.evidence.jsonl` → `kvbank_evidence/`
-- **raw 库**：保留 `blocks.jsonl` + `kvbank_blocks/` 用于回溯与补上下文
+- **Evidence bank**: DeepSeek **extractive** evidence sentences (extractive-only) → `blocks.evidence.jsonl` → `kvbank_evidence/`
+- **Raw bank**: Preserve `blocks.jsonl` + `kvbank_blocks/` for traceback and context supplementation
 
-现在 `rebuild_topic_kvbank_from_config.py` 会在 **PDF→raw_chunks→blocks** 之后，默认继续生成 evidence（从头构建）：
-
+Now `rebuild_topic_kvbank_from_config.py`, after **PDF→raw_chunks→blocks**, will by default continue to generate evidence (from scratch):
 - `topics/<TOPIC>/work/blocks.evidence.jsonl`
 - `topics/<TOPIC>/work/kvbank_evidence/manifest.json`
 
-如果你只想在已有产物基础上**单独补建 evidence**（不重跑 PDF→raw_chunks→blocks），可以用（但不推荐作为“最干净”的主线）：
+If you only want to **separately build evidence on top of existing artifacts** (without re-running PDF→raw_chunks→blocks), you may use (not recommended as the "cleanest" mainline):
 
 ```bash
 export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
 
-# 1) raw_chunks -> evidence blocks（DeepSeek 抽取式证据句；更干净，推荐）
+# 1) raw_chunks -> evidence blocks (DeepSeek extractive evidence sentences; cleaner, recommended)
 python -u scripts/build_evidence_blocks_from_raw_chunks_jsonl_deepseek.py \
   --raw_chunks_jsonl "$WORK_DIR/raw_chunks.jsonl" \
   --out_jsonl "$WORK_DIR/blocks.evidence.jsonl" \
   --topic_goal "$(jq -r .goal config/topics/SFTSV/config.json)" \
   --max_sentences_per_paragraph 3
 
-# 提示：如果你发现 evidence 覆盖不足（抽取偏保守），可以把上面的 max_sentences_per_paragraph 提到 4 或 5，
-# 会增加证据句密度（也可能带来少量噪声，需要用 1.3 的关键词抽样再确认）。
+# Tip: If you find evidence coverage insufficient (extraction is too conservative), you can raise max_sentences_per_paragraph to 4 or 5,
+# which increases evidence sentence density (may also bring slight noise; revalidate with keyword sampling from 1.3).
 
 # 2) evidence blocks -> kvbank_evidence
 python -u scripts/build_kvbank_from_blocks_jsonl.py \
@@ -298,14 +297,14 @@ python -u scripts/build_kvbank_from_blocks_jsonl.py \
   --shard_size 1024
 ```
 
-#### 1.2.2.1.a（调试必备）mini evidence.txt 一键建库：evidence.txt → blocks → pattern sidecar → pattern_contract → kvbank_blocks
+#### 1.2.2.1.a (Debug Essential) Mini evidence.txt One-Click Build: evidence.txt → blocks → pattern sidecar → pattern_contract → kvbank_blocks
 
-> 用途：你只有几行 `evidence.txt`，想先跑通“检索→Evidence Units→注入→回答”的最小闭环（用于架构调试/补漏洞），不依赖 PDF。
+> Purpose: You only have a few lines of `evidence.txt` and want to first run the minimum closed loop of "retrieval → Evidence Units → injection → answer" (for architecture debugging / patching gaps), without depending on PDFs.
 >
-> 约定目录（可替换成任意 topic）：  
-> - `TOPIC_DIR=/home/jb/KVI/config/topics/SFTSV`  
-> - 输入：`$TOPIC_DIR/evidence.txt`  
-> - 产物：`$TOPIC_DIR/blocks.jsonl`、`$TOPIC_DIR/blocks.enriched.jsonl`、`$TOPIC_DIR/pattern_contract.json`、`$TOPIC_DIR/kvbank_blocks/`
+> Convention directory (replaceable with any topic):
+> - `TOPIC_DIR=/home/jb/KVI/config/topics/SFTSV`
+> - Input: `$TOPIC_DIR/evidence.txt`
+> - Artifacts: `$TOPIC_DIR/blocks.jsonl`, `$TOPIC_DIR/blocks.enriched.jsonl`, `$TOPIC_DIR/pattern_contract.json`, `$TOPIC_DIR/kvbank_blocks/`
 
 ```bash
 cd /home/jb/KVI
@@ -323,13 +322,13 @@ python scripts/build_blocks_from_raw_text.py \
   --block_tokens 256 \
   --keep_last_incomplete_block
 
-# 2) blocks.jsonl -> blocks.enriched.jsonl + pattern sidecar（pattern_out_dir 放在 topic_dir 里即可）
+# 2) blocks.jsonl -> blocks.enriched.jsonl + pattern sidecar (place pattern_out_dir in topic_dir)
 python scripts/build_pattern_index_from_blocks_v2.py \
   --blocks_jsonl_in "$TOPIC_DIR/blocks.jsonl" \
   --blocks_jsonl_out "$TOPIC_DIR/blocks.enriched.jsonl" \
   --pattern_out_dir "$TOPIC_DIR"
 
-# 3) blocks.enriched.jsonl -> pattern_contract.json（供 PatternContractLoader + matcher/scoring 使用）
+# 3) blocks.enriched.jsonl -> pattern_contract.json (for PatternContractLoader + matcher/scoring usage)
 python scripts/pattern_contract_autogen.py \
   --blocks_jsonl_in "$TOPIC_DIR/blocks.enriched.jsonl" \
   --out "$TOPIC_DIR/pattern_contract.json" \
@@ -339,7 +338,7 @@ python scripts/pattern_contract_autogen.py \
   --max_abbr 50 \
   --max_slots 50
 
-# 4) blocks.enriched.jsonl -> kvbank_blocks（mini KVBank）
+# 4) blocks.enriched.jsonl -> kvbank_blocks (mini KVBank)
 python scripts/build_kvbank_from_blocks_jsonl.py \
   --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
   --out_dir "$TOPIC_DIR/kvbank_blocks" \
@@ -352,10 +351,10 @@ python scripts/build_kvbank_from_blocks_jsonl.py \
   --dtype bfloat16
 ```
 
-##### 1.2.2.1.a.1 验证（simple pipeline）：routing + Evidence Units + injected output
+##### 1.2.2.1.a.1 Validation (simple pipeline): routing + Evidence Units + injected output
 
-> 目标：验证“检索命中 + Evidence Units 数量 + 注入输出”都正常（输出 JSON 里会包含 step_debug）。
-> 注意：simple pipeline 是架构调试模式，核心链路是：prompt → similarity retrieval（kvbank_blocks）→ Evidence Units（sentence-level）→ 多步注入 → 文本回答。
+> Goal: Verify that "retrieval hits + Evidence Units count + injected output" all work correctly (output JSON will include step_debug).
+> Note: The simple pipeline is an architecture debugging mode; the core chain is: prompt → similarity retrieval (kvbank_blocks) → Evidence Units (sentence-level) → multi-step injection → text answer.
 
 ```bash
 cd /home/jb/KVI
@@ -364,11 +363,11 @@ export TOPIC_DIR="/home/jb/KVI/config/topics/SFTSV"
 export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
-# A) 症状（应出现 selected_unit_counts>0 且 evidence_units_shown 有症状枚举句）
+# A) Symptoms (should produce selected_unit_counts>0 and evidence_units_shown containing symptom enumeration sentences)
 python scripts/run_kvi2_runtime_test.py \
   --pipeline simple \
   --model "$BASE_LLM" \
-  --prompt "SFTSV的主要临床症状有哪些？" \
+  --prompt "What are the main clinical symptoms of SFTSV?" \
   --kv_dir "$TOPIC_DIR/kvbank_blocks" \
   --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
   --pattern_index_dir "$TOPIC_DIR" \
@@ -383,11 +382,11 @@ python scripts/run_kvi2_runtime_test.py \
   --simple_max_unit_sentences 4 \
   --show_baseline
 
-# B) 地区 + 症状（multi-intent，evidence_units_shown 应同时包含地区与症状句）
+# B) Region + symptoms (multi-intent, evidence_units_shown should contain both region and symptom sentences)
 python scripts/run_kvi2_runtime_test.py \
   --pipeline simple \
   --model "$BASE_LLM" \
-  --prompt "2009-2014年SFTSV在我国的主要发病地区有哪些？主要临床症状有哪些？" \
+  --prompt "Which regions in China had the highest incidence of SFTSV from 2009-2014? What are the main clinical symptoms?" \
   --kv_dir "$TOPIC_DIR/kvbank_blocks" \
   --blocks_jsonl "$TOPIC_DIR/blocks.enriched.jsonl" \
   --pattern_index_dir "$TOPIC_DIR" \
@@ -403,20 +402,20 @@ python scripts/run_kvi2_runtime_test.py \
   --show_baseline
 ```
 
-#### 1.2.2.2（新增，推荐）Schema 版本：blocks.schema + kvbank_schema（slot-aware 注入）
+#### 1.2.2.2 (New, Recommended) Schema Version: blocks.schema + kvbank_schema (slot-aware injection)
 
-为了解决"重复注入同一语义维度导致答案坍缩"的问题，我们在 evidence 之上引入 **schema-first + slot-aware 策略**：
+To address the problem of "repeated injection of the same semantic dimension causing answer collapse", we introduce the **schema-first + slot-aware strategy** on top of evidence:
 
-- **schema 库**：从 evidence 聚合的高信息密度槽位约束 → `blocks.schema.jsonl` → `kvbank_schema/`
-- **evidence 库**：保留用于 grounding/citation（retrieval-only，**永不注入**）
-- **raw 库**：保留用于回溯/fallback 上下文（retrieval-only，**永不注入**）
+- **Schema bank**: High information-density slot constraints aggregated from evidence → `blocks.schema.jsonl` → `kvbank_schema/`
+- **Evidence bank**: Preserved for grounding/citation (retrieval-only, **never injected**)
+- **Raw bank**: Preserved for traceback/fallback context (retrieval-only, **never injected**)
 
-**核心约束（见 `docs/slot_enum.md`）**：
-- Schema KV 是**唯一允许注入**的 cache
-- Evidence/raw **只能 append prompt**，不可注入 KV
-- 每步最多注入 1 个 schema；slot 覆盖用完即停止
+**Core constraints (see `docs/slot_enum.md`)**:
+- Schema KV is the **only cache allowed for injection**
+- Evidence/raw may **only append to prompt** (grounding), never inject into KV
+- At most 1 schema injected per step; stop when slot coverage is exhausted
 
-##### 1) 从 evidence blocks 生成 schema blocks
+##### 1) Generate schema blocks from evidence blocks
 
 ```bash
 export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
@@ -426,18 +425,18 @@ python -u scripts/build_schema_blocks_from_evidence_jsonl.py \
   --out_jsonl "$WORK_DIR/blocks.schema.jsonl"
 ```
 
-说明：
-- 该脚本会从 evidence 文本中**启发式推断** `answerable_slots`（用于 slot-aware 选择），包括但不限于：
+Explanation:
+- This script **heuristically infers** `answerable_slots` (for slot-aware selection) from evidence text, including but not limited to:
   - `transmission` / `pathogenesis` / `diagnosis` / `treatment`
-  - `disease_full_name`（全称/缩写展开，taxonomy.definition）
-  - `geographic_distribution`（地区分布，epidemiology.geography）
-- schema text 中已移除 `vector` 字段（避免物种中文俗名误译/越权）。
+  - `disease_full_name` (full name/abbreviation expansion, taxonomy.definition)
+  - `geographic_distribution` (region distribution, epidemiology.geography)
+- The `vector` field has been removed from schema text (to avoid mistranslation/overreach from species common names in Chinese).
 
-⚠️ 重要：如果你升级了 slot 或 schema 编译逻辑，必须 **重建**：
+⚠️ Important: If you upgrade the slot or schema compilation logic, you must **rebuild**:
 - `blocks.schema.jsonl`
 - `kvbank_schema`
 
-##### 2) 构建 schema KVBank
+##### 2) Build schema KVBank
 
 ```bash
 python -u scripts/build_kvbank_from_blocks_jsonl.py \
@@ -450,7 +449,7 @@ python -u scripts/build_kvbank_from_blocks_jsonl.py \
   --shard_size 1024
 ```
 
-##### 3) 检查 schema blocks 质量
+##### 3) Inspect schema block quality
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
@@ -458,15 +457,15 @@ python -u scripts/inspect_blocks_quality.py \
   --sample 10
 ```
 
-完成后，如何判断成功（schema-first 增加的 2 个硬产物）：
-- `$WORK_DIR/blocks.schema.jsonl`（schema blocks，带 `slots` 字段）
-- `$WORK_DIR/kvbank_schema/manifest.json`（schema KVBank）
+Upon completion, how to judge success (schema-first adds 2 hard artifacts):
+- `$WORK_DIR/blocks.schema.jsonl` (schema blocks, with `slots` field)
+- `$WORK_DIR/kvbank_schema/manifest.json` (schema KVBank)
 
-### 1.2.3（调试主线）把链路拆成三段，逐段排错
+### 1.2.3 (Debug Mainline) Break the Pipeline into Three Stages for Stepwise Debugging
 
-当你需要定位“到底是筛选不准、抽取不行、还是建库出错”时，用这三段式：
+When you need to pinpoint "whether filtering is inaccurate, extraction is poor, or KB construction has errors", use this three-stage approach:
 
-1) **doc-level 筛选（摘要）**：源 PDF → `topics/<TOPIC>/pdfs/` + `doc_filter_results.jsonl`
+1) **Doc-level filtering (abstract)**: Source PDFs → `topics/<TOPIC>/pdfs/` + `doc_filter_results.jsonl`
 
 ```bash
 python -u scripts/build_topic_pdf_subset_deepseek.py \
@@ -474,7 +473,7 @@ python -u scripts/build_topic_pdf_subset_deepseek.py \
   --max_pdfs 200
 ```
 
-2) **抽取 raw_chunks（不建库）**：KEEP PDFs → raw_chunks
+2) **Extract raw_chunks (no KB construction)**: KEEP PDFs → raw_chunks
 
 ```bash
 python -u scripts/build_raw_context_from_pdfs.py \
@@ -488,7 +487,7 @@ python -u scripts/build_raw_context_from_pdfs.py \
   --deepseek_model deepseek-chat
 ```
 
-3) **一键 blocks+KVBank**：KEEP PDFs → work_dir（raw_chunks/blocks/kvbank）
+3) **One-click blocks+KVBank**: KEEP PDFs → work_dir (raw_chunks/blocks/kvbank)
 
 ```bash
 python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
@@ -505,27 +504,27 @@ python -u scripts/build_kvbank_from_pdf_dir_multistep.py \
   --shard_size 1024
 ```
 
-为什么 runbook 里同时有 `rebuild_topic_kvbank_from_config.py` 和 `build_kvbank_from_pdf_dir_multistep.py`？
+Why do both `rebuild_topic_kvbank_from_config.py` and `build_kvbank_from_pdf_dir_multistep.py` appear in the runbook?
 
-- **`rebuild_topic_kvbank_from_config.py`（推荐主线）**：专题库“一条命令”流水线。它会按 `config/topics/<TOPIC>/config.json` 先做 doc-level DeepSeek（摘要）筛选，然后跑 PDF→raw_chunks→blocks→KVBank，并默认继续生成 `blocks.evidence.jsonl` + `kvbank_evidence/`（双库策略）。
-- **`build_kvbank_from_pdf_dir_multistep.py`（调试/拆解入口）**：不依赖 topic config 的通用脚本，用来在你**已经有一批 PDF** 时直接做 PDF→work_dir→KVBank，适合定位问题（比如抽取/OCR、切块、建库哪一步异常），也适合你临时做一个非专题的实验目录。
+- **`rebuild_topic_kvbank_from_config.py` (recommended mainline)**: Topic KB "one-command" pipeline. It follows `config/topics/<TOPIC>/config.json` to first perform doc-level DeepSeek (abstract) filtering, then runs PDF→raw_chunks→blocks→KVBank, and by default continues to generate `blocks.evidence.jsonl` + `kvbank_evidence/` (dual-bank strategy).
+- **`build_kvbank_from_pdf_dir_multistep.py` (debug/decompose entrypoint)**: A generic script not dependent on topic config, used when you **already have a batch of PDFs** and want to directly do PDF→work_dir→KVBank, suitable for pinpointing issues (e.g., which step of extraction/OCR, chunking, KVBank construction has anomalies), also suitable for temporarily creating a non-topic experiment directory.
 
-结论：**正常情况下只跑 `rebuild_topic_kvbank_from_config.py` 就够了**；只有当你要“逐段排错/做非专题 quick experiment”时才跑 `build_kvbank_from_pdf_dir_multistep.py`。
+Conclusion: **Under normal circumstances, only run `rebuild_topic_kvbank_from_config.py`**; only run `build_kvbank_from_pdf_dir_multistep.py` when you need to "debug step-by-step / do a non-topic quick experiment".
 
-### 1.3 质量检查（evidence-first）：如何确认 blocks 文本“抽取质量好”
+### 1.3 Quality Check (evidence-first): How to Confirm Block Text "Extraction Quality is Good"
 
-> 结论：在“双库策略”下，你**优先验证 evidence**（决定检索相关性与注入噪声），raw 只在需要表格/补上下文时再看。  
-> 简单原则：**你最终推理/注入优先用哪个库，就先检查哪个库对应的 blocks 文件。**
+> Conclusion: Under the "dual-bank strategy", you **prioritize evidence verification** (determines retrieval relevance and injection noise); raw only matters when tables/context supplementation is needed.
+> Simple principle: **Whichever bank you prioritize for final inference/injection, check that bank's corresponding blocks file first.**
 
-先设定当前专题的 work 目录（下面以 SFTSV 为例）：
+First set the work directory for the current topic (using SFTSV as example):
 
 ```bash
 export TOPIC_WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
 ```
 
-#### 1.3.1（优先）检查 evidence blocks：`blocks.evidence.jsonl`
+#### 1.3.1 (Priority) Inspect Evidence Blocks: `blocks.evidence.jsonl`
 
-1) **整体统计 + 抽样**（空块率、重复率、疑似乱码比例、抽样原文）
+1) **Overall statistics + sampling** (empty block rate, duplicate rate, suspected garbage ratio, sampled original text)
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
@@ -533,12 +532,12 @@ python -u scripts/inspect_blocks_quality.py \
   --sample 10
 ```
 
-> 说明：evidence blocks 目标是“更短、更单意图、更可直接回答”，通常不强调 `--tables_only`。
+> Note: Evidence blocks target "shorter, more single-intent, more directly answerable", typically do not emphasize `--tables_only`.
 
-2) **关键词抽样验证：库里是否包含某类证据句（例如“发病机制/免疫机制”）**
+2) **Keyword sampling validation: Does the KB contain certain types of evidence sentences (e.g., "pathogenesis/immune mechanism")?**
 
-> 用途：快速回答“evidence 库里有没有机制/pathogenesis/immune 相关证据句”，避免只凭感觉猜。  
-> 脚本会流式扫描 `blocks.evidence.jsonl`，统计每个关键词命中次数，并随机抽样打印命中的 block（含 `doc_id/source_uri/line_no` + snippet）。
+> Purpose: Quickly answer "does the evidence KB contain mechanism/pathogenesis/immune related evidence sentences", avoiding guesswork based on intuition alone.
+> The script streams through `blocks.evidence.jsonl`, counts hits per keyword, and randomly samples and prints matching blocks (including `doc_id/source_uri/line_no` + snippet).
 
 ```bash
 python -u scripts/sample_blocks_by_keywords.py \
@@ -549,9 +548,9 @@ python -u scripts/sample_blocks_by_keywords.py \
   --max_chars 600
 ```
 
-#### 1.3.2（可选）回看 raw blocks：`blocks.jsonl`（表格/上下文/定位碎片化问题）
+#### 1.3.2 (Optional) Review Raw Blocks: `blocks.jsonl` (tables/context/identify fragmentation issues)
 
-1) **整体统计 + 抽样**
+1) **Overall statistics + sampling**
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
@@ -559,7 +558,7 @@ python -u scripts/inspect_blocks_quality.py \
   --sample 10
 ```
 
-2) **只抽样表格相关 blocks**（仅当你开启 `extract_tables/split_tables`，并且确实希望表格进入 raw 库/表格路由时才需要）
+2) **Sample only table-related blocks** (only needed when you enable `extract_tables/split_tables` and actually want tables in the raw bank/table routing)
 
 ```bash
 python -u scripts/inspect_blocks_quality.py \
@@ -568,28 +567,28 @@ python -u scripts/inspect_blocks_quality.py \
   --sample 10
 ```
 
-> 如果你的仓库是“monorepo 布局”（即 repo root 下还有 `external_kv_injection/` 子目录），则把上述命令里的脚本路径改为：
+> If your repo uses a "monorepo layout" (i.e., has `external_kv_injection/` subdirectory under the repo root), change the script paths in the above commands to:
 > `python -u external_kv_injection/scripts/inspect_blocks_quality.py ...`
 
-产物（专题 work_dir 下）：
-- `$TOPIC_WORK_DIR/raw_chunks.jsonl`（PDF 抽取后的 raw context，不进 attention）
-- `$TOPIC_WORK_DIR/blocks.evidence.jsonl`（DeepSeek 抽取式证据句，推荐优先检索/注入）
-- `$TOPIC_WORK_DIR/kvbank_evidence/`（evidence KVBank）
-- （可选回溯）`$TOPIC_WORK_DIR/blocks.jsonl` + `$TOPIC_WORK_DIR/kvbank_blocks/`（raw blocks/KVBank，用于补上下文/表格）
+Artifacts (under topic work_dir):
+- `$TOPIC_WORK_DIR/raw_chunks.jsonl` (raw context after PDF extraction, does not enter attention)
+- `$TOPIC_WORK_DIR/blocks.evidence.jsonl` (DeepSeek extractive evidence sentences, recommended for priority retrieval/injection)
+- `$TOPIC_WORK_DIR/kvbank_evidence/` (evidence KVBank)
+- (Optional traceback) `$TOPIC_WORK_DIR/blocks.jsonl` + `$TOPIC_WORK_DIR/kvbank_blocks/` (raw blocks/KVBank, for context/table supplementation)
 
-### 1.4 后台构建 KVBank（evidence-first）：blocks → kvbank，nohup + 实时看日志
+### 1.4 Background KVBank Construction (evidence-first): blocks → kvbank, nohup + live log viewing
 
-> `blocks_to_kvbank` 阶段计算量大且**非常吃内存**。建议启用**方案A：分片 KVBank**（`--shard_size`），让它边处理边落盘，避免一次性 `np.stack` 把内存打爆。
+> The `blocks_to_kvbank` stage is computationally heavy and **very memory-hungry**. It is recommended to enable **Option A: Sharded KVBank** (`--shard_size`), letting it write to disk incrementally, avoiding memory blowup from a single `np.stack`.
 
-同样先设定当前专题 work 目录（下面以 SFTSV 为例）：
+Similarly, first set the current topic work directory (using SFTSV as example):
 
 ```bash
 export TOPIC_WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
 ```
 
-#### 1.4.1（优先）构建 evidence KVBank：`blocks.evidence.jsonl` → `kvbank_evidence/`
+#### 1.4.1 (Priority) Build Evidence KVBank: `blocks.evidence.jsonl` → `kvbank_evidence/`
 
-1) 启动后台任务（日志同时写文件，方便随时 `tail -f`）
+1) Start background task (log written to file simultaneously, convenient for `tail -f` anytime)
 
 ```bash
 mkdir -p "$TOPIC_WORK_DIR/logs"
@@ -606,22 +605,22 @@ nohup bash -lc "python -u scripts/build_kvbank_from_blocks_jsonl.py \
 echo "started, log=$TOPIC_WORK_DIR/logs/evidence_blocks_to_kvbank.log"
 ```
 
-2) 在当前终端“实时看输出”（不影响后台运行）
+2) Watch output live in the current terminal (does not affect background execution)
 
 ```bash
 tail -f "$TOPIC_WORK_DIR/logs/evidence_blocks_to_kvbank.log"
 ```
 
-3) 检查是否落盘成功（分片模式下，会出现 `kvbank_evidence/manifest.json` + `kvbank_evidence/shards/00000/...`）
+3) Verify successful disk output (in sharded mode, you'll see `kvbank_evidence/manifest.json` + `kvbank_evidence/shards/00000/...`)
 
 ```bash
 ls -alh "$TOPIC_WORK_DIR/kvbank_evidence"
 ls -alh "$TOPIC_WORK_DIR/kvbank_evidence/shards" | head
 ```
 
-#### 1.4.2（可选）构建 raw KVBank：`blocks.jsonl` → `kvbank_blocks/`（表格/补上下文）
+#### 1.4.2 (Optional) Build Raw KVBank: `blocks.jsonl` → `kvbank_blocks/` (tables/context supplementation)
 
-> 只有当你需要 raw fallback（或表格路由）时才跑这一段；否则可跳过。
+> Only run this section when you need raw fallback (or table routing); otherwise skip.
 
 ```bash
 mkdir -p "$TOPIC_WORK_DIR/logs"
@@ -647,16 +646,16 @@ ls -alh "$TOPIC_WORK_DIR/kvbank_blocks"
 ls -alh "$TOPIC_WORK_DIR/kvbank_blocks/shards" | head
 ```
 
-## 2) 测试：多步注入
+## 2) Test: Multi-Step Injection
 
-### 2.0（推荐，新增）Schema-first 注入（slot-aware，最严格）
+### 2.0 (Recommended, New) Schema-First Injection (slot-aware, strictest)
 
-> 核心规则（见 `docs/slot_enum.md`）：
-> - **只有 schema KV 可注入**（schema text forward → cache）
-> - evidence/raw **只能 append prompt**（grounding），不可注入 KV
-> - 每步最多注入 1 个 schema；slot 覆盖用完即停止
+> Core rules (see `docs/slot_enum.md`):
+> - **Only schema KV may be injected** (schema text forward → cache)
+> - evidence/raw may **only append to prompt** (grounding), cannot inject into KV
+> - At most 1 schema injected per step; stop when slot coverage is exhausted
 
-必须同时提供三库：`kvbank_schema`（注入）+ `kvbank_evidence`（grounding）+ `kvbank_blocks`（fallback）
+All three banks must be provided simultaneously: `kvbank_schema` (injection) + `kvbank_evidence` (grounding) + `kvbank_blocks` (fallback)
 
 ```bash
 export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
@@ -669,7 +668,7 @@ python -u scripts/run_multistep_inject_demo.py \
   --blocks_jsonl_schema "$WORK_DIR/blocks.schema.jsonl" \
   --blocks_jsonl_evidence "$WORK_DIR/blocks.evidence.jsonl" \
   --domain_encoder_model "$DOMAIN_ENCODER" \
-  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --prompt "What are the main transmission routes of SFTSV? Please answer in English and quote 1 evidence sentence verbatim." \
   --schema_required_slots "transmission,pathogenesis" \
   --use_struct_slots \
   --ground_with_selected_text \
@@ -681,36 +680,36 @@ python -u scripts/run_multistep_inject_demo.py \
   --debug_print_candidates 10
 ```
 
-验证要点：
-- 日志应出现 `[retriever] routing=schema->evidence->raw ...`
-- StepDebug.note 应包含 `schema_selector=...`（slot 覆盖信息）
-- 若选中 schema 不引入新 slot → 停止（`stop_reason=no_new_slots`）
-- 答案末尾只会 append `【证据句】/【回退上下文（raw）】`，**schema text 不会出现在 prompt**
+Verification points:
+- Logs should show `[retriever] routing=schema->evidence->raw ...`
+- StepDebug.note should include `schema_selector=...` (slot coverage info)
+- If selected schema introduces no new slots → stop (`stop_reason=no_new_slots`)
+- Answer end will only append `【Evidence Sentence】/【Fallback Context (raw)】`, **schema text will not appear in prompt**
 
-三层知识输出（强制格式）：
-- 注入后的回答会严格分成三段（永不跳层/合并）：
-  - `### L0｜证据支持的结论`（Evidence-Bound：仅基于 evidence/文档，不允许扩写；证据不足必须写“暂无证据支持”）
-  - `### L1｜领域共识（LLM 内部知识）`（Domain Prior：教科书级共识解释；不得与 L0 冲突；禁止“最新研究/假说”）
-  - `### L2｜推测性或解释性补充`（Speculative：默认关闭；开启后必须显式“推测/尚未完全证实”，不得覆盖 L0/L1）
+Three-layer knowledge output (mandatory format):
+- The injected answer will be strictly divided into three layers (never skip/merge layers):
+  - `### L0 | Evidence-Bound Conclusions` (Evidence-Bound: only based on evidence/documents, no extrapolation; insufficient evidence must state "No evidence supports this")
+  - `### L1 | Domain Prior (LLM Internal Knowledge)` (Domain Prior: textbook-level consensus explanation; must not conflict with L0; prohibit "latest research/hypotheses")
+  - `### L2 | Speculative or Interpretive Supplement` (Speculative: off by default; when enabled must explicitly state "speculative/not yet fully confirmed", must not override L0/L1)
 
-开启 L2（可选）：
-- 默认 L2 不生成，只保留占位；如需开启推测层，给 demo 加：
+Enabling L2 (optional):
+- By default L2 is not generated, only a placeholder is retained; to enable the speculative layer, add to the demo:
   - `--enable_layer2`
-  - 可调 token 预算：`--layer2_max_new_tokens 192`
-  - L1 token 预算：`--layer1_max_new_tokens 256`
+  - Adjustable token budget: `--layer2_max_new_tokens 192`
+  - L1 token budget: `--layer1_max_new_tokens 256`
 
-### 2.1（legacy）Evidence-first 注入
+### 2.1 (Legacy) Evidence-First Injection
 
-> 结论：默认用 **evidence KVBank** 做检索与注入（噪声更低、相关性更强），必要时再回退 raw 库补上下文。
+> Conclusion: Use **evidence KVBank** by default for retrieval and injection (lower noise, stronger relevance), fall back to raw bank for context supplementation when necessary.
 
-下面以 SFTSV 为例（flat layout：`/home/jb/KVI`）：
+Below using SFTSV as example (flat layout: `/home/jb/KVI`):
 
 ```bash
 python -u scripts/run_multistep_inject_demo.py \
   --model "$BASE_LLM" \
   --topic sftsv --topic_work_dir "/home/jb/KVI/topics" \
   --domain_encoder_model "$DOMAIN_ENCODER" \
-  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --prompt "What are the main transmission routes of SFTSV? Please answer in English and quote 1 evidence sentence verbatim." \
   --blocks_jsonl "/home/jb/KVI/topics/SFTSV/work/blocks.jsonl" \
   --blocks_jsonl_evidence "/home/jb/KVI/topics/SFTSV/work/blocks.evidence.jsonl" \
   --allowed_langs "zh,en" \
@@ -723,19 +722,19 @@ python -u scripts/run_multistep_inject_demo.py \
   --max_new_tokens 256
 ```
 
-说明：
-- `--topic ... --topic_work_dir ...`：脚本会优先探测 `kvbank_evidence`（并在需要时回退 raw 的 `kvbank_blocks`）。
-- `--blocks_jsonl(_evidence) + --allowed_langs`：强烈建议开启，避免混语料导致命中非目标语言 block 后注入退化。
-- `--max_steps=1 + --max_blocks_per_step=1`：先用“最小注入”验证相关性与稳定性；稳定后再把 `--max_steps` 提到 2/4。
+Explanation:
+- `--topic ... --topic_work_dir ...`: The script will first probe `kvbank_evidence` (and fall back to raw `kvbank_blocks` when needed).
+- `--blocks_jsonl(_evidence) + --allowed_langs`: Strongly recommended to enable, avoiding injection degradation from hitting non-target-language blocks in mixed-language corpora.
+- `--max_steps=1 + --max_blocks_per_step=1`: First validate relevance and stability with "minimum injection"; increase `--max_steps` to 2/4 after stabilization.
 
-### 2.1.1（等价写法）显式指定 evidence + raw（不使用 topic mode）
+### 2.1.1 (Equivalent Usage) Explicitly Specify Evidence + Raw (without topic mode)
 
-如果你的专题库 work_dir 下存在：
+If your topic KB work_dir contains:
 
 - `kvbank_evidence/manifest.json`
 - `blocks.evidence.jsonl`
 
-如果你不想用 `--topic` 自动探测，也可以显式指定两个库的路径（效果等价）：
+If you prefer not to use `--topic` for auto-detection, you can explicitly specify paths for both banks (equivalent effect):
 
 ```bash
 python -u scripts/run_multistep_inject_demo.py \
@@ -743,7 +742,7 @@ python -u scripts/run_multistep_inject_demo.py \
   --kv_dir "/home/jb/KVI/topics/SFTSV/work/kvbank_blocks" \
   --kv_dir_evidence "/home/jb/KVI/topics/SFTSV/work/kvbank_evidence" \
   --domain_encoder_model "$DOMAIN_ENCODER" \
-  --prompt "SFTSV 的主要传播途径是什么？请用中文回答，并逐字引用1句证据原文（英文也可以）。" \
+  --prompt "What are the main transmission routes of SFTSV? Please answer in English and quote 1 evidence sentence verbatim." \
   --max_steps 1 \
   --max_blocks_per_step 1 \
   --top_k_blocks 16 \
@@ -755,20 +754,20 @@ python -u scripts/run_multistep_inject_demo.py \
   --max_new_tokens 256
 ```
 
-验证要点：
-- `=== Step Debug ===` 的 `selected_block_ids` 更倾向 evidence block（更短、更单意图）。
-- 答案应更少出现“unknown routes / mink bite”等 raw 噪声带来的退化。
+Verification points:
+- `=== Step Debug ===`'s `selected_block_ids` should favor evidence blocks (shorter, more single-intent).
+- Answers should show less degradation from raw noise like "unknown routes / mink bite".
 
-### 2.2（新增）评测集 A/B：强制 JSON 协议输出 + faithfulness/overclaim 指标
+### 2.2 (New) Evaluation Set A/B: Mandatory JSON Protocol Output + Faithfulness/Overclaim Metrics
 
-准备评测集 `prompts.jsonl`（每行至少包含 `prompt`）：
+Prepare evaluation set `prompts.jsonl` (each line must contain at least `prompt`):
 
 ```json
-{"id":"sftsv_tx_001","prompt":"SFTSV 的主要传播途径是什么？"}
-{"id":"sftsv_tx_002","prompt":"SFTSV 是否存在人传人？如果有，主要通过什么接触？"}
+{"id":"sftsv_tx_001","prompt":"What are the main transmission routes of SFTSV?"}
+{"id":"sftsv_tx_002","prompt":"Does human-to-human transmission of SFTSV exist? If so, through what type of contact?"}
 ```
 
-运行 A/B（baseline vs injection），并自动计算覆盖率/overclaim：
+Run A/B (baseline vs injection) with automatic coverage/overclaim metrics:
 
 ```bash
 python -u scripts/run_ab_eval_protocol.py \
@@ -783,18 +782,18 @@ python -u scripts/run_ab_eval_protocol.py \
   --max_examples 0
 ```
 
-结果与验证：
-- `ab_results.jsonl` 每条包含 baseline/injected 的原始输出、解析后的 JSON、以及 `covered/overclaim` 指标。
-- 终端末尾会打印 summary：`baseline_valid/inj_valid`、`baseline_covered/inj_covered`、`baseline_over/inj_over`。
+Results and verification:
+- `ab_results.jsonl` each entry contains baseline/injected raw output, parsed JSON, and `covered/overclaim` metrics.
+- Terminal end prints summary: `baseline_valid/inj_valid`, `baseline_covered/inj_covered`, `baseline_over/inj_over`.
 
-### 2.3（新增）单元测试：Evidence Recall（检索命中率冒烟测试）
+### 2.3 (New) Unit Test: Evidence Recall (Retrieval Hit Rate Smoke Test)
 
-目的：
-- 验证 `blocks.evidence.jsonl` 产物非空、结构正常
-- 验证 `kvbank_evidence` 对一组常见中文问法具有基本“命中能力”（不要求逐条证据匹配，只做召回 sanity check）
-- 及时发现“检索向量退化/总是命中同一批证据”等问题
+Purpose:
+- Verify `blocks.evidence.jsonl` artifact is non-empty and structurally correct
+- Verify `kvbank_evidence` has basic "hit capability" for a set of common queries (not requiring sentence-level evidence matching, just a recall sanity check)
+- Catch issues like "retrieval vector degradation / always hitting the same batch of evidence" early
 
-运行（以 SFTSV 为例）：
+Run (using SFTSV as example):
 
 ```bash
 export WORK_DIR="/home/jb/KVI/topics/SFTSV/work"
@@ -806,21 +805,21 @@ python -u scripts/test_evidence_recall.py \
   --top_k 16
 ```
 
-说明：
-- 默认会对“传播途径/病原体/发病机制/流行病学/诊断防控”五类 query 做检索，并断言总体 hit_rate 不低于阈值
-- 若你发现 evidence 基本都是英文，可保留中文 query：该测试使用英文 anchor 做命中判断（检索是否拉回相关英文证据句）
+Explanation:
+- By default retrieves on five query categories ("transmission/pathogen/pathogenesis/epidemiology/diagnosis prevention") and asserts overall hit_rate meets threshold
+- If you find evidence is mostly in English, Chinese queries can be retained: the test uses English anchors for hit determination (whether retrieval pulls back relevant English evidence sentences)
 
-## 3) （可选）训练 Projector（对齐到 past_key_values 空间，max_kv_tokens=256）
+## 3) (Optional) Train Projector (Align to past_key_values space, max_kv_tokens=256)
 
-> 这条训练链路使用 `ChunkStore`（见 `external_kv_injection/scripts/build_chunkstore_from_pdfs.py`）。  
-> 如果你希望训练数据也采用“DeepSeek 过滤后的 raw context”，建议先用 1) 的 raw_chunks 产物做一次转换生成 chunkstore（后续可加脚本）。
+> This training pipeline uses `ChunkStore` (see `external_kv_injection/scripts/build_chunkstore_from_pdfs.py`).
+> If you want training data to also use "DeepSeek-filtered raw context", it is recommended to first convert the raw_chunks artifact from step 1 into a chunkstore (a script can be added later).
 
 ```bash
 export WORK_TRAIN="external_kv_injection/_exp_train"
 mkdir -p "$WORK_TRAIN"
 ```
 
-### 3.1 PDF → chunkstore.jsonl（快速训练集）
+### 3.1 PDF → chunkstore.jsonl (Quick Training Set)
 
 ```bash
 python external_kv_injection/scripts/build_chunkstore_from_pdfs.py \
@@ -829,7 +828,7 @@ python external_kv_injection/scripts/build_chunkstore_from_pdfs.py \
   --dataset_version v0
 ```
 
-### 3.2 生成 teacher KV dataset
+### 3.2 Generate Teacher KV Dataset
 
 ```bash
 python external_kv_injection/scripts/build_teacher_kv_dataset.py \
@@ -841,7 +840,7 @@ python external_kv_injection/scripts/build_teacher_kv_dataset.py \
   --max_samples 200
 ```
 
-### 3.3 训练 projector
+### 3.3 Train Projector
 
 ```bash
 python external_kv_injection/scripts/train_projector_kv.py \
@@ -853,7 +852,7 @@ python external_kv_injection/scripts/train_projector_kv.py \
   --epochs 1
 ```
 
-### 3.4 用 projector 构建 KVBank（检索 key 使用 DomainEncoder）
+### 3.4 Build KVBank with Projector (retrieval key uses DomainEncoder)
 
 ```bash
 python external_kv_injection/scripts/build_kvbank_with_projector.py \
@@ -866,7 +865,7 @@ python external_kv_injection/scripts/build_kvbank_with_projector.py \
   --retrieval_encoder_model "$DOMAIN_ENCODER"
 ```
 
-## 4) （可选）训练/使用 Gate（DomainEncoder(query) embedding）
+## 4) (Optional) Train/Use Gate (DomainEncoder(query) embedding)
 
 ```bash
 python external_kv_injection/scripts/train_gate_query.py \
@@ -874,13 +873,13 @@ python external_kv_injection/scripts/train_gate_query.py \
   --out "$WORK_TRAIN/gate_query.pt"
 ```
 
-推理验证（单步注入 demo）：
+Inference validation (single-step injection demo):
 
 ```bash
 python external_kv_injection/scripts/run_qwen_inject_demo.py \
   --model "$BASE_LLM" \
   --kv_dir "$WORK_TRAIN/kvbank_projector" \
-  --prompt "请根据知识库内容回答：SFTSV 的主要传播途径是什么？并给出依据。" \
+  --prompt "Based on the knowledge base content, please answer: What are the main transmission routes of SFTSV? Provide supporting evidence." \
   --layers 0,1,2,3 \
   --top_k 4 \
   --domain_encoder_model "$DOMAIN_ENCODER" \
@@ -888,4 +887,3 @@ python external_kv_injection/scripts/run_qwen_inject_demo.py \
   --gate_mode scale_v \
   --max_new_tokens 128
 ```
-

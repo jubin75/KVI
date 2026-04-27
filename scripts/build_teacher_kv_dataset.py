@@ -1,5 +1,5 @@
 """
-CLI：从 ChunkStore 构建 teacher KV dataset（past_key_values 监督）
+CLI: Build teacher KV dataset (past_key_values supervision) from ChunkStore
 """
 
 from __future__ import annotations

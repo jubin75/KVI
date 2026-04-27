@@ -7,4 +7,4 @@
 | ANN | 0.0 | 0.0 | 0.0 |
 | Graph | 0.0 | 0.0 | 0.0 |
 
-> **Note:** `gold_supporting_sentences` 来自 Hotpot **Wiki 原文**，而 Exp01 的 `sentences.jsonl` 多为 **QA 合成句池**，子串往往对不上，Recall/MRR 会为 0。若需非零 Exp3，请用与 Hotpot 段落对齐的语料构建 `sentences.jsonl` / 图，或改用 dense ANN（安装 `sentence-transformers`）在全句池上评测。
+> **Note:** `gold_supporting_sentences` come from Hotpot **Wiki original text**, while Exp01's `sentences.jsonl` is mostly a **QA synthetic sentence pool**, so substrings often don't match and Recall/MRR will be 0. For non-zero Exp3 results, build `sentences.jsonl` / graph using corpora aligned with Hotpot paragraphs, or switch to dense ANN (install `sentence-transformers`) on the full sentence pool.

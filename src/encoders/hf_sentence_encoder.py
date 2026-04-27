@@ -1,15 +1,15 @@
 """
-HF Sentence Encoder（DomainEncoder）
+HF Sentence Encoder (DomainEncoder)
 
-用途
-- 用 HF encoder（或任意 AutoModel）把文本编码成向量 embedding，用于：
-  - KVBank 的 retrieval_keys（chunk embedding）
-  - 在线检索的 query embedding
-  - Gate 的 query embedding（建议与检索空间一致）
+Purpose:
+- Encode text into vector embeddings using an HF encoder (or any AutoModel), for:
+  - KVBank retrieval_keys (chunk embeddings)
+  - Query embeddings for online retrieval
+  - Gate query embeddings (recommended to be consistent with retrieval space)
 
-实现
-- mean pooling over last_hidden_state（按 attention_mask）
-- 可选 L2 normalize（推荐：与 FAISS inner product 搭配即 cosine）
+Implementation:
+- Mean pooling over last_hidden_state (weighted by attention_mask)
+- Optional L2 normalization (recommended: paired with FAISS inner product, i.e. cosine)
 """
 
 from __future__ import annotations

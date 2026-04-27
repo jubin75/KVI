@@ -1,22 +1,22 @@
 """
 Multi-step Injection Runtime
 
-严格遵循 PRD/多步注入的工程实现.md：
-- 检索是推理的一部分：每一步都基于当前状态重新检索
-- 每步注入 external KV tokens ≤ 1024（推荐），绝对上限 2048
-- 每步注入由多个 256-token memory blocks 组成（4~8 个）
-- 只在前几层（默认 0..3）注入
-- 必须实现 stopping policy（不能硬编码步数）：至少两类信号 + 安全上限
+Strictly following PRD/multi-step injection engineering implementation:
+- Retrieval is part of inference: re-retrieve at each step based on current state
+- External KV tokens injected per step ≤ 1024 (recommended), absolute upper limit 2048
+- Each step injection consists of multiple 256-token memory blocks (4–8)
+- Only inject in early layers (default 0..3)
+- Must implement stopping policy (no hard-coded step count): at least two signal types + safety cap
 
-工程实现选择（HF Transformers 友好）
-- 外部 KV 以 past_key_values 前缀注入（不改写 attention forward）
-- hidden state 演化：每一步以当前 prompt/已生成文本的 last_hidden 构造 query embedding
+Engineering implementation choices (HF Transformers friendly)
+- External KV injected as past_key_values prefix (no modification to attention forward)
+- Hidden state evolution: construct query embedding from current prompt/generated text's last_hidden at each step
 
 ================================================================================
 SLOT BYPASS SEMANTICS (CRITICAL ARCHITECTURE CONTRACT)
 ================================================================================
 
-Slots are *retrieval-side bypass signals* (交通信号灯), NOT a semantic protocol (答题卡).
+Slots are *retrieval-side bypass signals* (traffic lights), NOT a semantic protocol (answer sheet).
 
 What slots MAY do (and only here, before generation):
 - Influence candidate filtering / selection priority

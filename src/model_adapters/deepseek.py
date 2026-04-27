@@ -1,8 +1,9 @@
 """
-model_adapters.deepseek: DeepSeek 适配器（最小可运行）
+model_adapters.deepseek: DeepSeek Adapter (minimal runnable)
 
-说明
-- 与 Qwen 一样，当前用 past_key_values 前缀注入，不需要深入 MoE 路由细节。
+Description:
+- Same as Qwen, uses past_key_values prefix injection for now; no need to delve into
+  MoE routing details.
 """
 
 from __future__ import annotations

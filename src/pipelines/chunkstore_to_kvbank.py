@@ -1,14 +1,14 @@
 """
-Pipeline：ChunkStore(JSONL) → FAISS KVBank（可跑通实现）
+Pipeline: ChunkStore(JSONL) → FAISS KVBank (runnable implementation)
 
-关键设计（让“完整工程可跑通”）
-- 为了解决不同模型的 RoPE/缓存空间对齐问题，本 pipeline 直接用“目标基模”对每条 chunk 做一次 forward，
-  取回该 chunk 的 `past_key_values`（即真实的 K/V cache）。这样：
-  - K/V 的 head_dim、kv_heads、rotary 处理都与目标模型一致
-  - 在线注入时可直接把这些 K/V 当作 past_key_values 前缀使用
+Key design (to make the "complete project runnable")
+- To solve RoPE/cache space alignment issues across different models, this pipeline directly runs a single forward pass
+  on each chunk using the "target base model" and retrieves its `past_key_values` (i.e. real K/V cache). Thus:
+  - K/V head_dim, kv_heads, rotary processing are all consistent with the target model
+  - During online injection, these K/V values can be directly used as a past_key_values prefix
 
-代价
-- 构建 KVBank 时需要跑目标模型（对小 KB demo 完全可接受；生产级可做批处理、缓存、分片/增量）。
+Cost
+- Building KVBank requires running the target model (fully acceptable for small KB demos; production can use batching, caching, sharding/incremental).
 """
 
 from __future__ import annotations
@@ -63,14 +63,14 @@ def build_faiss_kvbank_from_chunkstore(
     dtype: Optional[str] = None,
 ) -> Tuple[FaissKVBank, BuildStats]:
     """
-    构建 KVBank：
-    - retrieval_key：用目标基模最后一层 hidden 做 mean pooling（demo 直接用 H 维向量）
-    - K_ext/V_ext：直接取目标基模的 past_key_values（按 inject_layers 选择层）
+    Build KVBank:
+    - retrieval_key: mean pooling over the target base model's last hidden layer (demo uses H-dim vector directly)
+    - K_ext/V_ext: directly take the target base model's past_key_values (select layers per inject_layers)
 
-    K/V 存储形态（多层）：
-    - k_ext: [N, L, kv_heads, max_kv_tokens, head_dim]（padding 到 max_kv_tokens）
-    - v_ext: 同上
-    - meta 中记录：layer_ids、kv_len（有效 token 长度）
+    K/V storage format (multi-layer):
+    - k_ext: [N, L, kv_heads, max_kv_tokens, head_dim] (padded to max_kv_tokens)
+    - v_ext: same as above
+    - meta records: layer_ids, kv_len (effective token length)
     """
 
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -95,7 +95,7 @@ def build_faiss_kvbank_from_chunkstore(
         if li < 0 or li >= num_layers:
             raise ValueError(f"inject layer {li} out of range [0, {num_layers-1}]")
 
-    # retrieval keys: default 用 base model pooled hidden；若指定 retrieval_encoder_model 则用 DomainEncoder 空间
+    # retrieval keys: default uses base model pooled hidden; if retrieval_encoder_model is specified, use DomainEncoder space
     encoder = None
     if retrieval_encoder_model:
         from ..encoders.hf_sentence_encoder import HFSentenceEncoder, HFSentenceEncoderConfig
@@ -141,7 +141,7 @@ def build_faiss_kvbank_from_chunkstore(
                 pooled = _mean_pool_last_hidden(last_hidden, attention_mask)  # [1, H]
                 key = pooled[0].to(torch.float32).cpu().numpy()
             else:
-                # 走 DomainEncoder 空间（推荐用于生产检索）
+                # Use DomainEncoder space (recommended for production retrieval)
                 key = encoder.encode(text)[0]
 
             pkv = out.past_key_values

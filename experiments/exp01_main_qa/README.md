@@ -1,25 +1,25 @@
 ## Experiment 1
 ### Main QA Performance
 
-**目的**：验证 KVI 是否提升问答准确率（Exact Match, EM）。  
-**数据集**：`HotpotQA`、`MedHopQA` 与 `NQ (Natural Questions)`。  
-**展示形式**：统一结果表（按方法对比 `HotpotQA / MedHopQA / NQ` 的 EM 与 CI95）。
+**Purpose**: Verify whether KVI improves question-answering accuracy (Exact Match, EM).  
+**Datasets**: `HotpotQA`, `MedHopQA` and `NQ (Natural Questions)`.  
+**Presentation format**: Unified results table (comparing EM and CI95 across `HotpotQA / MedHopQA / NQ` by method).
 
-**Git 入库说明**：`results/`、`artifacts/`、`data/` 下的跑分与构建产物默认 **不提交**（见仓库根目录 `.gitignore`）。论文用 **Markdown 主表与附表** 放在 **`reports/`**（见 `reports/README.md`）；本地若将 `results` 指到数据盘符号链接，更新表后请 `cp -aL` 同步到 `reports/` 再提交。
+**Git check-in notes**: Scoring and build artifacts under `results/`, `artifacts/`, `data/` are **not committed** by default (see repo root `.gitignore`). Paper-facing **Markdown main tables and supplementary tables** are placed in **`reports/`** (see `reports/README.md`); if `results` is locally a symlink to a data disk, use `cp -aL` to sync into `reports/` before committing.
 
 ---
 
 ### Evaluation Table (target format)
 
 | Method | Retrieval | Injection | HotpotQA EM | HotpotQA CI95 | MedHopQA EM | MedHopQA CI95 | NQ EM | NQ CI95 |
-|---|---|---|---:|---:|---:|---:|---:|---:|
+|---|---|---|---|---:|---:|---:|---:|---:|---:|
 | LLM | none | none | 32.4 | [30.1, 34.8] | 28.1 | [26.0, 30.0] |
 | RAG | ANN | prompt | 55.2 | [52.4, 58.1] | 47.8 | [45.3, 50.1] |
 | GraphRAG | graph | prompt | 58.7 | [56.0, 61.3] | 50.3 | [48.0, 52.9] |
 | KV Prefix | ANN | KV | 57.9 | [55.4, 60.6] | 49.1 | [46.9, 51.6] |
 | KVI | graph | KV + prompt | 66.4 | [63.7, 69.0] | 56.2 | [53.8, 58.5] |
 
-> 说明：上表数值是论文/文档中的示例格式。你在本仓库复现实验时，需替换为实际跑出来的 EM。
+> Note: The values above are example formats from the paper/documentation. When reproducing experiments in this repo, replace them with actual EM values from your runs.
 
 ---
 
@@ -31,12 +31,12 @@
 - **KV Prefix**: ANN retrieval + KV-only injection
 - **KVI**: graph retrieval + KV injection + prompt evidence (dual-channel)
 
-### KVI vs RAG / analysis (重要)
+### KVI vs RAG / analysis (important)
 
-- **原因说明**：见 `KVI_FAILURE_ANALYSIS.md`（域错配、synthetic 图谱、检索通道不一致等）。
-- **默认** `run_exp01.py` 对 Graph/KVI 开启 **`--openqa_mode`**（英文开放域提示，避免沿用医学中文 system prompt）。
-- **消融**：**`--kvi_minimal_prompt`** —— KVI 注入 KV 时从 prompt 中去掉长证据列表，用于检验「仅 KV + 问题」是否减轻注意力偏转。
-- **Exp3 / Exp6**：独立目录 `experiments/exp03_retrieval_quality/`、`experiments/exp06_ablation/`；汇总表见仓库根目录 `experiments/RESULTS_COMBINED.md`（`python experiments/combine_experiment_results.py`）。
+- **Root cause analysis**: see `KVI_FAILURE_ANALYSIS.md` (domain mismatch, synthetic graph, retrieval channel inconsistency, etc.).
+- **Default** `run_exp01.py` enables **`--openqa_mode`** for Graph/KVI (English open-domain prompt, avoiding leftover Chinese medical system prompt).
+- **Ablation**: **`--kvi_minimal_prompt`** — when injecting KV, removes the long evidence list from the prompt, to test whether "KV + question only" reduces attention deflection.
+- **Exp3 / Exp6**: Independent directories `experiments/exp03_retrieval_quality/`, `experiments/exp06_ablation/`; summary table at repo root `experiments/RESULTS_COMBINED.md` (`python experiments/combine_experiment_results.py`).
 
 ---
 
@@ -72,8 +72,8 @@ python experiments/exp01_main_qa/code/prepare_hotpot_nq.py \
   --streaming
 ```
 
-> `--hotpot_max 0 --nq_max 0` 表示尽量拉取官方 validation 全量（或镜像可提供的完整子集）；  
-> 若先做 smoke test，可临时改成 `--hotpot_max 100 --nq_max 100`。
+> `--hotpot_max 0 --nq_max 0` means pull the full official validation set (or the complete subset the mirror can provide).  
+> For a smoke test, temporarily change to `--hotpot_max 100 --nq_max 100`.
 
 Generated files:
 
@@ -134,21 +134,21 @@ This dataset is intended for validating whether KVI benefits from multi-hop, lon
 
 ### Run Strategy (single `--dataset`)
 
-按你的要求，实验脚本采用 **单数据集单次评估**：
+As requested, the experiment script uses **single-dataset single-evaluation**:
 
-- `run_exp01.py --dataset <one_dataset>`：在该数据集上一次性评估 5 个方法（LLM / RAG / GraphRAG / KV Prefix / KVI）
-- 对 HotpotQA、MedHopQA、NQ 各跑一次
-- 再用 `aggregate_exp01.py` 自动合并成主表（HotpotQA + MedHopQA + NQ）
-- 每个方法自动输出 `EM`、`95% bootstrap CI`，并在 `summary.json` 中输出 `KVI` 相对其他方法的配对置换检验 `p-value`
+- `run_exp01.py --dataset <one_dataset>`: evaluates all 5 methods (LLM / RAG / GraphRAG / KV Prefix / KVI) on that dataset in one pass.
+- Run once each for HotpotQA, MedHopQA, NQ.
+- Then use `aggregate_exp01.py` to auto-merge into the main table (HotpotQA + MedHopQA + NQ).
+- Each method automatically outputs `EM`, `95% bootstrap CI`, and `summary.json` includes paired permutation test `p-value` of KVI vs other methods.
 
 ---
 
 ### Official-style staged execution (recommended)
 
-在远程不稳定场景下，建议两阶段：
+For unstable remote environments, a two-phase approach is recommended:
 
-1. **阶段A（校验）**：Hotpot/NQ 各 `--limit 100`，确认链路与统计输出正常  
-2. **阶段B（正式）**：去掉 `--limit`，后台跑完整 validation（断线不影响）
+1. **Phase A (verification)**: Hotpot/NQ each with `--limit 100`, confirm pipeline and statistical output are correct.  
+2. **Phase B (formal)**: Remove `--limit`, run full validation in background (survives SSH disconnect).
 
 ---
 
@@ -206,7 +206,7 @@ python experiments/exp01_main_qa/code/aggregate_exp01.py \
   --out_dir experiments/exp01_main_qa/results/main_table
 ```
 
-输出：
+Outputs:
 - `main_table.md`
 - `main_table.csv`
 - `main_table_summary.json`
@@ -263,21 +263,21 @@ python src/graph/triple_kv_compiler.py \
 
 Repeat the same for NQ by replacing `hotpot` paths with `nq`.
 
-> 说明：`extract_triples.py`（LLM抽取）优先于简单模板合成三元组，可显著提高 GraphRAG/KVI 上游图谱质量。  
-> ANN 侧建议保留 `sentences.tagged.jsonl` 的语义标签与更高覆盖语料（而非极小样本）来提升召回。
+> Note: `extract_triples.py` (LLM extraction) is preferred over simple template-based triple synthesis and can significantly improve upstream graph quality for GraphRAG/KVI.  
+> On the ANN side, keeping the semantic tags in `sentences.tagged.jsonl` and higher-coverage corpora (rather than minimal samples) is recommended for better recall.
 
 ---
 
-###方案A：常驻推理服务（降低耗时）
+### Plan A: Resident inference service (reducing runtime)
 
-`run_exp01.py` 默认通过子进程调用推理脚本，稳定但较慢。已提供方案A开关：
+`run_exp01.py` defaults to calling inference scripts via subprocess, which is stable but slower. A Plan A switch is provided:
 
-- 启一个常驻服务进程（`exp01_resident_infer_service.py`）
-- 批量评测脚本改为 HTTP 调用服务（`--inference_service_url`）
-- 服务进程内对 `transformers.from_pretrained` 做缓存，避免每条 query 重载
-- 远程断开后，服务与批任务仍继续运行（`nohup` + 日志）
+- Start a resident service process (`exp01_resident_infer_service.py`).
+- The batch eval script switches to HTTP calls to the service (`--inference_service_url`).
+- The service process caches `transformers.from_pretrained`, avoiding reload per query.
+- After remote disconnect, the service and batch tasks continue running (`nohup` + logs).
 
-启动服务（示例）：
+Start service (example):
 
 ```bash
 nohup bash -lc '
@@ -287,7 +287,7 @@ python experiments/exp01_main_qa/code/exp01_resident_infer_service.py --host 127
 ' > experiments/exp01_main_qa/results/resident_service.log 2>&1 &
 ```
 
-评测脚本切到常驻服务（示例）：
+Eval script switching to resident service (example):
 
 ```bash
 python experiments/exp01_main_qa/code/run_exp01.py \
@@ -295,7 +295,7 @@ python experiments/exp01_main_qa/code/run_exp01.py \
   --inference_service_url http://127.0.0.1:18888
 ```
 
-后台执行模板（先100条）：
+Background execution template (100 samples first):
 
 ```bash
 nohup bash -lc '
@@ -349,5 +349,4 @@ The output markdown is paper-ready for qualitative case analysis.
 
 - Exp01 is **not** toy-only; toy runs are only for smoke tests.
 - Final reported Exp01 numbers should include **HotpotQA + MedHopQA + NQ**.
-- 论文主表建议使用官方 validation 大子集/全量，并报告 CI + 显著性；100 条仅用于链路与参数确认。
-
+- Paper main tables should use large subsets or the full official validation set, reporting CI + significance; 100 samples are only for pipeline and parameter verification.

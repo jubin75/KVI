@@ -1,13 +1,13 @@
 """
-Pipeline：ChunkStore(JSONL) → FAISS KVBank（使用训练好的 KVProjector 生成 K/V）
+Pipeline: ChunkStore(JSONL) → FAISS KVBank (using trained KVProjector to generate K/V)
 
-目标
-- 不再为每条 chunk 跑 teacher past_key_values（构建更快）
-- 用冻结 base model 产出 last_hidden，然后用 KVProjector 生成各注入层的 K/V（对齐到 past_key_values 空间）
+Goal
+- No longer run teacher past_key_values for each chunk (faster build)
+- Use frozen base model to produce last_hidden, then use KVProjector to generate K/V for each injection layer (aligned to past_key_values space)
 
-注意
-- KVProjector 的效果依赖 teacher dataset 的覆盖与训练质量。
-- 生产级需要：更好的检索 key（DomainEncoder）、更严格的回归测试（inject off / gamma=0 / 输出一致性）。
+Note
+- KVProjector's effectiveness depends on teacher dataset coverage and training quality.
+- Production needs: better retrieval key (DomainEncoder), stricter regression tests (inject off / gamma=0 / output consistency).
 """
 
 from __future__ import annotations
@@ -53,9 +53,9 @@ def build_faiss_kvbank_with_projector(
     dtype: Optional[str] = None,
 ) -> None:
     """
-    构建 KVBank（多层 K/V）：
-    - retrieval_key: pooled last_hidden（demo；生产级建议替换为 DomainEncoder）
-    - K/V: KVProjector(last_hidden) -> [B, L, kv_heads, T, head_dim]，padding 到 max_kv_tokens
+    Build KVBank (multi-layer K/V):
+    - retrieval_key: pooled last_hidden (demo; production should replace with DomainEncoder)
+    - K/V: KVProjector(last_hidden) -> [B, L, kv_heads, T, head_dim], padded to max_kv_tokens
     """
 
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore

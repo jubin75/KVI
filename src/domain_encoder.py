@@ -1,10 +1,10 @@
 """
-domain_encoder: DomainEncoder 的运行期接口（可运行实现）
+domain_encoder: runtime interface of DomainEncoder (runnable implementation)
 
-说明
-- 训练 DomainEncoder 的完整流程较长，这里提供工程上可用的“加载/编码”接口：
-  - 基于 `encoders.hf_sentence_encoder.HFSentenceEncoder`
-  - 可用于：构建 KVBank 的 retrieval_keys、在线检索 query embedding、Gate 的 query embedding
+Notes
+- Training a DomainEncoder end-to-end is a long process; here we provide an engineering-ready "load/encode" interface:
+  - Based on `encoders.hf_sentence_encoder.HFSentenceEncoder`
+  - Can be used for: building KVBank retrieval_keys, online retrieval query embeddings, Gate query embeddings
 """
 
 from __future__ import annotations

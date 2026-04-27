@@ -1,5 +1,5 @@
 """
-CLI：ChunkStore → KVBank（用训练好的 KVProjector 生成 K/V）
+CLI: ChunkStore → KVBank (using trained KVProjector to generate K/V)
 """
 
 from __future__ import annotations

@@ -1,16 +1,16 @@
 """
-模块：kv_bank
+Module: kv_bank
 
-你当前的 demo 选择
-- 向量索引：本地 FAISS（文件落盘）
-- 存储内容：直接存 `K_ext/V_ext`（检索命中后可直接注入）
+Current demo choices
+- Vector index: local FAISS (persisted to file)
+- Storage: directly stores K_ext/V_ext (can be injected directly when retrieved)
 
-本文件的定位
-- 对上层提供“KV Bank”统一入口（build/load/search），内部可切换不同后端实现。
-- demo 阶段默认使用 `vector_store.faiss_kv_bank.FaissKVBank`。
+Purpose of this file
+- Provide a unified "KV Bank" entry point for the upper layer (build/load/search), with switchable backend implementations.
+- During demo phase, default to vector_store.faiss_kv_bank.FaissKVBank.
 
-生产演进方向（后续再做）
-- 分片/冷热分层/增量更新/压缩量化/过滤预索引等
+Production evolution direction (TBD)
+- Sharding / hot-cold tiering / incremental updates / compression-quantization / filter pre-indexing, etc.
 """
 
 from __future__ import annotations

@@ -1,9 +1,11 @@
 """
-model_adapters.base: 最小可运行的适配器抽象
+model_adapters.base: Minimal runnable adapter abstraction
 
-说明
-- 当前工程的主要注入实现是“past_key_values 前缀注入”，无需深度改写 attention。
-- 适配器在这里的作用是：统一读取模型元信息、提供一个通用的 generate_with_past_prefix 接口。
+Description:
+- The current project's primary injection implementation is "past_key_values prefix injection",
+  which does not require deep attention rewriting.
+- The adapter's role here is: uniformly read model metadata and provide a common
+  generate_with_past_prefix interface.
 """
 
 from __future__ import annotations

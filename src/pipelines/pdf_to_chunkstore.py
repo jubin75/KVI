@@ -1,14 +1,14 @@
 """
-Pipeline：PDF → ChunkStore（可跑通实现，demo 友好）
+Pipeline: PDF → ChunkStore (runnable implementation, demo-friendly)
 
-目标
-- 输入一个 PDF 目录，抽取文本并切分为 chunk，写出 JSONL ChunkStore。
+Goal
+- Input a PDF directory, extract text and split into chunks, write out JSONL ChunkStore.
 
-依赖
-- PyMuPDF（fitz）
+Dependencies
+- PyMuPDF (fitz)
 
-限制
-- 本实现主要覆盖“可复制文本 PDF”。扫描型 PDF 的 OCR 不在此 demo 中实现（生产级可接 PaddleOCR）。
+Limitations
+- This implementation primarily covers "selectable text PDFs". OCR for scanned PDFs is not implemented in this demo (production can integrate PaddleOCR).
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ def _now_iso() -> str:
 
 
 def _simple_lang_detect(text: str) -> str:
-    # demo：粗略判断
+    # demo: rough detection
     if re.search(r"[\u4e00-\u9fff]", text):
         return "zh"
     return "en"
 
 
 def _simhash_64(text: str) -> str:
-    # demo：非严格 simhash，仅做稳定哈希占位（生产级可换真正 simhash/minhash）
+    # demo: non-strict simhash, just a stable hash placeholder (production can use real simhash/minhash)
     import hashlib
 
     h = hashlib.sha256(text.encode("utf-8")).digest()
@@ -72,8 +72,8 @@ def chunk_text_by_tokens(
     overlap_ratio: float = 0.15,
 ) -> List[str]:
     """
-    demo 分块：
-    - 用近似 token=按空白分词计数（生产级建议用 tokenizer 计数）
+    Demo chunking:
+    - Uses approximate token count = whitespace-tokenized word count (production should use tokenizer counting)
     """
 
     text = re.sub(r"\s+", " ", text).strip()
@@ -90,7 +90,7 @@ def chunk_text_by_tokens(
     start = 0
     while start < len(words):
         end = min(len(words), start + max_tokens)
-        # 控制目标大小：尽量接近 target_tokens，但不超过 max_tokens
+        # Control target size: aim close to target_tokens, but not exceeding max_tokens
         if end - start > target_tokens:
             end = min(len(words), start + target_tokens)
         chunk = " ".join(words[start:end]).strip()
@@ -157,7 +157,7 @@ def build_chunkstore_from_pdfs(
             doc_id = pdf.stem
             pages = extract_pdf_pages(pdf)
             for page_no, page_text in pages:
-                # 质量过滤（demo）
+                # Quality filter (demo)
                 page_text = page_text.strip()
                 if len(page_text) < 50:
                     continue

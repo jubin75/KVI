@@ -1,46 +1,46 @@
-# Supplement: MedHopQA 官方风格评测集（自 medhop_raw）
+# Supplement: MedHopQA official-style evaluation set (built from medhop_raw)
 
-> **仓库路径**：`experiments/exp01_main_qa/reports/supplementary_medhop_official.md`。`data/medhop_*`、`artifacts/` 等为本地构建/数据盘产物，默认 **不入 Git**；下表路径表示流水线约定位置。
+> **Repo path**: `experiments/exp01_main_qa/reports/supplementary_medhop_official.md`. `data/medhop_*`, `artifacts/` etc. are local build/data disk artifacts and are **not checked into Git** by default; the paths in the tables below represent the pipeline convention locations.
 
-本附表说明从 `medhop_raw` 构建的 **自然语言问句 + short / long answer + supporting_facts** 评测格式，以及与主表 **MedHop-ID** 变体的关系。该 split 可与 Exp01 流水线直接对接（`medhop_eval.jsonl` + `sentences_medhop.jsonl` + `triples_medhop.jsonl`）。
+This supplementary table documents the **natural language query + short / long answer + supporting_facts** evaluation format built from `medhop_raw`, and its relationship to the main table **MedHop-ID** variant. This split can directly interface with the Exp01 pipeline (`medhop_eval.jsonl` + `sentences_medhop.jsonl` + `triples_medhop.jsonl`).
 
-## 数据位置
+## Data locations
 
-| 产物 | 路径 |
+| Artifact | Path |
 |------|------|
-| 源数据（本仓库） | `experiments/exp01_main_qa/data/medhop_raw/medhop_source_validation.parquet.jsonl` |
-| 附表级 schema（论文/附录） | `experiments/exp01_main_qa/data/medhop_official/medhop_official_eval.jsonl` |
-| Exp01 可跑 `dataset` | `experiments/exp01_main_qa/data/medhop_official/medhop_eval.jsonl` |
-| 句子、三元组 | `experiments/exp01_main_qa/data/medhop_official/sentences_medhop.jsonl`，`triples_medhop.jsonl` |
-| 构建清单 | `experiments/exp01_main_qa/data/medhop_official/manifest_medhop_official.json` |
+| Source data (this repo) | `experiments/exp01_main_qa/data/medhop_raw/medhop_source_validation.parquet.jsonl` |
+| Supplementary-table-level schema (paper/appendix) | `experiments/exp01_main_qa/data/medhop_official/medhop_official_eval.jsonl` |
+| Exp01 runnable `dataset` | `experiments/exp01_main_qa/data/medhop_official/medhop_eval.jsonl` |
+| Sentences, triples | `experiments/exp01_main_qa/data/medhop_official/sentences_medhop.jsonl`, `triples_medhop.jsonl` |
+| Build manifest | `experiments/exp01_main_qa/data/medhop_official/manifest_medhop_official.json` |
 
-## 表 S — `medhop_official_eval.jsonl` 字段
+## Table S — `medhop_official_eval.jsonl` fields
 
-| 字段 | 说明 |
+| Field | Description |
 |------|------|
-| `id` | 与 raw 一致，如 `MH_dev_0` |
-| `question` | 自然语言模板：`Which DrugBank-listed drug interacts with DBxxxx? …`；默认另附一行 **仅输出伙伴 DrugBank ID** 的约束（与主表 MedHop-ID 的 EM 口径一致） |
-| `raw_query` | 原始 `interacts_with DBxxxx?` |
-| `answer` / `answers` | 标准答案（伙伴 DrugBank ID） |
-| `short_answer` | 与 gold ID 相同（本发行版 **不**映射通用药品名；若需 `Ritonavir` 类等自然语言金标，需外部 ID→名称表） |
-| `long_answer` | 使用前 **2** 条 `supports` 全文截断拼接（≤2500 字符），供附录或人工核对 |
-| `type` | 固定标记 `drug_drug_interaction_completion` |
-| `supporting_facts` | `supports` 拆成的 `{title, sentence}`：若以 `DBxxxxx :` 起头则 `title` 为该 ID，否则 `title` 为 `passage_k` |
-| `candidates` | 保留 raw 中的多选 ID 列表 |
+| `id` | Consistent with raw, e.g. `MH_dev_0` |
+| `question` | Natural language template: `Which DrugBank-listed drug interacts with DBxxxx? …`; by default also includes a line constraining output to **only the partner DrugBank ID** (consistent with the main table MedHop-ID EM convention) |
+| `raw_query` | Original `interacts_with DBxxxx?` |
+| `answer` / `answers` | Gold answer (partner DrugBank ID) |
+| `short_answer` | Same as gold ID (this release does **not** map to generic drug names; if natural language gold like `Ritonavir` etc. is needed, an external ID→name table is required) |
+| `long_answer` | First **2** `supports` passages truncated and concatenated (≤2500 characters), for appendix or manual verification |
+| `type` | Fixed tag `drug_drug_interaction_completion` |
+| `supporting_facts` | `{title, sentence}` pairs split from `supports`: if the line starts with `DBxxxxx :`, `title` is that ID; otherwise `title` is `passage_k` |
+| `candidates` | Multi-choice ID list preserved from raw |
 | `dataset` | `MedHopQA_official_nl` |
-| `gold_note` | 简短说明金标仍为 ID 及 EM 含义 |
+| `gold_note` | Brief note that gold standard remains IDs and what EM means |
 
-`medhop_eval.jsonl` 为 Exp01 入口：每行至少含 `id`、`question`、`answer`/`answers`；`question` 与 `medhop_official_eval.jsonl` 中一致。
+`medhop_eval.jsonl` is the Exp01 entry point: each line contains at minimum `id`, `question`, `answer`/`answers`; `question` is identical to that in `medhop_official_eval.jsonl`.
 
-## 规模（当前构建）
+## Scale (current build)
 
-以 `manifest_medhop_official.json` 为准，典型一次构建为：
+Based on `manifest_medhop_official.json`, a typical build yields:
 
-- 例数：**342**
-- 句子块：**105098**（由 `supports` 字符串按句切分）
-- 三元组：**488**（每例 1–2 条；部分证据句未同时命中 query/answer ID 时仅保留 1 条）
+- Samples: **342**
+- Sentence blocks: **105098** (split from `supports` strings by sentence)
+- Triples: **488** (1–2 per sample; when some evidence sentences do not simultaneously hit query/answer IDs, only 1 triple is kept)
 
-## 重建命令
+## Rebuild command
 
 ```bash
 cd experiments/exp01_main_qa/code
@@ -49,28 +49,28 @@ python3 prepare_medhop_official_from_raw.py \
   --out_dir ../data/medhop_official
 ```
 
-可选：`--no_append_id_only_hint` 不对模型追加「仅输出 DB ID」提示（问句更开放，EM 口径可能与主表 strict-ID 不完全可比）。
+Optional: `--no_append_id_only_hint` does not append the "output only DB ID" hint to the model (more open-ended queries; EM convention may not be fully comparable with the main table strict-ID convention).
 
-## 与主表 MedHop-ID 的差异
+## Differences from main table MedHop-ID
 
-| 项目 | MedHop-ID（主表） | Official NL（本附表） |
+| Item | MedHop-ID (main table) | Official NL (this supplementary table) |
 |------|-------------------|------------------------|
-| 问句形式 | `interacts_with DBxxxx?` + ID 输出说明 | 自然语言 “Which DrugBank-listed drug…” + 默认同款 ID 输出说明 |
-| 金标 | DrugBank 伙伴 ID | 相同 |
-| EM | 子串 / 管道既有 EM | 使用同一 `medhop_eval.jsonl` 时与 MedHop-ID **一致** |
+| Query form | `interacts_with DBxxxx?` + ID output instruction | Natural language "Which DrugBank-listed drug…" + same-style ID output instruction by default |
+| Gold | DrugBank partner ID | Same |
+| EM | Substring / existing pipeline EM | Same when using the same `medhop_eval.jsonl` |
 
-主表仍保留较小子集 **MedHopQA_n40** 的已跑结果；全量 **342** 条可用于扩展实验或附录报告。
+The main table still retains the smaller **MedHopQA_n40** subset results; the full **342** samples can be used for extended experiments or appendix reporting.
 
-## Exp01 运行提示
+## Exp01 run tips
 
-将 `--dataset` 指向 `data/medhop_official/medhop_eval.jsonl`，图与 KVI 相关路径指向 **同目录下** 新生成的 `sentences_medhop.jsonl` / `triples_medhop.jsonl`，并按既有 MedHop 流程构建 `graph_index`、tagged sentences、kvbank 等（与 `prepare_medhopqa_assets.py` 产物用法相同）。全量 342 条与 ~105k 句对 resident/嵌入耗时显著高于 n40，建议按需设 `limit` 或分批。
+Point `--dataset` to `data/medhop_official/medhop_eval.jsonl`, point graph and KVI related paths to the newly generated `sentences_medhop.jsonl` / `triples_medhop.jsonl` in the **same directory**, and build `graph_index`, tagged sentences, kvbank, etc. following the existing MedHop workflow (same usage as `prepare_medhopqa_assets.py` outputs). The full 342 samples and ~105k sentences have significantly higher resident/embedding cost than n40; set `limit` or batch as needed.
 
-## Exp01 冒烟（`--limit 2`，已跑通）
+## Exp01 smoke test (`--limit 2`, runnable)
 
-在仓库根目录执行（示例复用既有 **MedHopQA_n40** 产物：`MH_dev_0` / `MH_dev_1` 与全量 official 前两条 id 一致，图与 KV 与这两条对齐；**正式全量 342 条**应对 `medhop_official` 单独建 artifacts）：
+Execute from repo root (the example reuses existing **MedHopQA_n40** artifacts: `MH_dev_0` / `MH_dev_1` have the same IDs as the first two official samples, and graph/KV are aligned with these two; for the **formal full 342-sample run**, build dedicated `medhop_official` artifacts):
 
 ```bash
-source KVI/bin/activate   # 若使用项目 venv
+source KVI/bin/activate   # if using project venv
 python -u experiments/exp01_main_qa/code/run_exp01.py \
   --dataset experiments/exp01_main_qa/data/medhop_official/medhop_eval.jsonl \
   --dataset_name MedHopQA_official_smoke \
@@ -89,15 +89,15 @@ python -u experiments/exp01_main_qa/code/run_exp01.py \
   --ann_force_cpu
 ```
 
-**本机一次成功冒烟产物**：`experiments/exp01_main_qa/results/medhop_official_smoke_limit2/`（含 `predictions.jsonl`、`summary.json`、`results.md`）。基座模型为本地 `Qwen2.5-7B-Instruct`；`relaxed` EM 下 GraphRAG/KVI 在 2 例上为 100%（子串命中金标 ID），其余方法在该小样本上为 0，仅作管道连通性验证。
+**One successful smoke test output on this machine**: `experiments/exp01_main_qa/results/medhop_official_smoke_limit2/` (contains `predictions.jsonl`, `summary.json`, `results.md`). Base model is local `Qwen2.5-7B-Instruct`; under `relaxed` EM, GraphRAG/KVI achieves 100% on the 2 samples (substring match on gold ID), other methods yield 0 on this small sample — only for pipeline connectivity verification.
 
-### 全量正式实验（后台，断 SSH 可继续）
+### Full formal experiment (background, survives SSH disconnect)
 
-- **脚本**：`experiments/exp01_main_qa/code/run_medhop_official_full_background.sh`  
-  - 在 `artifacts/medhop_official/` 下依次：语义标注 → `kvbank_sentences` → `graph_index.json` → `triple_kvbank`（与 n40 同构）。  
-  - 若本机 `127.0.0.1:18888` 无 `/health`，会 **nohup 拉起** `exp01_resident_infer_service.py`（图侧单例加载 7B，日志见下）。  
-  - 然后 **`run_exp01.py` 全 342 条、`--resume`**；默认输出目录 **`results/medhop_official_fullmethods_qwen25_7b_kvituned/`**，且默认 **KVI 调参**：`kvi_drm_threshold=0.12`、`max_kv_triples=2`、`top_k_relations=1`、`--kvi_minimal_prompt`。**调参前基线**（主表 Panel A 行）见 `results/medhop_official_fullmethods_qwen25_7b/summary.json`。
-- **推荐启动方式**（与脚本内 `nohup` 二选一即可；下面为再包一层 tee）：
+- **Script**: `experiments/exp01_main_qa/code/run_medhop_official_full_background.sh`  
+  - Under `artifacts/medhop_official/`, sequentially: semantic tagging → `kvbank_sentences` → `graph_index.json` → `triple_kvbank` (same structure as n40).  
+  - If `127.0.0.1:18888` has no `/health`, it will **nohup launch** `exp01_resident_infer_service.py` (graph-side singleton loads 7B, logs below).  
+  - Then **`run_exp01.py` full 342 samples, `--resume`**; default output directory **`results/medhop_official_fullmethods_qwen25_7b_kvituned/`**, and default **KVI tuning**: `kvi_drm_threshold=0.12`, `max_kv_triples=2`, `top_k_relations=1`, `--kvi_minimal_prompt`. **Pre-tuning baseline** (main table Panel A row) at `results/medhop_official_fullmethods_qwen25_7b/summary.json`.
+- **Recommended startup method** (choose either this or the script's internal `nohup`; below wraps with an extra tee):
 
 ```bash
 cd /home/zd/dev/KVI
@@ -105,6 +105,6 @@ nohup bash experiments/exp01_main_qa/code/run_medhop_official_full_background.sh
   >> experiments/exp01_main_qa/results/medhop_official_full_pipeline.log 2>&1 &
 ```
 
-- **主日志**：`experiments/exp01_main_qa/results/medhop_official_full_pipeline.log`  
-- **常驻服务日志**（若由脚本启动）：`experiments/exp01_main_qa/results/medhop_official_resident.log`  
-- **环境变量**：`MODEL`、`SKIP_ARTIFACTS=1`（仅跑评测）、`START_RESIDENT=0`（不启 resident、极慢）、`RESIDENT_PORT`、`MEDHOP_OFFICIAL_OUT`、`KVI_DRM_THRESHOLD`、`KVI_MAX_KV_TRIPLES`、`KVI_TOP_K_RELATIONS`、`KVI_MINIMAL_PROMPT`（0/1）。
+- **Main log**: `experiments/exp01_main_qa/results/medhop_official_full_pipeline.log`  
+- **Resident service log** (if launched by script): `experiments/exp01_main_qa/results/medhop_official_resident.log`  
+- **Environment variables**: `MODEL`, `SKIP_ARTIFACTS=1` (eval only), `START_RESIDENT=0` (don't start resident, very slow), `RESIDENT_PORT`, `MEDHOP_OFFICIAL_OUT`, `KVI_DRM_THRESHOLD`, `KVI_MAX_KV_TRIPLES`, `KVI_TOP_K_RELATIONS`, `KVI_MINIMAL_PROMPT` (0/1).

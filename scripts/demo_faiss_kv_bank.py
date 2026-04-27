@@ -1,11 +1,11 @@
 """
-Demo：FAISS KV Bank（build → save → load → search）
+Demo: FAISS KV Bank (build → save → load → search)
 
-说明
-- 这是一个最小可跑通的示例，用于验证：
-  1) 能把少量条目写入本地 KV Bank
-  2) 能从 query 向量检索 top-k
-  3) 能取回对应的 K_ext/V_ext 供注入（这里只打印 shape/元数据）
+Description:
+- This is a minimal runnable example to verify:
+  1) Small number of entries can be written to a local KV Bank
+  2) Top-k retrieval works from a query vector
+  3) Corresponding K_ext/V_ext can be retrieved for injection (here only prints shape/metadata)
 """
 
 from typing import Any

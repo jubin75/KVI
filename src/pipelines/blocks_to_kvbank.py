@@ -1,13 +1,13 @@
 """
-Pipeline：memory blocks（256-token）→ KVBank（FAISS）
+Pipeline: memory blocks (256-token) → KVBank (FAISS)
 
-严格对齐 PRD/多步注入的工程实现.md：
-- KVBank 存的是 256-token memory blocks 的 K/V（不是 raw text）
-- 建库时提取 layers 0..3 的 past_key_values（teacher cache，或后续用 projector）
-- 单条 block 的 kv_len 必须 <= 256，且作为注入 token 粒度
+Strictly aligned with PRD/multi-step injection engineering implementation:
+- KVBank stores K/V of 256-token memory blocks (not raw text)
+- Extract past_key_values from layers 0..3 when building the bank (teacher cache, or later with projector)
+- Each block's kv_len must be <= 256, which serves as the injection token granularity
 
-检索向量（retrieval_keys）
-- 推荐使用 DomainEncoder（独立 encoder）对 block 文本编码并归一化
+Retrieval vectors (retrieval_keys)
+- Recommended to use DomainEncoder (separate encoder) to encode and normalize block text
 """
 
 from __future__ import annotations
@@ -91,10 +91,10 @@ def build_kvbank_from_blocks_jsonl(
     table_pipe_threshold: int = 8,
 ) -> BuildBlocksKVBankStats:
     """
-    对每条 block：
-    - 用 base LLM tokenizer 截断到 block_tokens，并 forward 抽取 past_key_values(layers)
-    - 用 DomainEncoder 编码 block 文本得到 retrieval_key
-    - 写入 FaissKVBank（multi-layer KV）
+    For each block:
+    - Truncate to block_tokens using base LLM tokenizer, then forward to extract past_key_values(layers)
+    - Encode block text with DomainEncoder to get retrieval_key
+    - Write into FaissKVBank (multi-layer KV)
     """
 
     from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
@@ -408,7 +408,7 @@ def build_kvbank_from_blocks_jsonl(
             )
             continue
 
-        # Sharded flushing (方案A): write every `shard_size` items to disk to control RAM.
+        # Sharded flushing (Plan A): write every `shard_size` items to disk to control RAM.
         if shard_size is not None and shard_size > 0:
             if len(retrieval_keys_text) >= int(shard_size):
                 _flush_bank(

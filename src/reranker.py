@@ -1,9 +1,9 @@
 """
-reranker: 可选的候选重排（最小实现）
+reranker: optional candidate re-ranking (minimal implementation)
 
-说明
-- 生产级可接 cross-encoder reranker；
-- 这里提供一个“可运行”的 reranker：按 (retrieval_score + alpha * length_prior) 重新排序。
+Notes
+- Production-grade can plug in cross-encoder reranker;
+- Here we provide a "runnable" reranker: re-sort by (retrieval_score + alpha * length_prior).
 """
 
 from __future__ import annotations

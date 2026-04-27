@@ -13,7 +13,7 @@ This module is the core of the v3 "三元 KVI" architecture:
   other layers see no prefix.  This avoids the signal collision that caused
   token corruption in v1/v2.
 
-Design constraints (防 token 腐蚀):
+Design constraints (prevent token corruption):
 - Each KV text ≤ 20 tokens, pure Chinese
 - Each triple sentence ≤ 15 tokens
 - No English terms, no numbers (unless unavoidable)
@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # Tuple = (layer_start_inclusive, layer_end_inclusive)
 RELATION_LAYER_MAP: Dict[str, Tuple[int, int]] = {
-    # 定义/分类 → 浅层 (token alignment)
+    # definition/classification → shallow layers (token alignment)
     "is_a":               (0, 7),
     "has_subtype":        (0, 7),
     "also_known_as":      (0, 7),
@@ -42,7 +42,7 @@ RELATION_LAYER_MAP: Dict[str, Tuple[int, int]] = {
     "utilizes":           (0, 7),
     "detects":            (0, 7),
 
-    # 因果/机制 → 中层 (semantic reasoning)
+    # causality/mechanism → mid layers (semantic reasoning)
     "causes":             (8, 15),
     "caused_by":          (8, 15),
     "manifests_as":       (8, 15),
@@ -50,14 +50,14 @@ RELATION_LAYER_MAP: Dict[str, Tuple[int, int]] = {
     "leads_to":           (8, 15),
     "associated_with":    (8, 15),
 
-    # 治疗/诊断 → 中高层 (behavioral reasoning)
+    # treatment/diagnosis → mid-high layers (behavioral reasoning)
     "treats":             (12, 19),
     "treated_by":         (12, 19),
     "prevents":           (12, 19),
     "prevented_by":       (12, 19),
     "diagnosed_by":       (12, 19),
 
-    # 结构/位置 → 早中层 (spatial reasoning)
+    # structure/location → early-mid layers (spatial reasoning)
     "located_in":         (4, 11),
     "location_of":        (4, 11),
     "part_of":            (4, 11),
@@ -66,7 +66,7 @@ RELATION_LAYER_MAP: Dict[str, Tuple[int, int]] = {
     "transmission_route_for": (4, 11),
     "distributed_in":     (4, 11),
 
-    # 抑制 → 中层
+    # inhibition → mid layers
     "inhibits":           (8, 15),
     "inhibited_by":       (8, 15),
 }
@@ -224,7 +224,7 @@ def _build_triple_sentence(subject: str, predicate: str, obj: str) -> str:
     Target: ≤ 15 tokens. Insert separators so subject/verb/object don't run together.
     """
     verb = _PRED_VERB.get(predicate, predicate)
-    # Avoid "subjectverbobject"粘连: add thin space between parts when verb is long or ASCII
+    # Avoid "subjectverbobject" sticking together: add thin space between parts when verb is long or ASCII
     parts = [subject.strip(), verb.strip(), obj.strip()]
     sent = " ".join(p for p in parts if p)
     # Truncate by char to stay within ~15 tokens (roughly 45 chars for Chinese/English mix)

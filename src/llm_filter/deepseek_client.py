@@ -1,9 +1,10 @@
 """
-DeepSeek API Client（OpenAI-compatible）
+DeepSeek API Client (OpenAI-compatible)
 
-说明
-- 以 requests 调用 DeepSeek 的 chat.completions 风格接口（OpenAI 兼容）。
-- 默认通过环境变量读取 API KEY，避免把密钥写入代码/配置仓库。
+Description:
+- Uses requests to call DeepSeek's chat.completions-style API (OpenAI compatible).
+- By default, reads the API key from an environment variable to avoid embedding secrets
+  in code or configuration repositories.
 """
 
 from __future__ import annotations

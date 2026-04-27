@@ -1,16 +1,16 @@
 # Experiment 3 — Retrieval Quality (HotpotQA)
 
-**目的**：对比 **ANN** 与 **Graph+hybrid** 对官方 supporting sentences 的覆盖（Recall@k / MRR）。
+**Purpose**: Compare **ANN** vs **Graph+hybrid** on official supporting sentences coverage (Recall@k / MRR).
 
-## 目录
+## Directory
 
-| Path | 说明 |
+| Path | Description |
 |------|------|
-| `data/benchmarks/` | Hotpot JSONL（需含 `gold_supporting_sentences`） |
-| `code/run_exp03_retrieval.py` | 主脚本 |
-| `results/` | `metrics.json`、`metrics.md` |
+| `data/benchmarks/` | Hotpot JSONL (must contain `gold_supporting_sentences`) |
+| `code/run_exp03_retrieval.py` | Main script |
+| `results/` | `metrics.json`, `metrics.md` |
 
-## 准备数据（与 Exp01 共用 `prepare_hotpot_nq.py`）
+## Prepare Data (shared with Exp01 via `prepare_hotpot_nq.py`)
 
 ```bash
 python experiments/exp01_main_qa/code/prepare_hotpot_nq.py \
@@ -21,7 +21,7 @@ python experiments/exp01_main_qa/code/prepare_hotpot_nq.py \
   --hotpot_only
 ```
 
-## 运行（需与 Exp01 相同 Hotpot 工件路径）
+## Run (must use the same Hotpot artifact paths as Exp01)
 
 ```bash
 python experiments/exp03_retrieval_quality/code/run_exp03_retrieval.py \
@@ -32,4 +32,4 @@ python experiments/exp03_retrieval_quality/code/run_exp03_retrieval.py \
   --limit 0
 ```
 
-`--limit N`：只评测前 N 条（调试用）。
+`--limit N`: Only evaluate the first N entries (for debugging).

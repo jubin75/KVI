@@ -1,6 +1,6 @@
-# src 模块占位说明
+# src Module Placeholder Description
 
-本目录下的文件仅包含模块职责说明/接口契约/边界条件（不包含实现代码）。  
-实现时建议保持：接口稳定、可插拔、可测试、可观测。
+Files in this directory only contain module responsibility descriptions / interface contracts / boundary conditions (no implementation code).  
+When implementing, it is recommended to maintain: stable interfaces, pluggable, testable, observable.
 
 

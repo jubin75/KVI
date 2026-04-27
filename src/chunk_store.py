@@ -1,9 +1,9 @@
 """
-chunk_store: ChunkStore 的最小可运行实现（JSONL）
+chunk_store: minimal runnable implementation of ChunkStore (JSONL)
 
-目标
-- 提供一个无额外依赖的 ChunkStore：读写 JSONL、字段校验、过滤迭代。
-- 与 docs/10_data_spec.md 的字段语义对齐（字段可扩展，但必需字段必须存在）。
+Purpose
+- Provide a dependency-free ChunkStore: read/write JSONL, field validation, filter iteration.
+- Align with the field semantics of docs/10_data_spec.md (fields are extensible, but required fields must exist).
 """
 
 from __future__ import annotations

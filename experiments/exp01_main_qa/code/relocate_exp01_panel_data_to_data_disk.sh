@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Move Exp01 results + artifacts (Panel A/B 及共用构建产物，体积极大) 到大盘目录，
-# 原路径用符号链接指回，便于脚本与文档路径不变。
+# Move Exp01 results + artifacts (Panel A/B and shared build products, very large in size)
+# to the data disk directory, with the original paths symlinked back for compatibility
+# with existing scripts and document paths.
 #
-# 默认目标: /data/zd_data/KVI/exp01_main_qa/<timestamp>/{results,artifacts}
-# 若 /data/zd_data 不可写，先执行（需管理员一次）:
+# Default target: /data/zd_data/KVI/exp01_main_qa/<timestamp>/{results,artifacts}
+# If /data/zd_data is not writable, run first (requires admin, once):
 #   sudo mkdir -p /data/zd_data && sudo chown -R "$(id -un):$(id -gn)" /data/zd_data
 #
-# 用法:
+# Usage:
 #   bash experiments/exp01_main_qa/code/relocate_exp01_panel_data_to_data_disk.sh
-# 或:
+# Or:
 #   DEST_ROOT=/data/zd_data/KVI bash experiments/exp01_main_qa/code/relocate_exp01_panel_data_to_data_disk.sh
 #
-# 若目录权限不足，可交互式 sudo（会提示密码）:
+# If directory permissions are insufficient, interactive sudo (will prompt for password):
 #   USE_SUDO_MKDIR=1 bash experiments/exp01_main_qa/code/relocate_exp01_panel_data_to_data_disk.sh
 
 set -euo pipefail
@@ -79,4 +80,4 @@ ln -s "${ARCHIVE}/artifacts" "${ARTIFACTS}"
 log "Symlink: ${ARTIFACTS} -> ${ARCHIVE}/artifacts"
 
 df -h "${DEST_ROOT}" "${EXP01_ROOT}" 2>/dev/null || true
-log "Done. Panel A/B 与共用 artifacts 已迁至 ${ARCHIVE}；原路径为符号链接。"
+log "Done. Panel A/B and shared artifacts moved to ${ARCHIVE}; original paths are symlinks."

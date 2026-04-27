@@ -4,7 +4,7 @@ Evidence Sidecar Builder (minimal, offline).
 Input: blocks.enriched.jsonl
 Output: evidence.sidecar.jsonl
 
-Rules are defined in docs/085_问题修复.md.
+Rules are defined in docs/085_bug_fixes.md.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-CLI：ChunkStore(JSONL) → FAISS KVBank（存真实 past_key_values）
+CLI: ChunkStore(JSONL) → FAISS KVBank (store real past_key_values)
 """
 
 from __future__ import annotations

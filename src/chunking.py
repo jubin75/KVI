@@ -1,11 +1,11 @@
 """
-chunking: token-aware chunking 的最小可运行实现
+chunking: minimal runnable implementation of token-aware chunking
 
-说明
-- 生产级 chunking 应结构感知（标题/表格/图注等），这里提供一个“足够工程化”的版本：
-  - 输入文本 + tokenizer
-  - 按 token 长度切分（支持 overlap）
-  - 可用于 raw_chunks(4096) 或一般 chunks(200-500) 的构建
+Notes
+- Production-grade chunking should be structure-aware (headings/tables/captions, etc.). This provides a sufficiently engineered version:
+  - Input text + tokenizer
+  - Split by token length (supports overlap)
+  - Can be used for building raw_chunks(4096) or general chunks(200-500)
 """
 
 from __future__ import annotations

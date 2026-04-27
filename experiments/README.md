@@ -35,7 +35,7 @@ experiments/
 │   ├── artifacts/                     … per-topic KV/graph/triple assets (large; often gitignored)
 │   └── results/                       … main_table/, per-run predictions + md/csv/json
 │
-├── exp02_hallucination/               Experiment 2 — TruthfulQA + FEVER, unified “hallucination rate” summaries
+├── exp02_hallucination/               Experiment 2 — TruthfulQA + FEVER, unified "hallucination rate" summaries
 │   ├── README.md                      … ops notes (resident, resume, fast_once, FEVER GPU)
 │   ├── code/
 │   │   ├── run_exp02_hallucination.py ★ orchestrator:
@@ -83,15 +83,15 @@ scripts/
 src/graph/triple_kv_compiler.py        … graph_index + LLM → triple_kvbank (.pt + manifest)
 ```
 
-Design docs that constrain what “injection” means (schema vs evidence) live under `docs/` (e.g. `00_overview.md`); they are **not** experiment entrypoints.
+Design docs that constrain what "injection" means (schema vs evidence) live under `docs/` (e.g. `00_overview.md`); they are **not** experiment entrypoints.
 
 ---
 
 ### Remote env (Linux) — network & model cache
 
-- **HuggingFace 连通性**：直连 `huggingface.co` 不可达（超时/Network unreachable）。**改用镜像可行**：`export HF_ENDPOINT=https://hf-mirror.com` 后，`curl https://hf-mirror.com` 返回 200（约 0.5s），且 `huggingface_hub` 会使用该镜像生成下载 URL（如 `https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/...`）。建议在跑实验的终端或 `~/.bashrc` 中设置并 `source ~/.bashrc`，以便从镜像拉取模型。
-- **Encoder 本地缓存**：`sentence-transformers/all-MiniLM-L6-v2` 已存在于 **`/data/huggingface-cache/user/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2`**，用户 `zd` 可读。使用方式：`export HF_HOME=/data/huggingface-cache/user/huggingface` 后，transformers 会从该目录加载 encoder，**无需外网**。
-- **BASE_LLM（Qwen2.5-7B-Instruct）**：`config/topics/SFTSV/config.json` 中 `build.base_llm` 已设为 **`/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct`**（本地目录）。首次使用请先下载：`export HF_ENDPOINT=https://hf-mirror.com` 后运行 `python scripts/download_qwen25_7b_local.py`（日志：`experiments/logs/download_qwen25_7b.log`）。下载完成后该路径可直接作为 `from_pretrained` 的本地路径使用。
+- **HuggingFace connectivity**: Direct connection to `huggingface.co` is unreachable (timeout/Network unreachable). **Using a mirror works**: after `export HF_ENDPOINT=https://hf-mirror.com`, `curl https://hf-mirror.com` returns 200 (~0.5s), and `huggingface_hub` will use the mirror to generate download URLs (e.g. `https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/...`). It is recommended to set this in the experiment terminal or `~/.bashrc` and `source ~/.bashrc` to pull models from the mirror.
+- **Encoder local cache**: `sentence-transformers/all-MiniLM-L6-v2` already exists at **`/data/huggingface-cache/user/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2`**, readable by user `zd`. Usage: after `export HF_HOME=/data/huggingface-cache/user/huggingface`, transformers will load the encoder from that directory, **no internet required**.
+- **BASE_LLM (Qwen2.5-7B-Instruct)**: `build.base_llm` in `config/topics/SFTSV/config.json` is already set to **`/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct`** (local directory). For first use, download first: after `export HF_ENDPOINT=https://hf-mirror.com`, run `python scripts/download_qwen25_7b_local.py` (log: `experiments/logs/download_qwen25_7b.log`). After download, this path can be used directly as the local path for `from_pretrained`.
 
 ### Exp01 dataset construction (HotpotQA + NQ)
 
@@ -120,9 +120,9 @@ Design docs that constrain what “injection” means (schema vs evidence) live 
 - `exp07_clbench_longcontext/`: Experiment 7 — long-context proxy runs.
 - `RESULTS_COMBINED.md`: merged Exp1 + Exp3 + Exp6 (run `python experiments/combine_experiment_results.py`).
 
-### Medical “hallucination” vs TruthfulQA / FEVER / PubMedQA (brief)
+### Medical "hallucination" vs TruthfulQA / FEVER / PubMedQA (brief)
 
-- **TruthfulQA** is closest to “avoid popular **false** claims” (adversarial misconception style); MC proxies in Exp02 follow that spirit.
-- **FEVER** is **evidence stance** (SUPPORTS / REFUTES / NEI) against a corpus: strong on **retrieval + attribution**, not the same construct as TQA’s “myth busting.”
+- **TruthfulQA** is closest to "avoid popular **false** claims" (adversarial misconception style); MC proxies in Exp02 follow that spirit.
+- **FEVER** is **evidence stance** (SUPPORTS / REFUTES / NEI) against a corpus: strong on **retrieval + attribution**, not the same construct as TQA's "myth busting."
 - **PubMedQA** is **abstract-grounded MC** (yes/no/maybe): factual, but not primarily a **counter-misconception** benchmark.
-- For a **medical analogue to TruthfulQA**, look for benchmarks built as **medical myth / unsafe false claim** discrimination or dedicated **medical hallucination** test suites (literature names evolve; search for “medical hallucination benchmark” / “Med-HALT”-style suites and cite the exact paper). PubMedQA can remain as a **separate axis** (reading + evidence in abstracts), not a drop-in replacement for TQA-style hallucination rate.
+- For a **medical analogue to TruthfulQA**, look for benchmarks built as **medical myth / unsafe false claim** discrimination or dedicated **medical hallucination** test suites (literature names evolve; search for "medical hallucination benchmark" / "Med-HALT"-style suites and cite the exact paper). PubMedQA can remain as a **separate axis** (reading + evidence in abstracts), not a drop-in replacement for TQA-style hallucination rate.

@@ -1,9 +1,9 @@
 """
-gate_router: 推理期 γ 生成（可运行实现）
+gate_router: inference-time γ generation (runnable implementation)
 
-当前实现对齐你已经选定的路线：
-- γ 由 query embedding 驱动（DomainEncoder(query) embedding）
-- 使用 training/gate_query.py 的 QueryEmbeddingGate
+Current implementation aligns with the chosen approach:
+- γ is driven by query embedding (DomainEncoder(query) embedding)
+- Uses QueryEmbeddingGate from training/gate_query.py
 """
 
 from __future__ import annotations

@@ -147,7 +147,7 @@ async function buildFullPipelineImpl(outputEl, opts) {
   } catch (e) {
     const msg = String(e && e.message || e);
     if (msg === "Failed to fetch" || /network|fetch|load/i.test(msg)) {
-      throw new Error("网络请求失败。请检查：1) 后端服务是否在运行 2) 地址与端口是否正确 3) 若经代理/反向代理，是否超时或断开。");
+      throw new Error("Network request failed. Check: 1) Is the backend service running? 2) Are address and port correct? 3) If behind proxy/reverse-proxy, is there a timeout or disconnection?");
     }
     throw e;
   }
@@ -162,7 +162,7 @@ async function buildFullPipelineImpl(outputEl, opts) {
       } catch (e) {
         const msg = String(e && e.message || e);
         if (msg === "Failed to fetch" || /network|fetch|load/i.test(msg)) {
-          throw new Error("轮询状态时网络断开。请检查服务是否仍在运行，或稍后重试。");
+          throw new Error("Network disconnected while polling status. Check if the service is still running, or retry later.");
         }
         throw e;
       }
@@ -243,7 +243,7 @@ async function buildPipelineFromDocs() {
   const debugEl = $("pipeline_debug_log");
   const btn = $("btn_build_pipeline");
   $("pipeline_result_view").style.display = "block";
-  summaryEl.textContent = "Building full pipeline (全部文档)...\nThis may take several minutes.";
+  summaryEl.textContent = "Building full pipeline (all documents)...\nThis may take several minutes.";
   itemsEl.textContent = "Waiting...";
   if (debugEl) debugEl.textContent = "Polling backend runtime log...";
   if (btn) btn.disabled = true;
@@ -263,7 +263,7 @@ async function buildPipelineFromDocs() {
 
 async function buildPipelineFromCurrentDoc() {
   if (!selectedDoc || !selectedDoc.doc_id) {
-    alert("请先在文档列表中打开一篇文档（View Details）");
+    alert("Please first open a document (View Details) in the document list");
     return;
   }
   const summaryEl = $("pipeline_summary");
@@ -498,7 +498,7 @@ function _splitRangeValue(value) {
 function createRelationRow(r) {
   const row = document.createElement("div"); row.className = "row"; row.style.alignItems = "center";
   const variable = document.createElement("input");
-  variable.placeholder = "变量名";
+  variable.placeholder = "Variable name";
   variable.style.flex = "1";
   variable.value = String((r && r.variable) || "");
 
@@ -524,22 +524,22 @@ function createRelationRow(r) {
     if (curOp === "range") {
       const [mn, mx] = _splitRangeValue((r && r.value) || "");
       const minInp = document.createElement("input");
-      minInp.placeholder = "min(文本)";
+      minInp.placeholder = "min";
       minInp.value = mn;
       minInp.dataset.role = "range_min";
       minInp.style.width = "110px";
       const maxInp = document.createElement("input");
-      maxInp.placeholder = "max(文本)";
+      maxInp.placeholder = "max";
       maxInp.value = mx;
       maxInp.dataset.role = "range_max";
       maxInp.style.width = "110px";
       const hint = document.createElement("span");
       hint.className = "note";
-      hint.textContent = "导出为 min,max 字符串";
+      hint.textContent = "Output as min,max string";
       valueWrap.appendChild(minInp); valueWrap.appendChild(maxInp); valueWrap.appendChild(hint);
     } else {
       const val = document.createElement("input");
-      val.placeholder = "数值（文本）";
+      val.placeholder = "Value (text)";
       val.value = String((r && r.value) || "");
       val.dataset.role = "single_value";
       val.style.flex = "1";
@@ -569,13 +569,13 @@ function validateAndNormalizeRelations(relations) {
     const operator = String(r.operator || "").trim();
     const value = String(r.value || "").trim();
     if (!(variable || operator || value)) continue;
-    if (!variable) throw new Error(`Relation #${i + 1}: 变量名不能为空`);
-    if (!REL_OPS.includes(operator)) throw new Error(`Relation #${i + 1}: 比较符无效（支持: ${REL_OPS.join(", ")}）`);
-    if (!value) throw new Error(`Relation #${i + 1}: 数值不能为空`);
+    if (!variable) throw new Error(`Relation #${i + 1}: variable name cannot be empty`);
+    if (!REL_OPS.includes(operator)) throw new Error(`Relation #${i + 1}: invalid comparison operator (supported: ${REL_OPS.join(", ")})`);
+    if (!value) throw new Error(`Relation #${i + 1}: value cannot be empty`);
 
     if (operator === "range") {
       const parts = value.split(",").map(x => String(x || "").trim()).filter(Boolean);
-      if (parts.length !== 2) throw new Error(`Relation #${i + 1}: range 格式应为 min,max`);
+      if (parts.length !== 2) throw new Error(`Relation #${i + 1}: range format should be min,max`);
       out.push({ variable, operator, value: `${parts[0]},${parts[1]}` });
       continue;
     }
@@ -713,7 +713,7 @@ async function runDebug() {
   $("out_graph_evidence").textContent = evTexts.map((t, i) => {
     const src = evSrc[i] || "graph";
     let tag = src.startsWith("text_search") ? " [text]" : "";
-    if (verbatimSet.has(t.trim())) tag += " [verbatim→直出]";
+    if (verbatimSet.has(t.trim())) tag += " [verbatim→direct]";
     return `${i+1}. ${t}${tag}`;
   }).join("\n") || "(none)";
   // KV Injection info (with DRM scores)

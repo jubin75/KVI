@@ -1,12 +1,12 @@
-# Experiment 3 & 6（已迁移到独立目录）
+# Experiment 3 & 6 (migrated to independent directories)
 
-- **Exp3**：`experiments/exp03_retrieval_quality/README.md`
-- **Exp6**：`experiments/exp06_ablation/README.md`
-- **合并**：`python experiments/combine_experiment_results.py` → `experiments/RESULTS_COMBINED.md`
+- **Exp3**: `experiments/exp03_retrieval_quality/README.md`
+- **Exp6**: `experiments/exp06_ablation/README.md`
+- **Merge**: `python experiments/combine_experiment_results.py` → `experiments/RESULTS_COMBINED.md`
 
-以下内容保留作快速参考。
+The content below is kept for quick reference.
 
-## Exp3 — Retrieval Quality（HotpotQA）
+## Exp3 — Retrieval Quality (HotpotQA)
 
 ```bash
 python experiments/exp01_main_qa/code/prepare_hotpot_nq.py \

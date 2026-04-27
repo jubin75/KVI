@@ -1,9 +1,9 @@
 """
-pdf_ingestion: PDF→按页文本抽取（可运行实现）
+pdf_ingestion: PDF → per-page text extraction (runnable implementation)
 
-说明
-- 依赖 PyMuPDF（fitz）
-- OCR 在本仓库中暂不实现（可扩展），但会标记 ocr_used/ocr_confidence 字段
+Notes
+- Requires PyMuPDF (fitz)
+- OCR is not yet implemented in this repo (extensible), but ocr_used/ocr_confidence fields are tagged
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def _hash_str(s: str) -> str:
 def _tables_to_markdown_and_meta(tables: List[List[List[Optional[str]]]]) -> Tuple[str, List[Dict[str, Any]]]:
     """
     pdfplumber tables: list of rows(list of cells)
-    输出为 markdown（多表拼接）+ tables_meta。
+    Output as markdown (multi-table concatenated) + tables_meta.
     """
 
     out: List[str] = []
@@ -112,7 +112,7 @@ def ingest_pdf(
     likely_scanned = (avg_chars < 50) or (total_chars < 500)
 
     if ocr in {"auto", "on"} and likely_scanned:
-        # 实际 OCR：使用 tesseract（通过 pytesseract）
+        # actual OCR: use tesseract (via pytesseract)
         try:
             import pytesseract  # type: ignore
             from PIL import Image  # type: ignore

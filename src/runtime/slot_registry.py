@@ -4,7 +4,7 @@ Slot Registry + Fact Type classifier (runtime, lightweight)
 Design goal:
 - Slots are NOT the universe of knowledge; they are the minimal set of *adjudicable* facts.
 - We classify queries into Fact Types, then check whether any adjudicable slots cover them.
-- Coverage failure => explicit downgrade (fail-closed): do NOT inject schema; L0 explains "schema 未覆盖该事实类型";
+- Coverage failure => explicit downgrade (fail-closed): do NOT inject schema; L0 explains "schema does not cover this fact type";
   L1 is controlled; L2 disabled or heavily constrained.
 
 This module is intentionally heuristic and dependency-free.

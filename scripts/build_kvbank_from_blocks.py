@@ -1,5 +1,5 @@
 """
-CLI：memory blocks JSONL → KVBank（FAISS）
+CLI: memory blocks JSONL → KVBank (FAISS)
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def main() -> None:
         "--shard_size",
         type=int,
         default=0,
-        help="方案A：分片 KVBank。每 shard 写入 N 个 blocks（0=关闭，推荐 512~2048，视显存/内存而定）",
+        help="Plan A: shard KVBank. Write N blocks per shard (0=disabled, recommended 512~2048 depending on VRAM/RAM).",
     )
     args = p.parse_args()
 

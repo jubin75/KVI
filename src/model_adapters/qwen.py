@@ -1,9 +1,9 @@
 """
-model_adapters.qwen: Qwen 适配器（最小可运行）
+model_adapters.qwen: Qwen Adapter (minimal runnable)
 
-当前实现聚焦于：
-- 使用 past_key_values 前缀注入（无需改写 Qwen attention）
-- 提供与 base.ModelAdapter 一致的接口
+Current implementation focuses on:
+- Using past_key_values prefix injection (no need to rewrite Qwen attention)
+- Providing an interface consistent with base.ModelAdapter
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 """
-一键：PDF目录 → raw_chunks(4096) → blocks(256) → KVBank（FAISS）
+One-click: PDF directory → raw_chunks(4096) → blocks(256) → KVBank (FAISS)
 
-对齐 PRD/raw context构建流程.md：
-- 保留 raw context（4096-token chunks）作为离线存储层产物
-- KVBank 只存 memory blocks 的 embedding + K/V + metadata
+Aligned with PRD/raw context build pipeline:
+- Preserve raw context (4096-token chunks) as offline storage layer artifact
+- KVBank only stores memory blocks' embedding + K/V + metadata
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def main() -> None:
         "--shard_size",
         type=int,
         default=0,
-        help="方案A：分片 KVBank。每 shard 写入 N 个 blocks（0=关闭，推荐 512~2048）",
+        help="Plan A: shard KVBank. Write N blocks per shard (0=disabled, recommended 512~2048).",
     )
     p.add_argument("--ocr", default="auto", choices=["off", "auto", "on"])
     p.add_argument("--no_tables", action="store_true")

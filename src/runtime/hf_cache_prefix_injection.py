@@ -1,17 +1,17 @@
 """
-HF Transformers：cache-prefix 注入（Demo）
+HF Transformers: cache-prefix injection (Demo)
 
-核心想法
-- 不改写 attention forward。
-- 把外部 `K_ext/V_ext` 写入 `past_key_values`，作为“静态前缀 KV”参与注意力。
+Core idea
+- Do not modify attention forward.
+- Write external `K_ext/V_ext` into `past_key_values` as a "static prefix KV" to participate in attention.
 
-适用范围
-- demo 级链路验证（知识库不大、先跑通）。
+Scope
+- Demo-level pipeline verification (small knowledge base, get it running first).
 
-生产级注意事项（重要）
-- 许多 LLM（Llama/Qwen/DeepSeek 等）对 Q/K 应用 RoPE（rotary position embedding），并缓存的是“已旋转后的 K/V”。
-  如果你的 `K_ext` 不是处在同一空间（未应用相同 RoPE/对齐），效果会打折甚至失效。
-  demo 阶段允许简化；生产级应将 projector 输出对齐到与缓存一致的 attention 空间（含 rotary 处理）。
+Production notes (important)
+- Many LLMs (Llama/Qwen/DeepSeek, etc.) apply RoPE (rotary position embedding) to Q/K and cache "already-rotated K/V".
+  If your `K_ext` is not in the same space (no matching RoPE/alignment applied), effectiveness will degrade or even fail.
+  Demo stage allows simplification; production should align projector output to the same attention space as the cache (including rotary processing).
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import torch
 @dataclass(frozen=True)
 class ExtKV:
     """
-    单层外部 KV（batch-first，已按 heads 组织）。
+    Single-layer external KV (batch-first, organized by heads).
 
-    约定 shape（语义）：
+    Convention shape (semantic):
     - K: [batch, heads, ext_len, head_dim]
     - V: [batch, heads, ext_len, head_dim]
     """
@@ -38,8 +38,8 @@ class ExtKV:
 
 def _as_cache_obj() -> Any:
     """
-    尝试获取 HF 的 Cache/DynamicCache。
-    版本差异较大：demo 里做最小兼容。
+    Try to get HF's Cache/DynamicCache.
+    Large version differences: do minimal compatibility in demo.
     """
 
     try:
@@ -56,11 +56,11 @@ def build_past_key_values_prefix(
     ext_kv_by_layer: Dict[int, ExtKV],
 ) -> Any:
     """
-    构造可喂给 HF 模型的 past_key_values。
+    Construct past_key_values that can be fed to HF model.
 
-    优先返回 transformers 的 DynamicCache（若可用），否则退化为 tuple 结构：
+    Prefer returning transformers' DynamicCache (if available), otherwise fall back to tuple structure:
     past_key_values = tuple((K,V) for layer in range(num_layers))
-    其中未注入层的 (K,V) 为 None。
+    Where (K,V) for non-injected layers is None.
     """
 
     # We first build a "legacy" tuple-of-(K,V) per layer, then (if supported) convert it
@@ -124,10 +124,10 @@ def stack_ext_kv_items(
     dtype: torch.dtype,
 ) -> ExtKV:
     """
-    把 top-k items（每条含 K_ext/V_ext）拼成单个 ExtKV。
+    Concatenate top-k items (each containing K_ext/V_ext) into a single ExtKV.
 
-    约定 items[i].K_ext / items[i].V_ext 为 numpy 或 torch：
-    - [heads, ext_len, head_dim] 或 [1, heads, ext_len, head_dim]
+    Convention items[i].K_ext / items[i].V_ext as numpy or torch:
+    - [heads, ext_len, head_dim] or [1, heads, ext_len, head_dim]
     """
 
     if not items:
@@ -182,11 +182,11 @@ def stack_ext_kv_items_by_layer(
     kv_len_key: str = "kv_len",
 ) -> ExtKV:
     """
-    针对指定 layer_id，把 items 中的每条“多层 KV”切出对应层并拼接成 ExtKV。
+    For a given layer_id, extract the corresponding layer from each "multi-layer KV" in items and concatenate into ExtKV.
 
-    约定：
-    - item.get_kv_for_layer(layer_id) -> (K,V) numpy/torch，shape [kv_heads, ext_len, head_dim]
-    - item.meta[kv_len_key]（可选）：实际有效长度；用于从 padding 中切片
+    Convention:
+    - item.get_kv_for_layer(layer_id) -> (K,V) numpy/torch, shape [kv_heads, ext_len, head_dim]
+    - item.meta[kv_len_key] (optional): actual effective length; used to slice from padding
     """
 
     if not items:
@@ -198,7 +198,7 @@ def stack_ext_kv_items_by_layer(
         if hasattr(it, "get_kv_for_layer"):
             K, V = it.get_kv_for_layer(layer_id)
         else:
-            # fallback：认为 it.K_ext/it.V_ext 已经是单层
+            # fallback: assume it.K_ext/it.V_ext is already single-layer
             K, V = it.K_ext, it.V_ext
 
         if not isinstance(K, torch.Tensor):

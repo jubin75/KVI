@@ -1,8 +1,8 @@
 """
-eval: 最小可运行评测工具（检索 Recall@k + 日志汇总）
+eval: minimal runnable evaluation utility (retrieval Recall@k + log summary)
 
-说明
-- 完整 QA 评测/引用正确率需要标注数据集，这里先提供：
+Notes
+- Full QA evaluation / citation accuracy requires annotated datasets. Here we provide:
   - retrieval_recall_at_k
   - parse_jsonl_logs + latency summary
 """

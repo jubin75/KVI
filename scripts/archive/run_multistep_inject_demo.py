@@ -1,11 +1,11 @@
 """
-CLI：Multi-step Injection Demo（Qwen + blocks KVBank）
+CLI: Multi-step Injection Demo (Qwen + blocks KVBank)
 
-严格遵循 PRD/多步注入的工程实现.md 的核心约束：
-- 每步注入 ≤1024 tokens（由 256-token blocks 组成）
-- 注入层默认 0..3
-- retrieval 是推理的一部分：每步基于当前状态重新检索
-- stopping policy（边际收益 + 冗余 + 安全上限）
+Strictly follows the core constraints of PRD/multi-step injection engineering spec:
+- Per-step injection ≤1024 tokens (composed of 256-token blocks)
+- Default injection layers 0..3
+- Retrieval is part of inference: re-retrieve at each step based on current state
+- Stopping policy (marginal gain + redundancy + safety cap)
 """
 
 from __future__ import annotations
@@ -1017,7 +1017,7 @@ def main() -> None:
     dbg = []
     if mode == AnswerMode.REFUSE:
         # Deterministic refusal/fallback when evidence is explicitly required or task is high-risk.
-        answer = "未检索到可用证据，无法按要求回答。"
+        answer = "No available evidence found; unable to answer as requested."
         dbg = []
     elif mode == AnswerMode.UNGROUNDED:
         # Base LLM mode (no injection).

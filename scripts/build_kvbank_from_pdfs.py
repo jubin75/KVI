@@ -1,5 +1,5 @@
 """
-CLI：PDF 目录 → ChunkStore → KVBank（端到端）
+CLI: PDF directory → ChunkStore → KVBank (end-to-end)
 """
 
 from __future__ import annotations

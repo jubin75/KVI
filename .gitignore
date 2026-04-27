@@ -39,7 +39,7 @@ config/topics/SFTSV/alias_map.debug.json
 experiments/exp01_main_qa/artifacts
 experiments/exp01_main_qa/data/
 
-# Symlinked or local-heavy run tree (jsonl/csv/logs/json predictions). Paper *.md 副本见 experiments/exp01_main_qa/reports/
+# Symlinked or local-heavy run tree (jsonl/csv/logs/json predictions). Paper *.md copies at experiments/exp01_main_qa/reports/
 experiments/exp01_main_qa/results
 
 # --- Dataset mirrors (HF/local clones; often nested git repos — never `git add`) ---

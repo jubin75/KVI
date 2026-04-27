@@ -1,8 +1,8 @@
 """
-包：pipelines
+Package: pipelines
 
-职责
-- 放置可复用的离线流水线：PDF→ChunkStore、ChunkStore→KVBank 等。
+Responsibilities
+- Place reusable offline pipelines: PDF→ChunkStore, ChunkStore→KVBank, etc.
 """
 
 

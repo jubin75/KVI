@@ -1,14 +1,17 @@
 """
-知识含量过滤（DeepSeek）
+Knowledge Content Filtering (DeepSeek)
 
-输出目标
-- 对段落打标签：KEEP / DROP
-- 保留摘要、结果、关键结论、指南/共识、诊断/治疗要点、数据表格解读等
-- 丢弃：前言泛泛背景、病例患者叙事细节、未来展望、方法学局限/讨论噪声、致谢等
+Output goal:
+- Label each paragraph: KEEP / DROP
+- Retain: abstracts, results, key conclusions, guidelines/consensus, diagnosis/treatment
+  key points, data table analysis, etc.
+- Discard: generic background introductions, detailed case/patient narratives, future
+  outlook, methodological limitations/discussion noise, acknowledgements, etc.
 
-重要策略
-- 表格（markdown table）强制 KEEP（医疗场景表格价值高）
-- 对不确定输出：默认 KEEP（防止误删），可配置 strict 模式改为 DROP
+Key strategies:
+- Tables (markdown tables) are always KEPT (high value in medical context).
+- For uncertain outputs: default to KEEP (to avoid false deletion); configurable strict
+  mode switches to DROP instead.
 """
 
 from __future__ import annotations

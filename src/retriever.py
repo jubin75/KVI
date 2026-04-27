@@ -1,13 +1,13 @@
 """
-模块：retriever（Demo 可运行实现）
+Module: retriever (Demo runnable implementation)
 
-定位
-- 本模块负责“外部记忆检索”：输入 query 向量，输出可直接注入的 `K_ext/V_ext` 条目。
-- 这不是 RAG 的“把文本拼接到 prompt”，而是 External KV Injection 的“检索→注入”链路。
+Purpose
+- This module handles "external memory retrieval": input query vector, output K_ext/V_ext entries ready for injection.
+- This is NOT RAG's "append text to prompt", but rather External KV Injection's "retrieve → inject" pipeline.
 
-你当前 demo 选型
-- 向量索引：本地 FAISS
-- KV Bank：直接存 K_ext/V_ext（检索命中后直接返回）
+Current demo choices
+- Vector index: local FAISS
+- KV Bank: directly stores K_ext/V_ext (returned directly on retrieval hit)
 """
 
 from __future__ import annotations

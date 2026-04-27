@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# TruthfulQA — graphrag + kv_prefix + KVI (Exp02 优化验证)，SSH 断线后仍继续跑。
-# 依赖：已存在 experiments/exp02_hallucination/artifacts/truthfulqa/ 与 data/truthfulqa_eval.jsonl
+# TruthfulQA — graphrag + kv_prefix + KVI (Exp02 optimization verification), continues running after SSH disconnection.
+# Prerequisite: experiments/exp02_hallucination/artifacts/truthfulqa/ and data/truthfulqa_eval.jsonl must exist
 #
-# 环境变量（可选）：
-#   TRUTHFULQA_LIMIT   默认 25；0 表示不设 limit（全量以 data 为准）
-#   TIMEOUT_S          默认 1800
-#   RESIDENT_URL       默认 http://127.0.0.1:18888；设为空则不走常驻（子进程本地起模型，更慢）
-#   WAIT_RESIDENT      默认 0；设为 1 则在开跑前轮询 /health 并 sleep RESIDENT_READY_GRACE_SEC
-#   RESIDENT_READY_GRACE_SEC 默认 35
-#   BUILD_ORACLE       默认 1；设为 0 跳过弱 oracle 生成且不传 --graph_audit_oracle_jsonl
-#   RUN_AUDIT          默认 0；设为 1 时写 graph audit jsonl（与 BUILD_ORACLE=1 配合）
-#   TRUTHFULQA_KVI_MC1_ANSWER 默认 grounded；可设 injected（仅当 --methods 含 kv_prefix 时才会生效）
-#   TRUTHFULQA_KVI_MAX_NEW_TOKENS 默认 96
-#   KVI_MAX_KV_TRIPLES  默认不传（沿用 run_exp01.py 默认；如需 ablation 可设 3/4/5 等）
-#   KVI_DRM_THRESHOLD   默认不传（沿用 run_exp01.py 默认；如需 ablation 可设 0.03/0.05 等）
-#   KVI_TOP_K_RELATIONS 默认不传（沿用 run_exp01.py 默认；如需 ablation 可设 2/4 等）
-#   KVI_MINIMAL_PROMPT  默认不传；设为 1 则追加 --kvi_minimal_prompt（KVI KV-only/弱提示对照）
+# Environment variables (optional):
+#   TRUTHFULQA_LIMIT   default 25; 0 means no limit (uses full dataset from data)
+#   TIMEOUT_S          default 1800
+#   RESIDENT_URL       default http://127.0.0.1:18888; set to empty to skip resident mode (model loaded locally in subprocess, slower)
+#   WAIT_RESIDENT      default 0; set to 1 to poll /health before starting and sleep RESIDENT_READY_GRACE_SEC
+#   RESIDENT_READY_GRACE_SEC default 35
+#   BUILD_ORACLE       default 1; set to 0 to skip weak oracle generation and omit --graph_audit_oracle_jsonl
+#   RUN_AUDIT          default 0; set to 1 to write graph audit jsonl (used together with BUILD_ORACLE=1)
+#   TRUTHFULQA_KVI_MC1_ANSWER default grounded; can be set to injected (only takes effect when --methods includes kv_prefix)
+#   TRUTHFULQA_KVI_MAX_NEW_TOKENS default 96
+#   KVI_MAX_KV_TRIPLES  not passed by default (uses run_exp01.py default; for ablation, set to 3/4/5 etc.)
+#   KVI_DRM_THRESHOLD   not passed by default (uses run_exp01.py default; for ablation, set to 0.03/0.05 etc.)
+#   KVI_TOP_K_RELATIONS not passed by default (uses run_exp01.py default; for ablation, set to 2/4 etc.)
+#   KVI_MINIMAL_PROMPT  not passed by default; set to 1 to append --kvi_minimal_prompt (KVI KV-only / weak prompt control)
 #
-# 用法：
+# Usage:
 #   chmod +x experiments/exp02_hallucination/code/run_truthfulqa_kvi_optimization_detached.sh
 #   nohup env TRUTHFULQA_LIMIT=25 RUN_AUDIT=1 WAIT_RESIDENT=1 bash experiments/exp02_hallucination/code/run_truthfulqa_kvi_optimization_detached.sh \
 #     </dev/null >> experiments/exp02_hallucination/results/exp02_truthfulqa_kvi_opt_outer.log 2>&1 &

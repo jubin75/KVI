@@ -1,12 +1,12 @@
 """
-kv_injector: “不改 attention forward”的注入器（可运行实现）
+kv_injector: KV injector that does NOT modify attention forward (runnable implementation)
 
-实现方式
-- 通过 `past_key_values` 前缀注入外部 KV（见 runtime/hf_cache_prefix_injection.py）
-- 支持两种策略：
-  - concat：直接把外部 KV 当 prefix KV
-  - gate（工程近似）：通过缩放外部 V（V_ext *= gamma）控制贡献强度
-    （严格 gate mixing 需要改写 attention softmax，这里不做）
+Implementation approach
+- Injects external KV via past_key_values prefix (see runtime/hf_cache_prefix_injection.py)
+- Supports two strategies:
+  - concat: directly use external KV as prefix KV
+  - gate (engineering approximation): control contribution strength by scaling external V (V_ext *= gamma)
+    (strict gate mixing requires rewriting attention softmax, which is not done here)
 """
 
 from __future__ import annotations

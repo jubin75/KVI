@@ -1,10 +1,11 @@
 """
 llm_filter
 
-职责
-- 提供“知识含量过滤”能力：把 PDF 抽取后的段落做 KEEP/DROP 分类。
-- 目标：把前言/病例患者叙事/未来展望/方法局限等低知识密度内容剔除，
-  保留摘要、结果、指南/结论、以及表格信息（表格强制保留）。
+Responsibilities:
+- Provide "knowledge content filtering": classify PDF-extracted paragraphs as KEEP/DROP.
+- Goal: remove low-knowledge-density content such as introduction/background, patient case
+  narratives, future outlook, and methodological limitations, while retaining abstracts,
+  results, guidelines/conclusions, and table information (tables are always kept).
 """
 
 

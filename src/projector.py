@@ -1,12 +1,12 @@
 """
-projector: Projector 的运行期入口（可运行实现）
+projector: runtime entry point of Projector (runnable implementation)
 
-本仓库当前的“强一致性”路线：
-- Projector 直接对齐到目标 LLM 的 past_key_values 空间（见 training/projector_kv.py）
+The current "strong consistency" approach of this repo:
+- Projector aligns directly to the target LLM's past_key_values space (see training/projector_kv.py)
 
-因此此模块主要提供：
-- checkpoint 加载
-- 根据 last_hidden 生成 per-layer K/V（供建库或注入使用）
+Therefore this module mainly provides:
+- Checkpoint loading
+- Generate per-layer K/V from last_hidden (for building KB or injection)
 """
 
 from __future__ import annotations

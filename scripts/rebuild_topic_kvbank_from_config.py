@@ -387,7 +387,7 @@ def main() -> None:
     topic_name = str(cfg.get("topic_name") or cfg_path.parent.name)
     goal = str(cfg.get("goal") or "").strip()
     if not goal:
-        raise SystemExit("config.goal is required (专题库目标)")
+        raise SystemExit("config.goal is required (topic library goal)")
 
     source_pdf_dir = Path(str(cfg.get("source_pdf_dir") or ""))
     out_pdf_dir = Path(str(cfg.get("out_pdf_dir") or ""))

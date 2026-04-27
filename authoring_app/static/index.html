@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,7 +12,7 @@
     <!-- ==================== LEFT SIDEBAR ==================== -->
     <div class="sidebar">
       <div class="logo">KVI Console</div>
-      <div class="logo-sub">Knowledge Value Injection<br/>注入大模型的知识记忆体，无需改变大模型参数，能适配主流大模型</div>
+      <div class="logo-sub">Knowledge Value Injection<br/>Inject knowledge memory into LLMs without modifying model parameters. Compatible with mainstream LLMs.</div>
 
       <div class="nav-section">Workspace</div>
       <div class="nav-item active" id="tab_simple"><span class="nav-icon">K</span> Knowledge Authoring</div>
@@ -20,7 +20,7 @@
       <div class="nav-item" id="tab_debug"><span class="nav-icon">D</span> Inference Debug</div>
 
       <div class="nav-section">Topic <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:12px;color:var(--text-muted)">?</span></div>
-      <div class="help-content">例如，建立关于 SFTSV（发热伴血小板减少综合征）的专题知识库。</div>
+      <div class="help-content">Example: Build a topic-specific knowledge base for SFTSV (Severe Fever with Thrombocytopenia Syndrome).</div>
       <div class="field" style="min-width:0">
         <select id="topic_select"></select>
       </div>
@@ -84,11 +84,11 @@
               <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
             <div class="help-content">
-              每一条进入 KV space 的 Evidence，必须满足：<br/>
-              1. 表达一个单一医学事实或现象<br/>
-              2. 以临床语言自然句表达<br/>
-              3. 不包含推理、结论或解释<br/>
-              4. 不跨越多个医学维度（症状 / 机制 / 检查 / 预后）<br/><br/>
+              Each Evidence item entering KV space must satisfy:<br/>
+              1. Express a single medical fact or phenomenon<br/>
+              2. Written as a natural clinical sentence<br/>
+              3. Do not include reasoning, conclusions, or explanations<br/>
+              4. Do not span multiple medical dimensions (symptom / mechanism / test / prognosis)<br/><br/>
               <strong>Example (Bad):</strong> "SFTSV感染后患者常出现发热、乏力、血小板减少，并可伴有消化道症状，严重者可进展为多器官功能障碍。"<br/>
               <strong>Example (Good):</strong> "SFTSV感染的早期症状常包括发热。"
             </div>
@@ -123,7 +123,7 @@
               Entity Aliases (Graph Build)
               <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
-            <div class="help-content">实体别名表，用于图谱构建时合并同一实体的不同名称。每行一条 JSON：<br/><code>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒"]}</code><br/>Build Graph 时自动发送到服务器。</div>
+            <div class="help-content">Entity alias table for merging different names of the same entity during graph construction. One JSON per line:<br/><code>{"canonical": "SFTSV", "aliases": ["SFTSV virus", "Severe Fever with Thrombocytopenia Syndrome virus"]}</code><br/>Automatically sent to the server when building the graph.</div>
             <textarea id="graph_aliases" rows="5" placeholder='{"canonical": "SFTSV", "aliases": ["SFTSV病毒"]}'>{"canonical": "SFTSV", "aliases": ["SFTSV病毒", "发热伴血小板减少综合征病毒", "严重发热伴血小板减少综合征"], "entity_type": "pathogen", "description": "发热伴血小板减少综合征病毒（SFTSV），属于新型布尼亚病毒属"}
 {"canonical": "流感样症状", "aliases": ["急性发热", "发热"]}
 {"canonical": "山东", "aliases": [], "entity_type": "epidemiology"}
@@ -153,7 +153,7 @@
               Claim
               <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span>
             </label>
-            <div class="help-content">支持多条输入：每条知识以 ### 作为结束标记分隔。</div>
+            <div class="help-content">Supports multiple entries: use ### as a delimiter to separate each piece of knowledge.</div>
             <textarea id="sent_claim" placeholder="Enter evidence claims, use ### as delimiter"></textarea>
           </div>
           <div class="btns">
@@ -185,14 +185,14 @@
             <div class="field" style="flex:0 0 auto;min-width:120px">
               <select id="topic_select_docs"></select>
             </div>
-            <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff;white-space:nowrap">Build Graph（全部文档）</button>
+            <button class="ok" id="btn_build_pipeline" style="background:#5cb585;color:#fff;white-space:nowrap">Build Graph (All Docs)</button>
             <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')" style="cursor:pointer;font-size:13px;color:var(--text-muted);margin-left:4px">?</span>
           </div>
           <div class="help-content">
-            选择 Topic 后自动加载 PDF 文档列表（来源：work_dir/blocks.evidence.jsonl，按 doc_id 归类）。<br/>
-            点击文档进入 <b>View Details</b>，编辑 Abstract / Key Notes / 三元关系。<br/>
-            <b>Build Graph（全部文档）</b>：使用本 topic 下全部 document 的 blocks 建图（Sentences → Triples → graph_index.json → triple_kvbank/）。<br/>
-            <b>Build Graph（当前文档，base LLM 抽取）</b>：在 View Details 中可用，仅对当前打开的这篇文档建图，并用 base LLM 做三元抽取与 forward 语义对齐（无需 DeepSeek API）。
+            After selecting a topic, the PDF document list is automatically loaded (source: work_dir/blocks.evidence.jsonl, grouped by doc_id).<br/>
+            Click a document to <b>View Details</b>, edit Abstract / Key Notes / triple relations.<br/>
+            <b>Build Graph (All Docs)</b>: Build the graph using all document blocks in this topic (Sentences → Triples → graph_index.json → triple_kvbank/).<br/>
+            <b>Build Graph (Current Doc, Base LLM Extraction)</b>: Available in View Details. Build the graph for only the currently opened document, using base LLM for triple extraction and forward semantic alignment (no DeepSeek API needed).
           </div>
         </div>
         <div class="panel" id="docs_list_view">
@@ -206,7 +206,7 @@
             <button id="btn_back_to_docs">Back</button>
             <button id="btn_save_doc_details">Save Details</button>
             <button class="ok" id="btn_import_doc_details" disabled>Import Details</button>
-            <button class="ok" id="btn_build_pipeline_current_doc" style="background:#2d7d5e;color:#fff">Build Graph（当前文档，base LLM 抽取）</button>
+            <button class="ok" id="btn_build_pipeline_current_doc" style="background:#2d7d5e;color:#fff">Build Graph (Current Doc, Base LLM Extraction)</button>
           </div>
           <div class="field">
             <label>Abstract</label>
@@ -214,14 +214,14 @@
           </div>
           <div class="field">
             <label>Key Notes <span class="help-toggle" onclick="this.parentElement.nextElementSibling.classList.toggle('open')">?</span></label>
-            <div class="help-content">每行一条关键要点，可点击 Add Note 增加新行。</div>
+            <div class="help-content">One key point per line; click Add Note to add a new line.</div>
             <div id="doc_key_notes"></div>
             <div class="btns">
               <button id="btn_add_key_note">Add Note</button>
             </div>
           </div>
           <div class="field">
-            <label>Relations (变量 / 比较符 / 数值)</label>
+            <label>Relations (Variable / Operator / Value)</label>
             <div id="doc_relations"></div>
             <div class="btns">
               <button id="btn_add_relation">Add Relation</button>
@@ -234,11 +234,11 @@
             <div class="pre" id="pipeline_debug_log" style="max-height:260px">Waiting...</div>
           </div>
           <div class="field">
-            <label>Build Graph Result — 三元 KV 编译结果</label>
+            <label>Build Graph Result — Triple KV Compilation Result</label>
             <div class="pre" id="pipeline_summary">Waiting...</div>
           </div>
           <div class="field">
-            <label>Triple KV Items (编译后三元 KV 列表)</label>
+            <label>Triple KV Items (Compiled Triple KV List)</label>
             <div class="pre" id="pipeline_kv_items" style="max-height:600px">Waiting...</div>
           </div>
         </div>
@@ -284,7 +284,7 @@
             <div class="pre" id="out_graph_base_llm">Waiting...</div>
           </div>
           <div class="field">
-            <label>Triple KV Injection (三元 KVI)</label>
+            <label>Triple KV Injection (KVI)</label>
             <div class="pre" id="out_graph_kv_injection">Waiting...</div>
           </div>
           <div class="field">

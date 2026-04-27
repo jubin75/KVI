@@ -1,16 +1,16 @@
 """
-CLI：Raw Context(text file) → blocks.jsonl → KVBank（FAISS）
+CLI: Raw Context (text file) → blocks.jsonl → KVBank (FAISS)
 
-严格遵循 PRD/多步注入的工程实现.md：
-- Raw context 只用于建库
-- 4096-token chunks（overlap=256）
+Strictly follows PRD/multi-step injection engineering spec:
+- Raw context is only used for bank building
+- 4096-token chunks (overlap=256)
 - 256-token memory blocks
-- KVBank 存 blocks 的 K/V（layers 0..3），检索用 DomainEncoder embedding
+- KVBank stores blocks' K/V (layers 0..3), retrieval uses DomainEncoder embedding
 
-注意（避免误解）
-- 该脚本是“从 raw text 文件快速演示”的兜底路径。
-- 生产级推荐走：PDF→raw_chunks(4096)→blocks(256)→KVBank
-  对应脚本：build_raw_context_from_pdfs.py / build_blocks_from_raw_chunks.py / build_kvbank_from_blocks.py
+Note (to avoid misunderstanding):
+- This script is the fallback path for "quick demo from a raw text file".
+- For production, the recommended pipeline is: PDF→raw_chunks(4096)→blocks(256)→KVBank
+  Corresponding scripts: build_raw_context_from_pdfs.py / build_blocks_from_raw_chunks.py / build_kvbank_from_blocks.py
 """
 
 from __future__ import annotations

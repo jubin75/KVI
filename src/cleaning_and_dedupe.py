@@ -1,12 +1,12 @@
 """
-cleaning_and_dedupe: 清洗/语言检测/去重（可运行实现）
+cleaning_and_dedupe: cleaning / language detection / deduplication (runnable implementation)
 
-说明
-- 这是一个不依赖额外库的“工程可用”版本：
+Notes
+- This is an "engineering-ready" version with no extra dependencies:
   - normalize_text
-  - detect_lang（粗略）
-  - simhash64（用于去重键）
-  - dedupe_by_hash（chunk 级去重）
+  - detect_lang (coarse)
+  - simhash64 (for deduplication keys)
+  - dedupe_by_hash (chunk-level deduplication)
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def detect_lang(text: str) -> str:
 
 
 def _tokenize_for_hash(text: str) -> List[str]:
-    # 简单分词：字母数字串 + 中文单字
+    # simple tokenization: alphanumeric strings + CJK characters
     tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]", text)
     return [t.lower() for t in tokens if t]
 
@@ -141,7 +141,7 @@ def dedupe_by_hash(
             dup += 1
             continue
         if near_dup_hamming_threshold is not None and seen:
-            # demo 近重复：线性扫描已见集合（适合小规模）；生产级可换 LSH/分桶
+            # demo near-duplicate: linear scan seen set (suitable for small scale); production can switch to LSH/bucketing
             is_near = False
             for hh in seen.keys():
                 if hamming_distance_hex64(h, hh) <= near_dup_hamming_threshold:

@@ -1,13 +1,13 @@
-# scripts（说明占位）
+# scripts (Description Placeholder)
 
-本目录用于放置离线数据处理/索引构建/训练/评测脚本。  
-按你的要求：**当前仅提供脚本说明文件**（不包含实现代码）。
+This directory is used for offline data processing / index building / training / evaluation scripts.  
+As requested: **Currently only script documentation files are provided** (no implementation code).
 
-建议脚本清单（实现时可按需新增/调整）：
-- `pdf_to_chunks.md`：PDF→chunk 流水线说明与参数
-- `build_kv_bank.md`：构建 KV Bank 与 ANN 索引说明与参数
-- `train_domain_encoder.md`：训练检索 encoder 说明与参数
-- `train_projector_gate.md`：训练 projector/gate 说明与参数
-- `run_eval.md`：评测执行说明与参数
+Suggested script list (can be added/modified as needed during implementation):
+- `pdf_to_chunks.md`: PDF→chunk pipeline description and parameters
+- `build_kv_bank.md`: Build KV Bank and ANN index description and parameters
+- `train_domain_encoder.md`: Train retrieval encoder description and parameters
+- `train_projector_gate.md`: Train projector/gate description and parameters
+- `run_eval.md`: Evaluation execution description and parameters
 
 

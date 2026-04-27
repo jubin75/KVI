@@ -1,5 +1,5 @@
 """
-CLI：PDF 目录 → Raw Context chunks（4096-token）JSONL
+CLI: PDF directory → Raw Context chunks (4096-token) JSONL
 """
 
 from __future__ import annotations

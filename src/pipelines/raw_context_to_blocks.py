@@ -1,16 +1,16 @@
 """
-Pipeline：Raw Context(text) → 4096-token chunks → 256-token memory blocks
+Pipeline: Raw Context(text) → 4096-token chunks → 256-token memory blocks
 
-严格遵循 PRD/多步注入的工程实现.md：
-- Raw context 仅用于构建 KV Bank，不直接参与 attention
-- 4096-token chunks（可 overlap=256）
-- 每个 chunk 再切 256-token memory blocks（KV Bank 存 blocks）
+Strictly following PRD/multi-step injection engineering implementation:
+- Raw context is only used for building KV Bank, does not directly participate in attention
+- 4096-token chunks (overlap=256 configurable)
+- Each chunk further split into 256-token memory blocks (KV Bank stores blocks)
 
-输出（JSONL）
-每条记录是一条 memory block：
+Output (JSONL)
+Each record is one memory block:
 - block_id, parent_chunk_id
-- token_count（必须=256，最后一块可 <256 但默认丢弃以满足严格 256；可配置）
-- text（可选保留，用于 debug/引用，不用于直接注入）
+- token_count (must=256, last block may be <256 but discarded by default to enforce strict 256; configurable)
+- text (optionally retained for debug/citation, not used for direct injection)
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def build_memory_blocks_from_raw_text(
     cfg: RawToBlocksConfig,
 ) -> int:
     """
-    把 raw_text 切成 memory blocks 并写出 JSONL。
+    Split raw_text into memory blocks and write out JSONL.
     """
 
     from transformers import AutoTokenizer  # type: ignore

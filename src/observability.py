@@ -1,8 +1,8 @@
 """
-observability: 轻量观测实现（JSONL logger + timers）
+observability: lightweight observability implementation (JSONL logger + timers)
 
-目标
-- 让 demo/工程调试可复现：输出检索命中、注入 token 数、gamma、延迟等。
+Purpose
+- Make demo/engineering debugging reproducible: output retrieval hits, injected token counts, gamma, latency, etc.
 """
 
 from __future__ import annotations

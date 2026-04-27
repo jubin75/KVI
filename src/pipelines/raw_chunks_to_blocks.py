@@ -1,9 +1,9 @@
 """
-Pipeline：Raw Context chunks（4096-token）→ Memory blocks（256-token）JSONL
+Pipeline: Raw Context chunks (4096-token) → Memory blocks (256-token) JSONL
 
-严格对齐 PRD/raw context构建流程.md：
-- KV Bank 的最小单位是 256-token blocks（不是 raw text）
-- blocks 必须携带 parent_chunk_id 与文档级 metadata（doc_id、段落类型、疾病、日期等）
+Strictly aligned with PRD/raw context construction process:
+- The smallest unit of KV Bank is 256-token blocks (not raw text)
+- Blocks must carry parent_chunk_id and document-level metadata (doc_id, paragraph type, disease, date, etc.)
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def build_blocks_from_raw_chunks(
     trust_remote_code: bool = True,
 ) -> int:
     """
-    对每条 raw chunk 的 text：tokenizer 级切分为 256-token blocks。
+    For each raw chunk's text: tokenizer-level splitting into 256-token blocks.
     """
 
     from transformers import AutoTokenizer  # type: ignore

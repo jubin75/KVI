@@ -1,13 +1,13 @@
 """
-Pipeline：PDF 文献目录 → Raw Context（4096-token chunks）JSONL
+Pipeline: PDF document directory → Raw Context (4096-token chunks) JSONL
 
-严格对齐 PRD/raw context构建流程.md：
-1) 原始文档处理：PDF→文本；清洗噪声；分章节/分段（本实现为 demo 级段落化）
-2) Chunk 化：每篇文献切成 4096-token chunks（overlap 128–256）
-   - 为每个 chunk 生成 metadata（文献ID、段落类型、疾病、日期等）
+Strictly aligned with PRD/raw context construction process:
+1) Raw document processing: PDF→text; clean noise; split into chapters/sections (this implementation is demo-level paragraphing)
+2) Chunking: split each document into 4096-token chunks (overlap 128–256)
+   - Generate metadata for each chunk (document ID, paragraph type, disease, date, etc.)
 
-重要边界
-- Raw context 仅用于建库（KV Bank 构建），不直接参与 attention 注入。
+Important boundary
+- Raw context is only used for bank construction (KV Bank build), does not directly participate in attention injection.
 """
 
 from __future__ import annotations
@@ -52,11 +52,11 @@ def extract_pdf_text(pdf_path: Path) -> str:
 
 def clean_noise(text: str) -> str:
     """
-    demo 级清洗：
-    - 合并空白
-    - 去掉明显的“References/参考文献”后的尾段（粗略）
-    - 去掉图例/引用/公式等噪声（医疗场景通常不如表格重要）
-    - 注意：表格内容由专用表格抽取提供，不依赖正文里的 “Table X” 行
+    Demo-level cleaning:
+    - Merge whitespace
+    - Remove trailing sections after obvious "References/参考文献" headers (rough)
+    - Remove figure legends/citations/formulas and other noise (usually less important than tables in medical settings)
+    - Note: table content is provided by dedicated table extraction, not relying on "Table X" lines in body text
     """
 
     text = re.sub(r"\r", "\n", text)
@@ -153,7 +153,7 @@ def clean_noise(text: str) -> str:
 
 
 def split_paragraphs(text: str) -> List[str]:
-    # 段落化：按空行切段，并剔除极短段
+    # Paragraph splitting: split by blank lines, and discard very short paragraphs
     paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     return [p for p in paras if len(p) >= 30]
 
@@ -164,7 +164,7 @@ def _extract_year(text: str) -> Optional[str]:
 
 
 def _infer_disease(text: str) -> Optional[str]:
-    # demo：关键词占位（生产级可用词典/NER）
+    # demo: keyword placeholder (production can use dictionary/NER)
     for kw in ["SFTS", "SFTSV", "severe fever with thrombocytopenia", "传染病", "流感", "COVID", "SARS"]:
         if kw.lower() in text.lower():
             return kw
@@ -172,7 +172,7 @@ def _infer_disease(text: str) -> Optional[str]:
 
 
 def _infer_para_type(text: str) -> str:
-    # demo：粗略段落类型
+    # demo: rough paragraph type
     t = text.lower()
     if "abstract" in t[:200]:
         return "abstract"
@@ -237,8 +237,8 @@ def build_raw_context_chunks_from_pdf_dir(
     cfg: RawChunkConfig,
 ) -> int:
     """
-    遍历 pdf_dir 下所有 PDF，输出 raw_chunks.jsonl。
-    每条记录是一条 4096-token chunk（来自段落串联后的全文 token stream）。
+    Iterate over all PDFs under pdf_dir, output raw_chunks.jsonl.
+    Each record is a 4096-token chunk (from the full-text token stream after paragraph concatenation).
     """
 
     import time
@@ -263,7 +263,7 @@ def build_raw_context_chunks_from_pdf_dir(
             t0 = time.time()
             try:
                 doc_id = pdf.stem
-                # 1) ingestion（支持 OCR）
+                # 1) ingestion (supports OCR)
                 doc = ingest_pdf(pdf, ocr=cfg.ocr, extract_tables=cfg.extract_tables)
                 doc_text_chars = int(sum(len((p.text or "").strip()) for p in doc.pages))
                 doc_table_chars = int(sum(len((p.tables_markdown or "").strip()) for p in doc.pages))
@@ -281,9 +281,9 @@ def build_raw_context_chunks_from_pdf_dir(
                         "Common fixes: set --ocr on (or auto), ensure system 'tesseract' is installed for OCR, "
                         "and verify PyMuPDF can extract text from this PDF."
                     )
-                # 把表格（markdown）追加到每页末尾，确保表格信息进入 raw context
+                # Append tables (markdown) to the end of each page to ensure table information enters raw context
                 page_texts: List[str] = []
-                # doc-level table metadata（用于 chunk/block 的结构化 metadata）
+                # doc-level table metadata (for structured metadata of chunks/blocks)
                 doc_tables: List[Dict[str, Any]] = []
                 for p in doc.pages:
                     t = p.text or ""

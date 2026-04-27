@@ -1,66 +1,66 @@
 # Experiment 02 — Hallucination (proxy metrics)
 
-**当前优先的实验约定（按日期滚动更新，含 audit 冒烟参数与命令骨架）**：见 [`LATEST_EXPERIMENT_REQUIREMENTS.md`](./LATEST_EXPERIMENT_REQUIREMENTS.md)。
+**Current priority experiment conventions (rolling update by date, including audit smoke parameters and command skeletons)**: see [`LATEST_EXPERIMENT_REQUIREMENTS.md`](./LATEST_EXPERIMENT_REQUIREMENTS.md).
 
-## 实验方式与 KVI 分析目标（速查）
+## Experiment approach and KVI analysis goals (quick reference)
 
-后续若在 Exp02 上做 **KVI 提升**，默认以此为准：**同时对照 TruthfulQA 与 FEVER**，从两套结果里归纳能改进 KVI 的方向（提示、检索与 KV、超参、结构等），而不是只优化其中一集并把另一集带崩。
+When doing **KVI improvement** on Exp02 going forward, default to the following: **simultaneously compare against TruthfulQA and FEVER**, and derive directions for improving KVI (prompts, retrieval & KV, hyperparameters, structure, etc.) from both result sets, rather than optimizing only one set while degrading the other.
 
-### 管线与规模
+### Pipeline and scale
 
-| 项目 | 约定 |
+| Item | Convention |
 |------|------|
-| 主流程 | `run_exp02_hallucination.py` → 各数据 `artifacts/<name>/` → `run_exp01.py` |
-| 对比方法 | `llm,rag,graphrag,kv_prefix,kvi`（五方法） |
-| 默认规模 | TruthfulQA **500**、FEVER **1000**；实际 **`n`** 以 `results/*/summary.json` 与 `data/dataset_manifest.json` 为准 |
-| Graph 侧推理 | 常驻 **`http://127.0.0.1:18888`**（`--resident_url`） |
-| ANN（RAG / KV Prefix） | 默认 **本机 CPU**：`--ann_inference_service_url` 为空且 **`--ann_force_cpu`**；若显式 **`--ann_via_resident`** 则与 graph 共用同一 resident |
-| 已有数据与工件、不重复编译 | **`--skip_mirror_and_prepare --reuse_artifacts`**（见 `run_exp02_fast_once.sh`） |
-| 评测断点续跑 | Exp02 传 **`--resume_eval`** → 透传 `run_exp01.py` 的 **`--resume`**（校验 `predictions.jsonl` 前缀后追加） |
-| SSH 下 FEVER-only + 起 resident | `code/run_fever_gpu_detached.sh`（已含 **grace** 与 **`--resume_eval`**） |
-| 本机 resident 已就绪、仅续跑 FEVER | `code/run_fever_resume_eval.sh` |
+| Main pipeline | `run_exp02_hallucination.py` → per-data `artifacts/<name>/` → `run_exp01.py` |
+| Compared methods | `llm,rag,graphrag,kv_prefix,kvi` (five methods) |
+| Default scale | TruthfulQA **500**, FEVER **1000**; actual **`n`** follows `results/*/summary.json` and `data/dataset_manifest.json` |
+| Graph-side inference | Resident **`http://127.0.0.1:18888`** (`--resident_url`) |
+| ANN (RAG / KV Prefix) | Default **local CPU**: `--ann_inference_service_url` empty and **`--ann_force_cpu`**; if explicit **`--ann_via_resident`**, shares the same resident as graph |
+| Existing data and artifacts, no recompilation | **`--skip_mirror_and_prepare --reuse_artifacts`** (see `run_exp02_fast_once.sh`) |
+| Eval checkpoint resume | Exp02 passes **`--resume_eval`** → forwarded to `run_exp01.py`'s **`--resume`** (validates `predictions.jsonl` prefix then appends) |
+| FEVER-only under SSH + start resident | `code/run_fever_gpu_detached.sh` (includes **grace** and **`--resume_eval`**) |
+| Resident already up locally, only resume FEVER | `code/run_fever_resume_eval.sh` |
 
-### 读结果时的指标
+### Metrics when reading results
 
-- **TruthfulQA**：表中 **relaxed EM** 是 **proxy**，不是官方 MC；对外对比宜另接 MC1/MC2 或官方脚本（见下文「社区口径」）。  
-- **FEVER**：除 proxy EM 外，务必看 **`fever_label_accuracy`**（三分类标签，更接近 veracity 任务）。  
-- **Graph/KVI 提示**：`scripts/run_graph_inference.py` 对 FEVER 式题干（如以 `Claim:` 起头且含三标签说明）会用 **单行 SUPPORTS / REFUTES / NOT ENOUGH INFO** 的收紧说明；TruthfulQA 仍为开放式英文说明。**同一 `predictions.jsonl` 内若混有「续跑前后」或「删文件重跑前后」的行，模板可能不一致**——论文级统一口径可删 `predictions.jsonl` 后全量重跑（**不要** `--resume_eval`）。
+- **TruthfulQA**: The table's **relaxed EM** is a **proxy**, not the official MC; for external comparison, prefer MC1/MC2 or the official script (see "Community conventions" below).  
+- **FEVER**: Besides proxy EM, always check **`fever_label_accuracy`** (three-class label, closer to the veracity task).  
+- **Graph/KVI prompts**: `scripts/run_graph_inference.py` uses a **single-line SUPPORTS / REFUTES / NOT ENOUGH INFO** tightened instruction for FEVER-style stems (those starting with `Claim:` and containing three-label instructions); TruthfulQA still uses open-ended English instructions. **If the same `predictions.jsonl` contains mixed rows from "before/after resume" or "delete file and re-run before/after", templates may be inconsistent** — for paper-grade unified convention, delete `predictions.jsonl` and re-run the full set (**not** `--resume_eval`).
 
-### 分析主线
+### Analysis main line
 
-1. 在两套数据集上对比 **KVI 与其余方法**（尤其 **GraphRAG**）。  
-2. 归类错误：**格式与标签**、**检索/KV 是否偏离**、**证据与生成不一致**、**过长或跑题生成** 等。  
-3. 提出改动时区分：更偏 **任务模板**（对 FEVER 友好可能对 TQA 无用）与更偏 **机制**（如 KV 选择与注入），并计划在 **两集上交叉验证**。
+1. Compare **KVI against other methods** (especially **GraphRAG**) on both datasets.  
+2. Categorize errors: **format and label**, **retrieval/KV deviation**, **evidence-generation inconsistency**, **overly long or off-topic generation**, etc.  
+3. When proposing changes, distinguish between **task-template-oriented** (may help FEVER but not TQA) and **mechanism-oriented** (e.g. KV selection and injection), and plan **cross-validation on both sets**.
 
 ---
 
-## 全量规模与后台任务
+## Full scale and background tasks
 
-- **默认全量**（`run_exp02_hallucination.py` 未传 `--limit` 时）  
-  - **TruthfulQA**：`--truthfulqa_max` **500**（`generation` validation，见 `prepare_exp02_datasets.py`）  
-  - **FEVER**：`--fever_max` **1000**（KILT/FEVER 校验 split 的本地 parquet 或 HF 备选）  
-- **烟雾测试**：传 `--limit N` 时，`build_assets_from_dataset.py` 只对前 N 条建图/KV；`run_exp01.py` 也会 `--limit N`。看 `results/*/summary.json` 里的 **`n`** 即可区分全量还是小样本。  
-- **自动重启**：`code/run_exp02_autoresume.sh` 在 **`results/hallucination_proxy_summary.json` 不存在** 时循环执行主脚本；一旦该文件生成即认为本轮 Exp02 结束并退出。若要**强制重跑全量**，需先备份或删除旧的 `hallucination_proxy_summary.json`（以及按需清结果目录），再启动 supervisor。  
-- **日志**：主进程 stdout/stderr → `results/exp02_pipeline_v2.log`；督导一行行记录 → `results/exp02_supervisor.log`（`*.log` 已 `.gitignore`，仅存本地）。
+- **Default full scale** (when `run_exp02_hallucination.py` is called without `--limit`):  
+  - **TruthfulQA**: `--truthfulqa_max` **500** (`generation` validation, see `prepare_exp02_datasets.py`)  
+  - **FEVER**: `--fever_max` **1000** (local parquet from KILT/FEVER validation split, or HF fallback)  
+- **Smoke test**: When `--limit N` is passed, `build_assets_from_dataset.py` only builds graph/KV for the first N samples; `run_exp01.py` also gets `--limit N`. Check **`n`** in `results/*/summary.json` to distinguish full scale from small sample.  
+- **Auto-restart**: `code/run_exp02_autoresume.sh` loops the main script while **`results/hallucination_proxy_summary.json` does not exist**; once that file appears, it considers this round of Exp02 done and exits. To **force a full re-run**, first backup or delete the old `hallucination_proxy_summary.json` (and optionally clear result directories), then start the supervisor.  
+- **Logs**: Main process stdout/stderr → `results/exp02_pipeline_v2.log`; supervisor line-by-line records → `results/exp02_supervisor.log` (`*.log` is `.gitignore`d, local only).
 
-判断「后台是否还在跑」：本机存在 `run_exp02_autoresume.sh` / `run_exp02_hallucination.py` 进程，且 TruthfulQA 或 FEVER 管线（如 `triple_kv_compiler.py`）在跑，即全量流水线尚未收尾。
+To check "whether background is still running": if local processes `run_exp02_autoresume.sh` / `run_exp02_hallucination.py` exist, and TruthfulQA or FEVER pipeline steps (e.g. `triple_kv_compiler.py`) are running, the full pipeline has not yet finished.
 
-### 快速一次性跑完（推荐）
+### Fast one-shot run (recommended)
 
-若 **`data/dataset_manifest.json` 已是 500+1000** 且 **`artifacts/*` 已编译过图与 triple KV**，不要用 autoresume 从头反复编译。先**停掉** `run_exp02_autoresume.sh` 与旧的 `run_exp02_hallucination.py`，再起常驻 **18888**，然后：
+If **`data/dataset_manifest.json` already has 500+1000** and **`artifacts/*` already have compiled graphs and triple KV**, do not use autoresume to re-compile from scratch repeatedly. First **stop** `run_exp02_autoresume.sh` and the old `run_exp02_hallucination.py`, start resident **18888**, then:
 
 ```bash
-# 日志：results/exp02_fast_run.log
+# Log: results/exp02_fast_run.log
 nohup experiments/exp02_hallucination/code/run_exp02_fast_once.sh >> experiments/exp02_hallucination/results/exp02_fast_run.log 2>&1 &
 ```
 
-等价参数：`--skip_mirror_and_prepare --reuse_artifacts`（见 `run_exp02_hallucination.py`）。仍会跑 **两遍** `run_exp01`（500 + 1000 条 × 五方法），耗主要取决于推理，不再重复 CPU 编译 KV。
+Equivalent args: `--skip_mirror_and_prepare --reuse_artifacts` (see `run_exp02_hallucination.py`). Will still run **two passes** of `run_exp01` (500 + 1000 samples × five methods), with time dominated by inference, no repeated CPU KV compilation.
 
-可选：只跑某一数据集，例如 `--only_datasets fever`（另一数据集会从已有 `summary.json` 并入 `hallucination_proxy_summary.json`）。
+Optional: run only one dataset, e.g. `--only_datasets fever` (the other dataset will merge from existing `summary.json` into `hallucination_proxy_summary.json`).
 
-### SSH 断线仍跑（推荐：FEVER 补跑 + GPU0）
+### Survive SSH disconnect (recommended: FEVER fill-in + GPU0)
 
-常驻的 **`/health` 在模型未载入前就会返回 200**，若立刻开跑容易 **`RemoteDisconnected` / `Connection refused`**。脚本 **`code/run_fever_gpu_detached.sh`** 会先起 resident、轮询 health，再 **`sleep 45`**（可用环境变量 **`RESIDENT_READY_GRACE_SEC`** 改），最后 **`exec` 跑 FEVER-only Exp02**，整段挂在 **nohup** 上，**与 SSH 会话脱钩**：
+The resident **`/health` returns 200 before the model is loaded**, so starting eval immediately can easily cause **`RemoteDisconnected` / `Connection refused`**. Script **`code/run_fever_gpu_detached.sh`** starts resident first, polls health, then **`sleep 45`** (adjustable via env var **`RESIDENT_READY_GRACE_SEC`**), then **`exec`s FEVER-only Exp02**, the whole block on **nohup**, **detached from the SSH session**:
 
 ```bash
 cd ~/dev/KVI
@@ -69,102 +69,102 @@ nohup bash experiments/exp02_hallucination/code/run_fever_gpu_detached.sh \
   >> experiments/exp02_hallucination/results/exp02_fever_gpu_orchestrator_outer.log 2>&1 &
 ```
 
-- 编排日志：`results/exp02_fever_gpu_orchestrator.log`  
-- 常驻日志：`experiments/results/resident_18888_gpu.log`  
-- FEVER 评测输出：`results/exp02_fever_gpu.log`  
+- Orchestrator log: `results/exp02_fever_gpu_orchestrator.log`  
+- Resident log: `experiments/results/resident_18888_gpu.log`  
+- FEVER eval output: `results/exp02_fever_gpu.log`  
 
-断线后用 `pgrep -af 'run_fever_gpu_detached|run_exp02_hallucination|resident_infer'` 与 `wc -l results/fever_fullmethods_qwen25_7b/predictions.jsonl` 自查。
-
----
-
-## 当前图中的「幻觉率」是什么（与社区口径的差异）
-
-`run_exp02_hallucination.py` 写出的 **`hallucination_proxy_summary.json`** 中：**TruthfulQA** 为 **`100 − relaxed EM`**，**FEVER** 为 **`100 − fever_label_accuracy`**（见该 JSON 的 `note` 与脚本内注释）。
-
-- **relaxed EM**（`experiments/exp01_main_qa/code/metrics.py`）：SQuAD 风格归一化后，**任一条 gold 是否作为子串出现在模型整段输出中**（并对 `yes`/`no` 有少量扩展）。适合长段生成的 Hotpot/NQ 风格 QA，**不是** TruthfulQA 或 FEVER 官方主表口径。  
-- **应对齐的社区/官方口径（建议写论文或对外对比时使用）**  
-  - **TruthfulQA**：官方/常用为 **generation 上的人类或自动化评测**（如 MC1/MC2、或官方脚本），而不是「参考句是否出现在长生成里」。  
-  - **FEVER**：共享任务常用 **三分类标签准确率**（SUPPORTS / REFUTES / NOT ENOUGH INFO）；完整流水线还可接 **fever-scorer**（需预测 Wikidata 证据等），与本仓库的「仅标签」设定不同。
-
-### 推荐实现顺序（已定）
-
-1. **FEVER（优先，已落地）**  
-   - `run_exp01.py` 在 `--dataset_name FEVER` 时额外计算 **标签准确率**：在模型全文里找 **首次出现** 的 `SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO`（`metrics.parse_fever_label`），与 `prepare_exp02_datasets.py` 写入的 gold 比较。  
-   - 见 `results/fever_fullmethods_qwen25_7b/summary.json` 中每方法的 **`fever_label_accuracy`**、**`fever_label_ci95_*`**；逐题见 `predictions.jsonl` 的 **`fever_label_em`**。  
-   - 比 **relaxed EM** 更接近共享任务的 **veracity 标签**口径；**仍不是**带证据提交的官方 scorer。  
-2. **TruthfulQA（第二步，已接入）**  
-   - `prepare_exp02_datasets.py` 现已支持把 `multiple_choice` 的 `mc1_targets` / `mc2_targets`（若本地或在线可读）并入 `truthfulqa_eval.jsonl`。  
-   - 若 `multiple_choice` 不可用，会从 generation split 的 `correct_answers/incorrect_answers` 自建 MC targets，保证覆盖率。  
-   - `run_exp01.py` 现已输出 `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`，默认 `--truthfulqa_mc_mode likelihood_proxy`（对候选选项做对数似然打分）。  
-   - 注意：该实现比纯字符串匹配更接近 MC 口径，但仍记为 **proxy**，与官方 TruthfulQA 发布链路并非逐项完全等价。
-
-Exp02 的 **`hallucination_proxy_summary.json`**（由 `run_exp02_hallucination.py` 写出）口径是：**TruthfulQA = `100 − relaxed EM`**，**FEVER = `100 − fever_label_accuracy`**（与 JSON 内 `note` 一致）。因此 **同一文件里两套任务的「幻觉率」不可横向类比**：TruthfulQA 这一列往往极高（长生成里很难子串命中参考句），并不代表 FEVER 上模型更「诚实」。论文主图若要与 FEVER 并列、且 TruthfulQA 希望接近社区 MC 语义，请用下面的 **`results/summary.json` + 三栏图**（MC1 / MC2 / FEVER label）。
+After disconnect, check with `pgrep -af 'run_fever_gpu_detached|run_exp02_hallucination|resident_infer'` and `wc -l results/fever_fullmethods_qwen25_7b/predictions.jsonl`.
 
 ---
 
-## `run_exp02_hallucination.py` → `run_exp01.py` 实际参数（逐条对照）
+## What is the "hallucination rate" in the current figure (and differences from community conventions)
 
-以下为主脚本对 **每个数据集** 构建完 `artifacts/<name>/` 后，调用 `run_exp01.py` 时**明确传入**或与**默认值**一致的项（摘自 `run_exp02_hallucination.py`）。
+In **`hallucination_proxy_summary.json`** written by `run_exp02_hallucination.py`: **TruthfulQA** is **`100 − relaxed EM`**, **FEVER** is **`100 − fever_label_accuracy`** (see that JSON's `note` and in-script comments).
 
-| 参数 | 值 / 说明 |
+- **relaxed EM** (`experiments/exp01_main_qa/code/metrics.py`): SQuAD-style normalization, checks whether **any gold appears as a substring in the model's full output** (with minor extensions for `yes`/`no`). Suitable for long-generation Hotpot/NQ-style QA, **not** the TruthfulQA or FEVER official main table convention.  
+- **Community/official conventions to align with (recommended for paper or external comparison)**:  
+  - **TruthfulQA**: Official/commonly used is **generation-based human or automated evaluation** (e.g. MC1/MC2, or official scripts), not "whether the reference sentence appears in the long generation."  
+  - **FEVER**: The shared task commonly uses **three-class label accuracy** (SUPPORTS / REFUTES / NOT ENOUGH INFO); a full pipeline can also plug into **fever-scorer** (requires predicted Wikidata evidence etc.), which differs from this repo's "label-only" setting.
+
+### Recommended implementation order (settled)
+
+1. **FEVER (priority, landed)**  
+   - `run_exp01.py` additionally computes **label accuracy** when `--dataset_name FEVER`: finds the **first occurrence** of `SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO` in the model's full response (`metrics.parse_fever_label`), compares against gold written by `prepare_exp02_datasets.py`.  
+   - See each method's **`fever_label_accuracy`**, **`fever_label_ci95_*`** in `results/fever_fullmethods_qwen25_7b/summary.json`; per-question see **`fever_label_em`** in `predictions.jsonl`.  
+   - Closer than **relaxed EM** to the shared task's **veracity label** convention; **still not** the official scorer with evidence submission.  
+2. **TruthfulQA (second step, integrated)**  
+   - `prepare_exp02_datasets.py` now supports merging `multiple_choice` `mc1_targets` / `mc2_targets` (if locally or online readable) into `truthfulqa_eval.jsonl`.  
+   - If `multiple_choice` is unavailable, it self-builds MC targets from the generation split's `correct_answers/incorrect_answers`, guaranteeing coverage.  
+   - `run_exp01.py` now outputs `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`, default `--truthfulqa_mc_mode likelihood_proxy` (log-likelihood scoring on candidate options).  
+   - Note: this implementation is closer to the MC convention than pure string matching, but is still noted as **proxy** — not fully equivalent item-by-item to the official TruthfulQA release pipeline.
+
+Exp02's **`hallucination_proxy_summary.json`** (written by `run_exp02_hallucination.py`) convention is: **TruthfulQA = `100 − relaxed EM`**, **FEVER = `100 − fever_label_accuracy`** (consistent with the JSON's `note`). Therefore **the "hallucination rates" for the two tasks in the same file are not horizontally comparable**: TruthfulQA's column is often very high (unlikely to substring-match reference answers in long generation), which does not imply the model is more "honest" on FEVER. If the paper's main figure needs to juxtapose FEVER side by side and TruthfulQA hopes to approach community MC semantics, use the **`results/summary.json` + three-panel figure** below (MC1 / MC2 / FEVER label).
+
+---
+
+## Actual parameters: `run_exp02_hallucination.py` → `run_exp01.py` (line-by-line mapping)
+
+The following are items the main script **explicitly passes** or matches **defaults** when calling `run_exp01.py` for **each dataset** after building `artifacts/<name>/` (excerpted from `run_exp02_hallucination.py`).
+
+| Parameter | Value / Note |
 |------|-----------|
-| `--dataset` | `data/truthfulqa_eval.jsonl` 或 `data/fever_eval.jsonl` |
-| `--dataset_name` | `TRUTHFULQA` 或 `FEVER` |
-| `--model` | 默认 `.../models/Qwen2.5-7B-Instruct` |
+| `--dataset` | `data/truthfulqa_eval.jsonl` or `data/fever_eval.jsonl` |
+| `--dataset_name` | `TRUTHFULQA` or `FEVER` |
+| `--model` | Default `.../models/Qwen2.5-7B-Instruct` |
 | `--graph_index` | `artifacts/<name>/graph_index.json` |
 | `--triple_kvbank_dir` | `artifacts/<name>/triple_kvbank` |
 | `--graph_sentences_jsonl` | `artifacts/<name>/sentences.tagged.jsonl` |
-| `--ann_kv_dir` 等 ANN 路径 | 对应该数据集的 `kvbank_sentences` 与 pattern sidecar |
+| `--ann_kv_dir` and other ANN paths | Corresponding dataset `kvbank_sentences` and pattern sidecar |
 | `--methods` | `llm,rag,graphrag,kv_prefix,kvi` |
 | `--out_dir` | `results/<name>_fullmethods_qwen25_7b` |
 | `--timeout_s` | `600` |
 | `--bootstrap_samples` / `--permutation_samples` | `1000` / `2000` |
-| `--inference_service_url` / `--ann_inference_service_url` | 若命令行传了 `--resident_url`（autoresume 为 `http://127.0.0.1:18888`）则一并传入 |
-| `--limit` | **仅当** `run_exp02_hallucination.py --limit K` 时追加，限制评测条数 |
-| `--em_mode` | **未传**，沿用 `run_exp01.py` 默认 **`relaxed`** |
-| `--openqa_mode` | **未传**，沿用 `run_exp01.py` 默认 **`True`**（`BooleanOptionalAction`，即 Graph/KVI 走英文开放域提示，见 `run_exp01.py` 帮助文案） |
+| `--inference_service_url` / `--ann_inference_service_url` | If command line provided `--resident_url` (autoresume uses `http://127.0.0.1:18888`), both are passed |
+| `--limit` | **Only** when `run_exp02_hallucination.py --limit K` is given, restricts eval sample count |
+| `--em_mode` | **Not passed**, uses `run_exp01.py` default **`relaxed`** |
+| `--openqa_mode` | **Not passed**, uses `run_exp01.py` default **`True`** (`BooleanOptionalAction`, meaning Graph/KVI use English open-domain prompts; see `run_exp01.py` help text) |
 
-未列出的 `run_exp01` 参数均取其文件内默认值（如 KVI 的 `kvi_max_kv_triples=3`、`kvi_reconcile_no_kv_decode=False` 等）。
+Unlisted `run_exp01` parameters use their in-file defaults (e.g. KVI's `kvi_max_kv_triples=3`, `kvi_reconcile_no_kv_decode=False`, etc.).
 
 ---
 
-## FEVER：gold 从哪来？为什么和 `openqa_mode` 同时出现？
+## FEVER: Where does gold come from? Why does it coexist with `openqa_mode`?
 
-### Gold（`answer` / `answers`）如何构造
+### How gold (`answer` / `answers`) is constructed
 
-逻辑在 **`prepare_exp02_datasets.py`**（与 `run_exp02_hallucination.py` 调用参数一致：`--fever_max`、`--mirror_root`、`--mirror_data_root`、`--streaming`）。
+Logic is in **`prepare_exp02_datasets.py`** (same args as the `run_exp02_hallucination.py` invocation: `--fever_max`, `--mirror_root`, `--mirror_data_root`, `--streaming`).
 
-1. 从本地 parquet（如 `kilt_fever_validation.parquet`）或备选 HF 配置加载行。  
-2. **标签映射**（整型标号时）：  
+1. Load rows from local parquet (e.g. `kilt_fever_validation.parquet`) or fallback HF config.  
+2. **Label mapping** (when integer-encoded):  
 
    `label_map = {0: "SUPPORTS", 1: "REFUTES", 2: "NOT ENOUGH INFO"}`  
 
-   若列为字符串则 `strip().upper()`；若 KILT 风格 `output` 列表里带 `answer` 字段则取其大写字符串。  
-3. **写入 JSONL 的字段**：  
-   - `question`：人为拼装的英文说明 + claim，要求模型 **只输出三标签之一**（见脚本内 `q = f'Claim: "{claim}"\nBased on evidence, ...'`）。  
-   - `answer` / `answers`：**单一标准串**，即上述 **`SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO`**（仅此一字串放入 `answers` 列表）。
+   If column is string, `strip().upper()`; if KILT-style `output` list contains an `answer` field, take its uppercase string.  
+3. **Fields written to JSONL**:  
+   - `question`: Manually assembled English instructions + claim, requiring the model to **output only one of the three labels** (see in-script `q = f'Claim: "{claim}"\nBased on evidence, ...'`).  
+   - `answer` / `answers`: **Single gold string**, i.e. the above **`SUPPORTS` / `REFUTES` / `NOT ENOUGH INFO`** (only this one string placed in the `answers` list).
 
-因此，**监督信号仍是 FEVER 的三类标签**；评测时 `run_exp01` 用 relaxed EM 检查模型**长输出**里是否出现归一化后的 gold 子串（例如 `supports`），与「开放域长答案」并存。
+Therefore, the **supervision signal remains FEVER's three-class labels**; at eval time `run_exp01` uses relaxed EM to check whether the normalized gold substring (e.g. `supports`) appears in the model's **long output**, coexisting with "open-domain long answers."
 
-### 为何默认 `openqa_mode=True`（和医学中文无关）
+### Why `openqa_mode=True` by default (unrelated to Chinese medical prompts)
 
-- `openqa_mode` 只影响 **Graph/KVI 路径**里 `run_graph_inference` 的提示模板：默认 **英文开放域**，避免 Exp01 为 MedHop 准备的 **中文医学 system prompt** 污染 TruthfulQA/FEVER。  
-- FEVER 的 **claim+指令** 已通过数据集里的 **`question` 字段** 注入；gold 仍是 **三分类标签**，不是开放域自由文本事实。
+- `openqa_mode` only affects the **Graph/KVI path** prompt template in `run_graph_inference`: default **English open-domain**, avoiding the **Chinese medical system prompt** (prepared for MedHop in Exp01) from polluting TruthfulQA/FEVER.  
+- FEVER's **claim+instructions** are already injected via the dataset's **`question` field**; gold is still **three-class labels**, not open-domain free-text facts.
 
-如需**严格复现 MedHop 式中文闭域图推理**，需对 Exp02 **显式传入** `run_exp01.py` 的 `--no-openqa_mode`（当前 `run_exp02_hallucination.py` **没有**传这一项，故全为默认开放域英文图侧提示）。
+To **strictly reproduce MedHop-style Chinese closed-domain graph reasoning**, you would need to **explicitly pass** `run_exp01.py`'s `--no-openqa_mode` for Exp02 (currently `run_exp02_hallucination.py` does **not** pass this, so all use default open-domain English graph-side prompts).
 
 ---
 
-## 结果与图（论文用图看这里）
+## Results and figures (paper figures — look here)
 
-**绝对路径（本机）**：`/home/zd/dev/KVI/experiments/exp02_hallucination/results/`
+**Absolute path (this machine)**: `/home/zd/dev/KVI/experiments/exp02_hallucination/results/`
 
-### 当前已跑结果（TruthfulQA + FEVER）
+### Currently available results (TruthfulQA + FEVER)
 
-> 口径说明：下表 EM 为 `relaxed EM`；Exp02 的 hallucination rate 为 `100 - relaxed EM`（proxy）。
+> Convention note: The EM in the table below is `relaxed EM`; Exp02 hallucination rate is `100 - relaxed EM` (proxy).
 
 | Dataset | Method | EM (%) | 95% CI | F1 Mean | Proxy Hallucination (%) |
-|---|---|---:|---:|---:|---:|
+|---|---|---|---:|---:|---:|---:|
 | TruthfulQA | LLM | 5.0 | [3.2, 7.0] | 0.176 | 95.0 |
 | TruthfulQA | RAG | 7.4 | [5.0, 9.6] | 0.135 | 92.6 |
 | TruthfulQA | GraphRAG | 17.8 | [14.6, 21.2] | 0.195 | 82.2 |
@@ -176,53 +176,53 @@ Exp02 的 **`hallucination_proxy_summary.json`**（由 `run_exp02_hallucination.
 | FEVER | KV Prefix | 74.3 | [71.7, 76.8] | 0.312 | 25.7 |
 | FEVER | KVI | 89.3 | [87.3, 91.2] | 0.893 | 10.7 |
 
-FEVER 额外标签指标（更接近 veracity 任务）：
+FEVER additional label metrics (closer to veracity task):
 
 | FEVER Method | FEVER Label Accuracy (%) | 95% CI |
-|---|---:|---:|
+|---|---|---:|
 | LLM | 30.9 | [28.0, 33.7] |
 | RAG | 92.5 | [90.9, 94.1] |
 | GraphRAG | 68.8 | [66.1, 72.0] |
 | KV Prefix | 72.3 | [69.6, 75.1] |
 | KVI | 89.3 | [87.3, 91.2] |
 
-对应文件：
+Corresponding files:
 
 - `results/truthfulqa_fullmethods_qwen25_7b/summary.json`
 - `results/fever_fullmethods_qwen25_7b/summary.json`
 - `results/hallucination_proxy_summary.json`
 
-### 表格与原始指标
+### Tables and raw metrics
 
-| 内容 | 路径 |
+| Content | Path |
 |------|------|
-| 跨数据集汇总（代理指标） | `results/hallucination_proxy_summary.json`、`hallucination_proxy_summary.md`（跑完 `run_exp02_hallucination.py` 后生成；**无则**可用下面两个 `summary.json` 手搓图） |
-| TruthfulQA 逐方法 EM / F1 / CI（以及 `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`） | `results/truthfulqa_fullmethods_qwen25_7b/summary.json`、`results.md`、`results.csv` |
-| FEVER 同上 + **标签准确率** `fever_label_accuracy` | `results/fever_fullmethods_qwen25_7b/summary.json`、`results.md`、`results.csv` |
-| 逐题预测 | 各数据集目录下 `predictions.jsonl` |
+| Cross-dataset summary (proxy metrics) | `results/hallucination_proxy_summary.json`, `hallucination_proxy_summary.md` (generated after `run_exp02_hallucination.py` completes; **if missing**, use the two `summary.json` files below to manually construct figures) |
+| TruthfulQA per-method EM / F1 / CI (and `truthfulqa_mc1_proxy` / `truthfulqa_mc2_proxy`) | `results/truthfulqa_fullmethods_qwen25_7b/summary.json`, `results.md`, `results.csv` |
+| FEVER same as above + **label accuracy** `fever_label_accuracy` | `results/fever_fullmethods_qwen25_7b/summary.json`, `results.md`, `results.csv` |
+| Per-question predictions | `predictions.jsonl` under each dataset directory |
 
-### 发表论文用的矢量图（SVG，可插 LaTeX / Word）
+### Vector figures for paper publication (SVG, pluggable into LaTeX / Word)
 
-**两栏 vs 三栏（不要混用文件）**
+**Two-panel vs three-panel (do not mix files)**
 
-| 图 | 栏数 | TruthfulQA 口径 | FEVER 口径 |
+| Figure | Panels | TruthfulQA convention | FEVER convention |
 |----|------|-----------------|------------|
-| `hallucination_proxy_bars_paper.svg` | **2** | `100 − relaxed EM`（子串 proxy，柱子常 **80–96%**） | `100 − fever_label_accuracy`（与 `hallucination_proxy_summary.json` 一致） |
-| `hallucination_proxy_three_panel_paper.svg` 或 `unified_hallucination_bars.svg` | **3** | 左两栏：`100 − MC1 / MC2 likelihood proxy` | 右栏：`100 − fever_label_accuracy` |
+| `hallucination_proxy_bars_paper.svg` | **2** | `100 − relaxed EM` (substring proxy, bars often **80–96%**) | `100 − fever_label_accuracy` (consistent with `hallucination_proxy_summary.json`) |
+| `hallucination_proxy_three_panel_paper.svg` or `unified_hallucination_bars.svg` | **3** | Left two panels: `100 − MC1 / MC2 likelihood proxy` | Right panel: `100 − fever_label_accuracy` |
 
-三栏数据来自跑完 Exp02 后生成的 **`results/summary.json`**（与 `hallucination_proxy_summary.json` 不同：后者 TruthfulQA 仍是 relaxed EM）。
+Three-panel data comes from **`results/summary.json`** generated after running Exp02 (different from `hallucination_proxy_summary.json`: the latter still uses relaxed EM for TruthfulQA).
 
-脚本：`experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py`
+Script: `experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py`
 
 ```bash
-# 推荐：一次生成 paper 两栏 + 三栏 + 可选拆分图（需已有 results/summary.json）
+# Recommended: generate paper two-panel + three-panel + optional split figures in one pass (requires existing results/summary.json)
 python3 experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py \
   --paper \
   --three_panel_unified \
   --fever_label_figure \
   --truthfulqa_mc_figure
 
-# 或仅从两个 per-dataset summary.json 生成（无 hallucination_proxy_summary.json 时）
+# Or generate from two per-dataset summary.json only (when hallucination_proxy_summary.json is missing)
 python3 experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py \
   --truthfulqa_summary experiments/exp02_hallucination/results/truthfulqa_fullmethods_qwen25_7b/summary.json \
   --fever_summary experiments/exp02_hallucination/results/fever_fullmethods_qwen25_7b/summary.json \
@@ -232,34 +232,34 @@ python3 experiments/exp02_hallucination/code/plot_hallucination_proxy_bars.py \
   --truthfulqa_mc_figure
 ```
 
-（三栏也可单独用 `code/plot_unified_hallucination_bars.py` 写出 `unified_hallucination_bars.svg`，样式略简；与 `--three_panel_unified` 使用同一 `results/summary.json`。）
+(Three-panel can also be generated standalone via `code/plot_unified_hallucination_bars.py` outputting `unified_hallucination_bars.svg`, with slightly simpler styling; uses the same `results/summary.json` as `--three_panel_unified`.)
 
-| 输出文件 | 用途 |
+| Output file | Use |
 |----------|------|
-| **`hallucination_proxy_three_panel_paper.svg`** | **论文并列主图推荐**：三栏统一口径（TQA MC1 + TQA MC2 + FEVER label → 幻觉率） |
-| `hallucination_proxy_three_panel.svg` | 同左，非 `paper` 样式 |
-| `unified_hallucination_bars.svg` | 与上同类三栏（`plot_unified_hallucination_bars.py`） |
-| **`hallucination_proxy_bars_paper.svg`** | **仅两栏**：左 TQA **relaxed EM**（易显「虚高」）、右 FEVER label；图注已写明差异 |
-| `hallucination_proxy_bars.svg` | 屏幕预览 / 非印刷 |
-| **`fever_label_accuracy_bars_paper.svg`** | FEVER **三分类标签准确率**（需 `summary.json` 含 `fever_label_accuracy`；老结果需重跑 `run_exp01.py`） |
-| `fever_label_accuracy_bars.svg` | 同左，非 `paper` 样式 |
-| **`truthfulqa_mc_proxy_bars_paper.svg`** | TruthfulQA **MC1/MC2 proxy**（来自 `truthfulqa_mc*_proxy`，非官方 MC 脚本分） |
-| `truthfulqa_mc_proxy_bars.svg` | 同左，非 `paper` 样式 |
+| **`hallucination_proxy_three_panel_paper.svg`** | **Recommended paper side-by-side main figure**: three panels with unified convention (TQA MC1 + TQA MC2 + FEVER label → hallucination rate) |
+| `hallucination_proxy_three_panel.svg` | Same as above, non-`paper` style |
+| `unified_hallucination_bars.svg` | Same-class three-panel (`plot_unified_hallucination_bars.py`) |
+| **`hallucination_proxy_bars_paper.svg`** | **Two-panel only**: left TQA **relaxed EM** (prone to "inflated" values), right FEVER label; figure caption has noted the difference |
+| `hallucination_proxy_bars.svg` | Screen preview / non-print |
+| **`fever_label_accuracy_bars_paper.svg`** | FEVER **three-class label accuracy** (requires `summary.json` with `fever_label_accuracy`; old results need re-run of `run_exp01.py`) |
+| `fever_label_accuracy_bars.svg` | Same as above, non-`paper` style |
+| **`truthfulqa_mc_proxy_bars_paper.svg`** | TruthfulQA **MC1/MC2 proxy** (from `truthfulqa_mc*_proxy`, not official MC script scores) |
+| `truthfulqa_mc_proxy_bars.svg` | Same as above, non-`paper` style |
 
-**PDF**：编辑部常要 PDF/EPS。可用 Inkscape（`inkscape file.svg --export-filename=file.pdf`）或 `rsvg-convert -f pdf -o file.pdf file.svg` 从 **SVG** 转换，保持矢量。
+**PDF**: Editorial offices often require PDF/EPS. Use Inkscape (`inkscape file.svg --export-filename=file.pdf`) or `rsvg-convert -f pdf -o file.pdf file.svg` to convert from **SVG**, preserving vector quality.
 
-**图中要写清的表述**：两栏图中 **TruthfulQA = relaxed EM 代理**，与 **MC1/MC2** 或人类评测不是同一数字；三栏图中 TruthfulQA 为 **likelihood MC proxy**。FEVER 侧以 **标签准确率** 为主；仍非带证据的官方 fever-scorer。
+**Wording to make clear in figures**: In two-panel figures, **TruthfulQA = relaxed EM proxy**, which is not the same number as **MC1/MC2** or human evaluation; in three-panel figures, TruthfulQA is **likelihood MC proxy**. On the FEVER side, use **label accuracy** as primary; still not the official fever-scorer with evidence.
 
-另：`*.html` 仅为浏览器预览，投稿一般用 **SVG/PDF**。
+Also: `*.html` is for browser preview only; submissions generally use **SVG/PDF**.
 
 ---
 
-## 代码入口
+## Code entry points
 
-| 步骤 | 脚本 |
+| Step | Script |
 |------|------|
-| 镜像下载 | `experiments/code/download_mirror_datasets.py` |
-| 数据 JSONL | `code/prepare_exp02_datasets.py` |
-| 主 orchestrator | `code/run_exp02_hallucination.py` |
-| 评测 | `experiments/exp01_main_qa/code/run_exp01.py` |
-| EM 定义 | `experiments/exp01_main_qa/code/metrics.py` |
+| Mirror download | `experiments/code/download_mirror_datasets.py` |
+| Data JSONL | `code/prepare_exp02_datasets.py` |
+| Main orchestrator | `code/run_exp02_hallucination.py` |
+| Evaluation | `experiments/exp01_main_qa/code/run_exp01.py` |
+| EM definition | `experiments/exp01_main_qa/code/metrics.py` |

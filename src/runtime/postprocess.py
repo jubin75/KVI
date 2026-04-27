@@ -627,10 +627,10 @@ def _parse_answer_units_from_text(cleaned_text: str) -> List[AnswerUnit]:
 
 def normalize_answer_units(answer_units: Sequence[AnswerUnit]) -> List[AnswerUnit]:
     """
-    职责：
-    - 去重语义等价回答（字符串 + slot + evidence_id）
-    - 合并多条“证据不足”类回答为 1 条
-    - 过滤空内容 / 异常 token（如 '】】】'）
+    Responsibilities:
+    - Deduplicate semantically equivalent answers (string + slot + evidence_id)
+    - Merge multiple "insufficient evidence" type answers into 1
+    - Filter empty content / abnormal tokens (e.g. '】】】')
     """
     units_in = list(answer_units or [])
     out: List[AnswerUnit] = []
@@ -676,10 +676,10 @@ def normalize_answer_units(answer_units: Sequence[AnswerUnit]) -> List[AnswerUni
 
 def validate_answer_structure(answer_units: Sequence[AnswerUnit]) -> List[AnswerUnit]:
     """
-    职责：
-    - 校验回答是否包含可读自然语言
-    - 若检测到 prompt 崩坏 / 模板残留 / 乱码，丢弃该 unit
-    - 防止输出退化为【证据句】】】】类内容
+    Responsibilities:
+    - Validate whether answer contains readable natural language
+    - If prompt corruption / template residue / garbled text detected, discard the unit
+    - Prevent output from degenerating into bracket-enclosed template residue content
     """
     units = list(answer_units or [])
     out: List[AnswerUnit] = []
@@ -735,14 +735,14 @@ def _infer_question_intent_slots(user_prompt: str) -> List[str]:
 
 def enforce_evidence_policy(answer_units: Sequence[AnswerUnit], question_intent: Dict[str, Any]) -> FinalAnswer:
     """
-    职责：
-    - 若问题属于常见医学 slot（如 risk_factors / complications / prognosis）
-      且 evidence 为空 → 回退到 evidence 层重新匹配
-    - 若仍无 evidence，只允许输出一次标准 fallback
-    - 明确区分：
-        - evidence 缺失
-        - slot 未命中
-        - PDF 中确实无相关信息
+    Responsibilities:
+    - If the question falls under common medical slots (e.g. risk_factors / complications / prognosis)
+      and evidence is empty → fall back to evidence layer for re-matching
+    - If still no evidence, only allow outputting one standard fallback
+    - Clearly distinguish:
+        - evidence missing
+        - slot miss
+        - truly no relevant information in PDFs
     """
     units = list(answer_units or [])
     user_prompt = str((question_intent or {}).get("user_prompt") or "")
