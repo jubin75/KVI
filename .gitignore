@@ -69,3 +69,8 @@ experiments/exp06_ablation/results/**/*.json
 experiments/exp06_ablation/results/**/*.jsonl
 experiments/exp06_ablation/results/**/*.csv
 experiments/logs/
+
+# --- Docs: only allow PNG files and 90_experiment_runbook_linux.md ---
+docs/*
+!docs/*.png
+!docs/90_experiment_runbook_linux.md
