@@ -1,5 +1,7 @@
 # Experiment 02 — Hallucination (proxy metrics)
 
+**New mainline for the next iteration**: follow the `2026-04-28 Progressive Experiment Plan` in [`experiments/README.md`](../README.md). In particular, Exp02-vNext should treat **`kvi_schema_verifier`** as the target architecture, keep **triple-KV generation** only as a legacy ablation, and separate **schema planning / verification** from **evidence-only final answer writing**.
+
 **Current priority experiment conventions (rolling update by date, including audit smoke parameters and command skeletons)**: see [`LATEST_EXPERIMENT_REQUIREMENTS.md`](./LATEST_EXPERIMENT_REQUIREMENTS.md).
 
 ## Experiment approach and KVI analysis goals (quick reference)
