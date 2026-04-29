@@ -23,13 +23,34 @@ from metrics import (
 )
 
 
-METHODS_ORDER = ["llm", "rag", "graphrag", "kv_prefix", "kvi"]
+METHODS_ORDER = [
+    "llm",
+    "rag",
+    "graphrag",
+    "kv_prefix",
+    "kvi",
+    "kvi_triple_legacy",
+    "kvi_schema_writer",
+    "kvi_schema_verifier",
+    "kvi_noinject_planner",
+]
 METHODS_META = {
     "llm": {"label": "LLM", "retrieval": "none", "injection": "none"},
     "rag": {"label": "RAG", "retrieval": "ANN", "injection": "prompt"},
     "graphrag": {"label": "GraphRAG", "retrieval": "graph", "injection": "prompt"},
     "kv_prefix": {"label": "KV Prefix", "retrieval": "ANN", "injection": "KV"},
     "kvi": {"label": "KVI", "retrieval": "graph", "injection": "KV + prompt"},
+    "kvi_triple_legacy": {"label": "KVI Triple Legacy", "retrieval": "graph", "injection": "KV + prompt (legacy)"},
+    "kvi_schema_writer": {"label": "KVI Schema Writer", "retrieval": "graph + schema", "injection": "schema-guided KV + prompt"},
+    "kvi_schema_verifier": {"label": "KVI Schema Verifier", "retrieval": "graph + schema", "injection": "schema plan + evidence writer"},
+    "kvi_noinject_planner": {"label": "KVI No-Inject Planner", "retrieval": "graph + schema", "injection": "planner only"},
+}
+KVI_FAMILY_METHODS = {
+    "kvi",
+    "kvi_triple_legacy",
+    "kvi_schema_writer",
+    "kvi_schema_verifier",
+    "kvi_noinject_planner",
 }
 
 
@@ -392,6 +413,7 @@ def _run_graph(
     kvi_kvprefix_style_prompt: bool = False,
     kvi_disable_kv_injection: bool = False,
     kvi_two_stage_kv_then_evidence: bool = False,
+    kvi_execution_mode: str = "legacy_triple_generate",
     audit_jsonl: str = "",
     audit_query_id: str = "",
     audit_method_key: str = "",
@@ -436,6 +458,8 @@ def _run_graph(
         argv += ["--kvi_disable_kv_injection"]
     if enable_kvi and kvi_two_stage_kv_then_evidence:
         argv += ["--kvi_two_stage_kv_then_evidence"]
+    if str(kvi_execution_mode or "").strip():
+        argv += ["--kvi_execution_mode", str(kvi_execution_mode)]
     if str(audit_jsonl).strip():
         argv += ["--audit_jsonl", str(audit_jsonl)]
     if str(audit_query_id).strip():
@@ -509,18 +533,19 @@ def _run_kvi2_runtime(
 def _pick_method_prediction(
     *,
     method: str,
-    out_gr_rag: Dict[str, Any],
-    out_gr_kvi: Dict[str, Any],
+    graph_outputs: Dict[str, Dict[str, Any]],
     out_rag: Optional[Dict[str, Any]],
     out_kv_prefix: Optional[Dict[str, Any]],
 ) -> str:
     if method == "llm":
-        return str(out_gr_rag.get("base_llm_result") or "")
+        return str((graph_outputs.get("graphrag") or {}).get("base_llm_result") or "")
     if method == "graphrag":
-        return str(out_gr_rag.get("diagnosis_result_raw") or out_gr_rag.get("diagnosis_result") or "")
-    if method == "kvi":
-        # Prefer grounded `diagnosis_result` over raw decode for stored prediction / EM / F1.
-        return str(out_gr_kvi.get("diagnosis_result") or out_gr_kvi.get("diagnosis_result_raw") or "")
+        out = graph_outputs.get("graphrag") or {}
+        return str(out.get("diagnosis_result_raw") or out.get("diagnosis_result") or "")
+    if method in KVI_FAMILY_METHODS:
+        out = graph_outputs.get(method) or {}
+        # Prefer grounded diagnosis_result over raw decode for stored prediction / EM / F1.
+        return str(out.get("diagnosis_result") or out.get("diagnosis_result_raw") or "")
     if method == "rag":
         return str((out_rag or {}).get("diagnosis_result") or (out_rag or {}).get("base_llm_result") or "")
     if method == "kv_prefix":
@@ -592,7 +617,15 @@ def main() -> None:
     p.add_argument("--ann_sidecar_dir", default="", help="sidecar/work dir")
     p.add_argument("--domain_encoder_model", default="sentence-transformers/all-MiniLM-L6-v2")
 
-    p.add_argument("--methods", default="llm,rag,graphrag,kv_prefix,kvi", help="comma list from: llm,rag,graphrag,kv_prefix,kvi")
+    p.add_argument(
+        "--methods",
+        default="llm,rag,graphrag,kv_prefix,kvi",
+        help=(
+            "comma list from: "
+            "llm,rag,graphrag,kv_prefix,kvi,"
+            "kvi_triple_legacy,kvi_schema_writer,kvi_schema_verifier,kvi_noinject_planner"
+        ),
+    )
     p.add_argument("--out_dir", required=True, help="Output directory")
     p.add_argument("--limit", type=int, default=0, help="Limit examples (0=all)")
     p.add_argument(
@@ -907,7 +940,7 @@ def main() -> None:
                     for mm in methods:
                         pp = str(preds_resume.get(mm) or "")
                         if str(args.truthfulqa_mc_mode) == "proxy":
-                            if mm == "kvi":
+                            if mm in KVI_FAMILY_METHODS:
                                 if str(args.truthfulqa_kvi_mc1_answer) == "grounded":
                                     p_m1 = _kvi_pred_for_truthfulqa_mc1_likelihood(pp)
                                 else:
@@ -928,10 +961,10 @@ def main() -> None:
                                     methods=methods,
                                     mc1_answer=str(args.truthfulqa_kvi_mc1_answer),
                                 )
-                                if mm == "kvi"
+                                if mm in KVI_FAMILY_METHODS
                                 else pp
                             )
-                            p2 = _kvi_pred_for_truthfulqa_mc1_likelihood(pp) if mm == "kvi" else pp
+                            p2 = _kvi_pred_for_truthfulqa_mc1_likelihood(pp) if mm in KVI_FAMILY_METHODS else pp
                             s1 = tqa_scorer.score_targets(ex.question, p1, ex.mc1_targets or {}) if tqa_scorer is not None else {"mc1": 0.0, "mc2": 0.0}
                             s2 = tqa_scorer.score_targets(ex.question, p2, ex.mc2_targets or {}) if tqa_scorer is not None else {"mc1": 0.0, "mc2": 0.0}
                             mc1_row[mm] = float(s1["mc1"])
@@ -964,31 +997,12 @@ def main() -> None:
         for idx, ex in enumerate(examples, start=1):
             if idx < start_idx:
                 continue
-            need_graph = any(m in {"llm", "graphrag", "kvi"} for m in methods)
-            out_gr_rag: Dict[str, Any] = {}
-            out_gr_kvi: Dict[str, Any] = {}
+            need_graph = any(m in {"llm", "graphrag"} or m in KVI_FAMILY_METHODS for m in methods)
+            graph_outputs: Dict[str, Dict[str, Any]] = {}
+            runtime_modes: Dict[str, str] = {}
             if need_graph:
                 graph_audit_path = str(args.graph_audit_jsonl or "").strip()
                 graph_audit_oracle = str(args.graph_audit_oracle_jsonl or "").strip()
-                out_gr_rag = _run_graph(
-                    repo_root=repo_root,
-                    model=args.model,
-                    question=ex.question,
-                    graph_index=graph_index,
-                    sentences_jsonl=graph_sentences_jsonl,
-                    enable_kvi=False,
-                    triple_kvbank_dir=triple_kvbank_dir,
-                    max_new_tokens=int(args.max_new_tokens),
-                    timeout_s=int(args.timeout_s),
-                    service_url=str(args.inference_service_url or ""),
-                    force_cpu=bool(args.graph_force_cpu),
-                    openqa_mode=bool(args.openqa_mode),
-                    kvi_minimal_prompt=False,
-                    audit_jsonl=graph_audit_path,
-                    audit_query_id=str(ex.id),
-                    audit_method_key="graphrag",
-                    audit_oracle_jsonl=graph_audit_oracle,
-                )
                 # TruthfulQA (open English): tighter KV budget + stricter DRM + minimal prompt / reconcile (KVI path only).
                 kvi_triples = int(args.kvi_max_kv_triples)
                 kvi_drm = float(args.kvi_drm_threshold)
@@ -1011,32 +1025,84 @@ def main() -> None:
                         kvi_reconcile_use = True
                     # TruthfulQA MC proxy alignment: use KV Prefix-like compact generation template.
                     kvi_kvprefix_style_use = True
-                out_gr_kvi = _run_graph(
-                    repo_root=repo_root,
-                    model=args.model,
-                    question=ex.question,
-                    graph_index=graph_index,
-                    sentences_jsonl=graph_sentences_jsonl,
-                    enable_kvi=True,
-                    triple_kvbank_dir=triple_kvbank_dir,
-                    max_new_tokens=kvi_max_new_tokens,
-                    timeout_s=int(args.timeout_s),
-                    service_url=str(args.inference_service_url or ""),
-                    force_cpu=bool(args.graph_force_cpu),
-                    openqa_mode=bool(args.openqa_mode),
-                    kvi_minimal_prompt=kvi_minimal_use,
-                    kvi_max_kv_triples=kvi_triples,
-                    kvi_drm_threshold=kvi_drm,
-                    kvi_top_k_relations=kvi_rels,
-                    kvi_reconcile_no_kv_decode=kvi_reconcile_use,
-                    kvi_kvprefix_style_prompt=kvi_kvprefix_style_use,
-                    kvi_disable_kv_injection=bool(args.kvi_disable_kv_injection),
-                    kvi_two_stage_kv_then_evidence=bool(args.kvi_two_stage_kv_then_evidence),
-                    audit_jsonl=graph_audit_path,
-                    audit_query_id=str(ex.id),
-                    audit_method_key="kvi",
-                    audit_oracle_jsonl=graph_audit_oracle,
-                )
+                def _run_graph_variant(
+                    *,
+                    method_key: str,
+                    enable_kvi: bool,
+                    execution_mode: str,
+                ) -> Dict[str, Any]:
+                    return _run_graph(
+                        repo_root=repo_root,
+                        model=args.model,
+                        question=ex.question,
+                        graph_index=graph_index,
+                        sentences_jsonl=graph_sentences_jsonl,
+                        enable_kvi=enable_kvi,
+                        triple_kvbank_dir=triple_kvbank_dir,
+                        max_new_tokens=(kvi_max_new_tokens if enable_kvi else int(args.max_new_tokens)),
+                        timeout_s=int(args.timeout_s),
+                        service_url=str(args.inference_service_url or ""),
+                        force_cpu=bool(args.graph_force_cpu),
+                        openqa_mode=bool(args.openqa_mode),
+                        kvi_minimal_prompt=(kvi_minimal_use if enable_kvi else False),
+                        kvi_max_kv_triples=kvi_triples,
+                        kvi_drm_threshold=kvi_drm,
+                        kvi_top_k_relations=kvi_rels,
+                        kvi_reconcile_no_kv_decode=(kvi_reconcile_use if enable_kvi else False),
+                        kvi_kvprefix_style_prompt=(kvi_kvprefix_style_use if enable_kvi else False),
+                        kvi_disable_kv_injection=bool(args.kvi_disable_kv_injection),
+                        kvi_two_stage_kv_then_evidence=bool(args.kvi_two_stage_kv_then_evidence),
+                        kvi_execution_mode=execution_mode,
+                        audit_jsonl=graph_audit_path,
+                        audit_query_id=str(ex.id),
+                        audit_method_key=method_key,
+                        audit_oracle_jsonl=graph_audit_oracle,
+                    )
+
+                if any(m in {"llm", "graphrag"} for m in methods):
+                    graph_outputs["graphrag"] = _run_graph_variant(
+                        method_key="graphrag",
+                        enable_kvi=False,
+                        execution_mode="legacy_triple_generate",
+                    )
+                    runtime_modes["graphrag"] = "legacy_triple_generate"
+
+                if "kvi" in methods or "kvi_triple_legacy" in methods:
+                    legacy_out = _run_graph_variant(
+                        method_key="kvi_triple_legacy",
+                        enable_kvi=True,
+                        execution_mode="legacy_triple_generate",
+                    )
+                    if "kvi" in methods:
+                        graph_outputs["kvi"] = legacy_out
+                        runtime_modes["kvi"] = "legacy_triple_generate"
+                    if "kvi_triple_legacy" in methods:
+                        graph_outputs["kvi_triple_legacy"] = legacy_out
+                        runtime_modes["kvi_triple_legacy"] = "legacy_triple_generate"
+
+                if "kvi_schema_writer" in methods:
+                    graph_outputs["kvi_schema_writer"] = _run_graph_variant(
+                        method_key="kvi_schema_writer",
+                        enable_kvi=True,
+                        execution_mode="schema_generate",
+                    )
+                    runtime_modes["kvi_schema_writer"] = "schema_generate"
+
+                if "kvi_schema_verifier" in methods:
+                    graph_outputs["kvi_schema_verifier"] = _run_graph_variant(
+                        method_key="kvi_schema_verifier",
+                        enable_kvi=True,
+                        execution_mode="schema_verify_then_evidence_write",
+                    )
+                    runtime_modes["kvi_schema_verifier"] = "schema_verify_then_evidence_write"
+
+                if "kvi_noinject_planner" in methods:
+                    graph_outputs["kvi_noinject_planner"] = _run_graph_variant(
+                        method_key="kvi_noinject_planner",
+                        enable_kvi=False,
+                        execution_mode="schema_plan_no_kv_generate",
+                    )
+                    runtime_modes["kvi_noinject_planner"] = "schema_plan_no_kv_generate"
 
             out_rag = None
             out_kv_prefix = None
@@ -1086,15 +1152,14 @@ def main() -> None:
             for m in methods:
                 pred = _pick_method_prediction(
                     method=m,
-                    out_gr_rag=out_gr_rag,
-                    out_gr_kvi=out_gr_kvi,
+                    graph_outputs=graph_outputs,
                     out_rag=out_rag,
                     out_kv_prefix=out_kv_prefix,
                 )
-                if is_truthfulqa and m == "kvi":
+                if is_truthfulqa and m in KVI_FAMILY_METHODS:
                     pred = _select_truthfulqa_kvi_prediction(
                         primary_pred=pred,
-                        out_gr_kvi=out_gr_kvi,
+                        out_gr_kvi=(graph_outputs.get(m) or {}),
                         out_kv_prefix=out_kv_prefix,
                     )
                 em = int(em_score_fn(pred, ex.answers))
@@ -1112,7 +1177,7 @@ def main() -> None:
                     method_fever_series[m].append(fv)
                 elif is_truthfulqa:
                     if str(args.truthfulqa_mc_mode) == "proxy":
-                        if m == "kvi":
+                        if m in KVI_FAMILY_METHODS:
                             inj = str((out_kv_prefix or {}).get("injected_answer") or "").strip()
                             if str(args.truthfulqa_kvi_mc1_answer) == "grounded":
                                 pred_m1 = _kvi_pred_for_truthfulqa_mc1_likelihood(pred)
@@ -1136,10 +1201,10 @@ def main() -> None:
                                 methods=methods,
                                 mc1_answer=str(args.truthfulqa_kvi_mc1_answer),
                             )
-                            if m == "kvi"
+                            if m in KVI_FAMILY_METHODS
                             else pred
                         )
-                        pred_mc2 = _kvi_pred_for_truthfulqa_mc1_likelihood(pred) if m == "kvi" else pred
+                        pred_mc2 = _kvi_pred_for_truthfulqa_mc1_likelihood(pred) if m in KVI_FAMILY_METHODS else pred
                         s1 = tqa_scorer.score_targets(ex.question, pred_mc1, ex.mc1_targets or {}) if tqa_scorer is not None else {"mc1": 0.0, "mc2": 0.0, "valid": 0.0}
                         s2 = tqa_scorer.score_targets(ex.question, pred_mc2, ex.mc2_targets or {}) if tqa_scorer is not None else {"mc1": 0.0, "mc2": 0.0, "valid": 0.0}
                         v1 = float(s1["mc1"])
@@ -1159,6 +1224,7 @@ def main() -> None:
                 "question": ex.question,
                 "gold_answers": ex.answers,
                 "predictions": preds,
+                "runtime_modes": runtime_modes,
                 "em": ems,
                 "f1": f1s,
                 "em_mode": str(args.em_mode),
@@ -1217,12 +1283,12 @@ def main() -> None:
         rows.append(row)
 
     significance: Dict[str, Any] = {}
-    if "kvi" in methods:
+    for kvi_key in [m for m in methods if m in KVI_FAMILY_METHODS]:
         for m in methods:
-            if m == "kvi":
+            if m == kvi_key:
                 continue
             pval = _paired_permutation_pvalue(
-                method_em_series["kvi"],
+                method_em_series[kvi_key],
                 method_em_series[m],
                 n_perm=int(args.permutation_samples),
                 seed=int(args.random_seed),
@@ -1231,15 +1297,16 @@ def main() -> None:
             if is_fever:
                 sig_entry["fever_label_p_value"] = float(
                     _paired_permutation_pvalue(
-                        method_fever_series["kvi"],
+                        method_fever_series[kvi_key],
                         method_fever_series[m],
                         n_perm=int(args.permutation_samples),
                         seed=int(args.random_seed),
                     )
                 )
-            significance[f"kvi_vs_{m}"] = sig_entry
+            significance[f"{kvi_key}_vs_{m}"] = sig_entry
 
     stats: Dict[str, Any] = {
+        "methods": list(methods),
         "em_mode": str(args.em_mode),
         "openqa_mode": bool(args.openqa_mode),
         "kvi_minimal_prompt": bool(args.kvi_minimal_prompt),
@@ -1266,14 +1333,14 @@ def main() -> None:
             "truthfulqa_mc1_proxy / truthfulqa_mc2_proxy are proxy metrics. "
             "likelihood_proxy mode scores options by average token log-prob under base model "
             "conditioned on question + method answer. Not identical to official TruthfulQA MC1/MC2 pipeline. "
-            "For method kvi: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened "
+            "For KVI-family methods: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened "
             "grounded KVI decode (diagnosis_result). Legacy `injected` uses full ANN injected_answer for KVI MC1 "
             "when kv_prefix is co-run. TruthfulQA can apply tuned KVI runtime overrides unless disabled "
             "for controlled ablations. Stored predictions / EM / F1 are unchanged."
         )
         stats["truthfulqa_mc_mode"] = str(args.truthfulqa_mc_mode)
         stats["truthfulqa_kvi_mc1_answer"] = str(args.truthfulqa_kvi_mc1_answer)
-        if "kvi" in methods and tqa_kvi_stats is not None:
+        if any(m in KVI_FAMILY_METHODS for m in methods) and tqa_kvi_stats is not None:
             stats["kvi_truthfulqa_runtime_overrides"] = {
                 **tqa_kvi_stats,
                 "kvi_max_new_tokens_effective": (
@@ -1384,4 +1451,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

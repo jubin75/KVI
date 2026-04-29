@@ -48,7 +48,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +187,100 @@ def _sanitize_two_stage_openqa_final(
     if t and not t.endswith((".", "?", "!")):
         t += "."
     return t
+
+
+def _schema_slots_from_evidence_schema(schema_obj: Any) -> Set[str]:
+    slots: Set[str] = set()
+    if schema_obj is None:
+        return slots
+    if getattr(schema_obj, "transmission_primary", None) or getattr(schema_obj, "transmission_secondary", None):
+        slots.add("transmission")
+    if getattr(schema_obj, "pathogenesis_notes", None):
+        slots.add("pathogenesis")
+        slots.add("mechanism")
+    return slots
+
+
+def _detect_triple_contradictions(selected_triples: List[dict]) -> List[dict]:
+    grouped: Dict[tuple[str, str], Set[str]] = {}
+    for item in selected_triples or []:
+        subj = str(item.get("subject") or "").strip()
+        rel = str(item.get("relation") or "").strip()
+        obj = str(item.get("object") or "").strip()
+        if not subj or not rel or not obj:
+            continue
+        grouped.setdefault((subj, rel), set()).add(obj)
+    out: List[dict] = []
+    for (subj, rel), objs in grouped.items():
+        if len(objs) > 1:
+            out.append(
+                {
+                    "subject": subj,
+                    "relation": rel,
+                    "objects": sorted(objs),
+                    "type": "multi_object_conflict",
+                }
+            )
+    return out
+
+
+def _build_schema_planning_report(
+    *,
+    query_text: str,
+    evidence_texts: List[str],
+    selected_triples: Optional[List[dict]] = None,
+    execution_mode: str = "",
+) -> Dict[str, Any]:
+    from src.runtime.slot_registry import (
+        adjudicable_slots_for_query,
+        classify_fact_types,
+        domain_prior_allowed_for_fact_types,
+        fact_types_need_schema_coverage,
+    )
+    from src.runtime.schema_answerability import infer_slots_from_query
+    from src.runtime.struct_slots import build_schema_from_evidence_texts, schema_to_injection_text
+
+    schema_obj = build_schema_from_evidence_texts(evidence_texts or [])
+    schema_text = schema_to_injection_text(schema_obj)
+    inferred_slots = set(infer_slots_from_query(query_text))
+    fact_types = set(classify_fact_types(query_text))
+    adjudicable = set(
+        adjudicable_slots_for_query(inferred_slots=inferred_slots, fact_types=fact_types)
+    )
+    answered_slots = _schema_slots_from_evidence_schema(schema_obj)
+    required_slots = adjudicable or set(fact_types_need_schema_coverage(fact_types))
+    uncovered_slots = set(required_slots) - set(answered_slots)
+    contradiction_flags = _detect_triple_contradictions(selected_triples or [])
+    evidence_count = len([x for x in evidence_texts if str(x).strip()])
+    coverage_den = max(1, len(required_slots) if required_slots else 1)
+    evidence_coverage_score = min(1.0, float(evidence_count) / float(coverage_den))
+    fail_closed = bool(required_slots) and bool(uncovered_slots) and not bool(
+        domain_prior_allowed_for_fact_types(fact_types)
+    )
+    abstain_recommended = fail_closed or evidence_count <= 0
+    return {
+        "execution_mode": execution_mode,
+        "schema_backend": "evidence_derived_prompt_schema",
+        "schema_text": schema_text,
+        "fact_types": sorted(fact_types),
+        "inferred_slots": sorted(inferred_slots),
+        "adjudicable_slots": sorted(adjudicable),
+        "answered_slots": sorted(answered_slots),
+        "required_slots": sorted(required_slots),
+        "uncovered_slots": sorted(uncovered_slots),
+        "contradiction_flags": contradiction_flags,
+        "contradiction_flag_count": len(contradiction_flags),
+        "evidence_count": evidence_count,
+        "evidence_coverage_score": round(evidence_coverage_score, 4),
+        "domain_prior_allowed": bool(domain_prior_allowed_for_fact_types(fact_types)),
+        "fail_closed": bool(fail_closed),
+        "abstain_recommended": bool(abstain_recommended),
+        "abstain_reason": (
+            "schema_uncovered_and_domain_prior_forbidden"
+            if fail_closed
+            else ("no_evidence" if evidence_count <= 0 else "")
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +567,23 @@ def main() -> None:
         help="If --enable_kvi in openqa_mode (non-FEVER): stage-1 draft uses KV injection without evidence text; "
         "stage-2 final answer uses stage-1 draft + evidence prompt without KV injection.",
     )
+    p.add_argument(
+        "--kvi_execution_mode",
+        default="legacy_triple_generate",
+        choices=[
+            "legacy_triple_generate",
+            "schema_generate",
+            "schema_verify_then_evidence_write",
+            "schema_plan_no_kv_generate",
+        ],
+        help=(
+            "Execution mode for KVI-family runs. "
+            "legacy_triple_generate = current triple-KV generate path; "
+            "schema_generate = reasoning-oriented path with schema guidance; "
+            "schema_verify_then_evidence_write = schema planning/verifying + evidence-only final writer; "
+            "schema_plan_no_kv_generate = planning-only path without final KV generation."
+        ),
+    )
     p.add_argument("--audit_jsonl", default="", help="Optional JSONL path to append retrieval/DRM/prompt audit records.")
     p.add_argument("--audit_query_id", default="", help="Optional query/example id for audit joins.")
     p.add_argument("--audit_method_key", default="", help="Optional method key tag in audit record (e.g., graphrag, kvi).")
@@ -602,8 +713,10 @@ def main() -> None:
         }, ensure_ascii=False))
         sys.exit(0)
 
+    execution_mode = str(getattr(args, "kvi_execution_mode", "legacy_triple_generate") or "legacy_triple_generate").strip().lower()
+
     # ---- 4. Load Triple KV Bank (only if --enable_kvi) ----
-    kv_injection_debug: dict = {"enabled": False}
+    kv_injection_debug: dict = {"enabled": False, "execution_mode": execution_mode}
     triple_kv_manifest = None
     triple_kv_cache_dict = None
     triple_kvbank_dir = Path(args.triple_kvbank_dir) if args.triple_kvbank_dir else None
@@ -771,11 +884,30 @@ def main() -> None:
         ranked_evidence_texts = ranked_evidence_texts[:max_oe]
     evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
 
+    schema_planning_report = _build_schema_planning_report(
+        query_text=args.prompt,
+        evidence_texts=ranked_evidence_texts,
+        selected_triples=list(kv_injection_debug.get("selected_triples") or []),
+        execution_mode=execution_mode,
+    )
+    schema_summary_text = str(schema_planning_report.get("schema_text") or "").strip()
+    evidence_only_writer_mode = execution_mode in {
+        "schema_verify_then_evidence_write",
+        "schema_plan_no_kv_generate",
+    }
+    planner_only_mode = execution_mode == "schema_plan_no_kv_generate"
+    writer_uses_kv = bool(args.enable_kvi) and execution_mode in {
+        "legacy_triple_generate",
+        "schema_generate",
+    }
+
     use_kvi_minimal = (
         bool(getattr(args, "kvi_minimal_prompt", False))
         and bool(args.enable_kvi)
         and assembled_kv is not None
     )
+    if evidence_only_writer_mode:
+        use_kvi_minimal = False
 
     if use_openqa:
         prompt_parts: list[str] = []
@@ -784,6 +916,7 @@ def main() -> None:
             and bool(args.enable_kvi)
             and assembled_kv is not None
             and not fever_claim_qa
+            and execution_mode == "legacy_triple_generate"
         )
         if kvprefix_style_prompt:
             prompt_parts.append(f"Question: {args.prompt}")
@@ -799,10 +932,12 @@ def main() -> None:
                 "and do not invent unsupported facts."
             )
         else:
-        # Keep entity context whenever present (including KVI minimal). Stripping
-        # entity+evidence while KV is only in past_key_values caused degenerate
-        # outputs on MedHop official (kvituned sweep).
-            if entity_context:
+            # Keep entity context whenever present for legacy KVI/GraphRAG.
+            # In evidence-only writer mode, the final answer must be attributable
+            # to evidence sentences only, so entity context is withheld.
+            if execution_mode == "schema_generate" and schema_summary_text:
+                prompt_parts.append(f"Schema guidance:\n{schema_summary_text}")
+            if entity_context and not evidence_only_writer_mode:
                 prompt_parts.append(f"Entity context:\n{entity_context}")
             if not use_kvi_minimal:
                 prompt_parts.append(f"Evidence:\n{evidence_block}")
@@ -829,9 +964,16 @@ def main() -> None:
                         "Output only one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
                     )
             else:
+                abstain_hint = ""
+                if bool(schema_planning_report.get("abstain_recommended")):
+                    abstain_hint = (
+                        "The evidence may be insufficient; if so, answer with one short sentence stating insufficient evidence. "
+                    )
                 prompt_parts.append(
                     "Answer concisely with the final answer only when possible (entity, yes/no, or short phrase). "
-                    "Use only the evidence and entity context above; do not invent facts or cite unseen sources. "
+                    + ("Use only the evidence above; " if evidence_only_writer_mode else "Use only the evidence and entity context above; ")
+                    + abstain_hint
+                    + "Do not invent facts or cite unseen sources. "
                     "Do not output markdown, images, or code. "
                     "Start with the direct factual answer in one sentence, then stop. "
                     "If the evidence is insufficient to answer, say so in one short sentence."
@@ -843,6 +985,13 @@ def main() -> None:
                         "Give one direct factual sentence first and avoid hedging filler. "
                         "Do not invent facts; do not use markdown or images."
                     )
+                elif evidence_only_writer_mode:
+                    system_msg = (
+                        "You are a strict evidence-grounded writer. "
+                        "Use only the provided evidence. "
+                        "Do not add prior knowledge, entity-background facts, or unsupported inferences. "
+                        "If evidence is insufficient, say so briefly in plain text."
+                    )
                 else:
                     system_msg = (
                         "You are a careful assistant for open-domain question answering. "
@@ -853,7 +1002,9 @@ def main() -> None:
             full_prompt = "\n\n".join(prompt_parts)
     elif use_kvi_minimal:
         prompt_parts = []
-        if entity_context:
+        if execution_mode == "schema_generate" and schema_summary_text:
+            prompt_parts.append(schema_summary_text)
+        if entity_context and not evidence_only_writer_mode:
             prompt_parts.append(entity_context)
         prompt_parts.append(f"### 问题\n{args.prompt}")
         prompt_parts.append(
@@ -865,29 +1016,40 @@ def main() -> None:
         system_msg = "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
     else:
         prompt_parts = []
-        if entity_context:
+        if execution_mode == "schema_generate" and schema_summary_text:
+            prompt_parts.append(f"### Schema Guidance\n{schema_summary_text}")
+        if entity_context and not evidence_only_writer_mode:
             prompt_parts.append(entity_context)
         prompt_parts.append(f"### 参考证据\n{evidence_block}")
         prompt_parts.append(f"### 问题\n{args.prompt}")
         prompt_parts.append(
             "### 要求\n"
-            "请根据上述实体背景和参考证据回答问题。"
-            "以参考证据为主，必要时可结合医学常识补充。"
-            "使用中文简洁作答。"
+            + (
+                "请仅根据参考证据回答问题。"
+                if evidence_only_writer_mode
+                else "请根据上述实体背景和参考证据回答问题。以参考证据为主，必要时可结合医学常识补充。"
+            )
+            + "使用中文简洁作答。"
         )
         full_prompt = "\n\n".join(prompt_parts)
-        system_msg = "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
+        system_msg = (
+            "你是一个严格依据证据作答的助手。只允许根据给定证据回答；证据不足时明确说明。"
+            if evidence_only_writer_mode
+            else "你是一个医学专业助手。根据提供的参考资料回答问题，必要时可结合医学常识。"
+        )
 
     if bool(getattr(args, "audit_only", False)):
         result_json = {
             "diagnosis_result": "",
             "diagnosis_result_raw": "",
             "base_llm_result": "",
+            "kvi_execution_mode": execution_mode,
             "graph_debug": gr.debug,
             "evidence_texts": evidence_texts,
             "evidence_source": evidence_source,
             "entity_context": entity_context,
             "intent": intent,
+            "schema_planning_report": schema_planning_report,
             "grounding_report": {},
             "kv_injection_debug": kv_injection_debug,
             "verbatim_evidence": verbatim_evidence,
@@ -957,6 +1119,7 @@ def main() -> None:
                 "query_id": str(getattr(args, "audit_query_id", "") or ""),
                 "method_key": str(getattr(args, "audit_method_key", "") or ("kvi" if args.enable_kvi else "graphrag")),
                 "enable_kvi": bool(args.enable_kvi),
+                "kvi_execution_mode": execution_mode,
                 "kvi_minimal_prompt": bool(
                     getattr(args, "kvi_minimal_prompt", False)
                     and bool(args.enable_kvi)
@@ -981,6 +1144,14 @@ def main() -> None:
                     "prompt_contains_evidence_count": prompt_contains,
                     "prompt_contains_evidence_ratio": round(prompt_ratio, 4),
                     "prompt_len_chars": len(full_prompt),
+                },
+                "schema_planning": {
+                    "fact_types": schema_planning_report.get("fact_types"),
+                    "required_slots": schema_planning_report.get("required_slots"),
+                    "answered_slots": schema_planning_report.get("answered_slots"),
+                    "uncovered_slots": schema_planning_report.get("uncovered_slots"),
+                    "abstain_recommended": schema_planning_report.get("abstain_recommended"),
+                    "contradiction_flag_count": schema_planning_report.get("contradiction_flag_count"),
                 },
                 "oracle_hits": oracle_hits,
             }
@@ -1023,6 +1194,7 @@ def main() -> None:
         and bool(getattr(args, "openqa_mode", False))
         and not fever_claim_qa
         and assembled_kv is not None
+        and execution_mode == "legacy_triple_generate"
     )
     if two_stage_enabled:
         full_prompt = (
@@ -1054,7 +1226,14 @@ def main() -> None:
 
     # Inject triple KV as past_key_values if available.
     # Transformers 5.x requires Cache object (legacy tuple is rejected).
-    disable_kv_injection = bool(getattr(args, "kvi_disable_kv_injection", False)) and bool(args.enable_kvi)
+    disable_kv_injection = (
+        (bool(getattr(args, "kvi_disable_kv_injection", False)) and bool(args.enable_kvi))
+        or not bool(writer_uses_kv)
+        or bool(planner_only_mode)
+    )
+    kv_injection_debug["writer_uses_kv"] = bool(
+        assembled_kv is not None and not disable_kv_injection and bool(writer_uses_kv)
+    )
     if assembled_kv is not None and not disable_kv_injection:
         pkv_for_generate = assembled_kv
         try:
@@ -1247,11 +1426,13 @@ def main() -> None:
         "diagnosis_result_raw": answer,
         "diagnosis_stage1_draft": stage1_draft if two_stage_enabled else "",
         "base_llm_result": base_answer,
+        "kvi_execution_mode": execution_mode,
         "graph_debug": gr.debug,
         "evidence_texts": evidence_texts,
         "evidence_source": evidence_source,
         "entity_context": entity_context,
         "intent": intent,
+        "schema_planning_report": schema_planning_report,
         "grounding_report": grounding,
         "kv_injection_debug": kv_injection_debug,
         "verbatim_evidence": verbatim_evidence,
@@ -1319,6 +1500,7 @@ def main() -> None:
             "query_id": str(getattr(args, "audit_query_id", "") or ""),
             "method_key": str(getattr(args, "audit_method_key", "") or ("kvi" if args.enable_kvi else "graphrag")),
             "enable_kvi": bool(args.enable_kvi),
+            "kvi_execution_mode": execution_mode,
             "kvi_minimal_prompt": bool(
                 getattr(args, "kvi_minimal_prompt", False)
                 and bool(args.enable_kvi)
@@ -1343,6 +1525,14 @@ def main() -> None:
                 "prompt_contains_evidence_count": prompt_contains,
                 "prompt_contains_evidence_ratio": round(prompt_ratio, 4),
                 "prompt_len_chars": len(full_prompt),
+            },
+            "schema_planning": {
+                "fact_types": schema_planning_report.get("fact_types"),
+                "required_slots": schema_planning_report.get("required_slots"),
+                "answered_slots": schema_planning_report.get("answered_slots"),
+                "uncovered_slots": schema_planning_report.get("uncovered_slots"),
+                "abstain_recommended": schema_planning_report.get("abstain_recommended"),
+                "contradiction_flag_count": schema_planning_report.get("contradiction_flag_count"),
             },
             "oracle_hits": oracle_hits,
         }

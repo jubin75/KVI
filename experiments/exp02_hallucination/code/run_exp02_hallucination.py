@@ -86,6 +86,19 @@ def main() -> None:
     p.add_argument("--fever_max", type=int, default=1000)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument(
+        "--methods",
+        default="graphrag,kvi_triple_legacy,kvi_schema_verifier,kvi_noinject_planner",
+        help=(
+            "Comma list forwarded to Exp01 methods. "
+            "Recommended Exp02-vNext default: graphrag,kvi_triple_legacy,kvi_schema_verifier,kvi_noinject_planner"
+        ),
+    )
+    p.add_argument(
+        "--result_tag",
+        default="vnext_qwen25_7b",
+        help="Suffix for dataset result directories, e.g. truthfulqa_<result_tag>/summary.json",
+    )
+    p.add_argument(
         "--only_datasets",
         default="truthfulqa,fever",
         help="Comma list: truthfulqa, fever (subset to run build+eval for)",
@@ -116,6 +129,8 @@ def main() -> None:
                 "reuse_artifacts": bool(args.reuse_artifacts),
                 "ann_via_resident": bool(args.ann_via_resident),
                 "resume_eval": bool(args.resume_eval),
+                "methods": str(args.methods),
+                "result_tag": str(args.result_tag),
             },
             ensure_ascii=False,
         ),
@@ -272,7 +287,7 @@ def main() -> None:
                 root,
             )
 
-        out_dir = res / f"{name}_fullmethods_qwen25_7b"
+        out_dir = res / f"{name}_{str(args.result_tag)}"
         cmd = [
             str(root / "KVI" / "bin" / "python"),
             "-u",
@@ -300,7 +315,7 @@ def main() -> None:
             "--ann_sidecar_dir",
             str(ds_art / "kvbank_sentences/pattern_sidecar"),
             "--methods",
-            "llm,rag,graphrag,kv_prefix,kvi",
+            str(args.methods),
             "--out_dir",
             str(out_dir),
             "--timeout_s",
@@ -328,7 +343,7 @@ def main() -> None:
     # Allow partial runs: merge summaries from disk for datasets not in this invocation.
     for ds_key in ("truthfulqa", "fever"):
         if ds_key not in run_summaries:
-            summ_path = res / f"{ds_key}_fullmethods_qwen25_7b/summary.json"
+            summ_path = res / f"{ds_key}_{str(args.result_tag)}/summary.json"
             if summ_path.exists():
                 run_summaries[ds_key] = _load_summary(summ_path)
 
@@ -558,4 +573,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
