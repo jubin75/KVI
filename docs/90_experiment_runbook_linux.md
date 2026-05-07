@@ -43,9 +43,6 @@ export WORK_DIR="/home/jb/KVI/_exp_prod"
 export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
-# DeepSeek (knowledge density filtering)
-export DEEPSEEK_API_KEY="sk-bc1bf3f7edd344c69ca74b2279340434"
-```
 
 ### 1.1.1 (Highly Recommended) Topic-based Model: Use Separate KBs for Datasets Moving Forward
 
