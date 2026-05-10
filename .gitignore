@@ -7,8 +7,8 @@ models/
 # Topic runtime artifacts (if present under repo topics)
 config/topics/**/evidence_sets/
 
-# --- Virtual environments (do not commit) ---
-KVI/
+# --- Virtual environments (do not commit; recreate with python -m venv) ---
+/KVI/
 .venv/
 venv/
 env/
