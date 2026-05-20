@@ -32,6 +32,19 @@ sudo apt-get update
 sudo apt-get install -y tesseract-ocr
 ```
 
+### 0.3 Local API keys (gitignored; never commit)
+
+DeepSeek filtering scripts read `DEEPSEEK_API_KEY` from the environment. Store the key in a local `.env` file (already listed in `.gitignore`):
+
+```bash
+cd /home/jb/KVI
+cp .env.example .env
+# Edit .env: set DEEPSEEK_API_KEY=sk-... (your key; file stays local only)
+set -a && source .env && set +a
+```
+
+Re-run `source .env` (with `set -a` / `set +a` as above) in each new shell before pipeline steps that call DeepSeek.
+
 ## 1) Data Construction (Production Recommended): PDF → raw_chunks(4096) → blocks(256) → KVBank
 
 ### 1.1 Set Experiment Parameters
@@ -43,6 +56,9 @@ export WORK_DIR="/home/jb/KVI/_exp_prod"
 export BASE_LLM="Qwen/Qwen2.5-7B-Instruct"
 export DOMAIN_ENCODER="sentence-transformers/all-MiniLM-L6-v2"
 
+# DeepSeek (knowledge density filtering) — see §0.3; key lives in gitignored .env
+set -a && source .env && set +a
+```
 
 ### 1.1.1 (Highly Recommended) Topic-based Model: Use Separate KBs for Datasets Moving Forward
 
