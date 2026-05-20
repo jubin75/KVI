@@ -1,0 +1,182 @@
+{
+  "dataset": "FEVER",
+  "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/fever_eval.jsonl",
+  "n": 100,
+  "methods": [
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 67.0,
+      "em_ci95_lo": 58.0,
+      "em_ci95_hi": 76.0,
+      "f1_mean": 0.605,
+      "correct": 67,
+      "total": 100,
+      "fever_label_accuracy": 66.0,
+      "fever_label_ci95_lo": 57.0,
+      "fever_label_ci95_hi": 75.0,
+      "fever_label_correct": 66
+    },
+    {
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
+      "retrieval": "graph",
+      "injection": "KV + prompt (legacy)",
+      "em": 88.0,
+      "em_ci95_lo": 82.0,
+      "em_ci95_hi": 94.0,
+      "f1_mean": 0.88,
+      "correct": 88,
+      "total": 100,
+      "fever_label_accuracy": 88.0,
+      "fever_label_ci95_lo": 82.0,
+      "fever_label_ci95_hi": 94.0,
+      "fever_label_correct": 88
+    },
+    {
+      "method_key": "kvi_schema_writer",
+      "method": "KVI Schema Writer",
+      "retrieval": "graph + schema",
+      "injection": "schema-guided KV + prompt",
+      "em": 77.0,
+      "em_ci95_lo": 68.0,
+      "em_ci95_hi": 85.0,
+      "f1_mean": 0.77,
+      "correct": 77,
+      "total": 100,
+      "fever_label_accuracy": 77.0,
+      "fever_label_ci95_lo": 68.0,
+      "fever_label_ci95_hi": 85.0,
+      "fever_label_correct": 77
+    },
+    {
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "retrieval": "graph + schema",
+      "injection": "schema plan + evidence writer",
+      "em": 71.0,
+      "em_ci95_lo": 62.0,
+      "em_ci95_hi": 79.0,
+      "f1_mean": 0.6308,
+      "correct": 71,
+      "total": 100,
+      "fever_label_accuracy": 67.0,
+      "fever_label_ci95_lo": 58.0,
+      "fever_label_ci95_hi": 75.0,
+      "fever_label_correct": 67
+    },
+    {
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "retrieval": "graph + schema",
+      "injection": "planner only",
+      "em": 71.0,
+      "em_ci95_lo": 62.0,
+      "em_ci95_hi": 79.0,
+      "f1_mean": 0.6308,
+      "correct": 71,
+      "total": 100,
+      "fever_label_accuracy": 67.0,
+      "fever_label_ci95_lo": 58.0,
+      "fever_label_ci95_hi": 75.0,
+      "fever_label_correct": 67
+    }
+  ],
+  "paths": {
+    "predictions": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_readme_daemon_12069f0b6dbdd1c2_source_id_mx12_mn0p04/predictions.jsonl",
+    "results_md": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_readme_daemon_12069f0b6dbdd1c2_source_id_mx12_mn0p04/results.md",
+    "results_csv": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_readme_daemon_12069f0b6dbdd1c2_source_id_mx12_mn0p04/results.csv"
+  },
+  "statistics": {
+    "methods": [
+      "graphrag",
+      "kvi_triple_legacy",
+      "kvi_schema_writer",
+      "kvi_schema_verifier",
+      "kvi_noinject_planner"
+    ],
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "truthfulqa_kvi_tuned_overrides": true,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_triple_legacy_vs_graphrag": {
+        "p_value": 0.0004997501249375312,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_triple_legacy_vs_kvi_schema_writer": {
+        "p_value": 0.009995002498750625,
+        "fever_label_p_value": 0.009995002498750625
+      },
+      "kvi_triple_legacy_vs_kvi_schema_verifier": {
+        "p_value": 0.0029985007496251873,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_triple_legacy_vs_kvi_noinject_planner": {
+        "p_value": 0.0029985007496251873,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_schema_writer_vs_graphrag": {
+        "p_value": 0.13793103448275862,
+        "fever_label_p_value": 0.09745127436281859
+      },
+      "kvi_schema_writer_vs_kvi_triple_legacy": {
+        "p_value": 0.009995002498750625,
+        "fever_label_p_value": 0.009995002498750625
+      },
+      "kvi_schema_writer_vs_kvi_schema_verifier": {
+        "p_value": 0.37681159420289856,
+        "fever_label_p_value": 0.11444277861069466
+      },
+      "kvi_schema_writer_vs_kvi_noinject_planner": {
+        "p_value": 0.37681159420289856,
+        "fever_label_p_value": 0.11444277861069466
+      },
+      "kvi_schema_verifier_vs_graphrag": {
+        "p_value": 0.3568215892053973,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_schema_verifier_vs_kvi_triple_legacy": {
+        "p_value": 0.0029985007496251873,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_schema_verifier_vs_kvi_schema_writer": {
+        "p_value": 0.37681159420289856,
+        "fever_label_p_value": 0.11444277861069466
+      },
+      "kvi_schema_verifier_vs_kvi_noinject_planner": {
+        "p_value": 1.0,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_graphrag": {
+        "p_value": 0.3568215892053973,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_kvi_triple_legacy": {
+        "p_value": 0.0029985007496251873,
+        "fever_label_p_value": 0.0004997501249375312
+      },
+      "kvi_noinject_planner_vs_kvi_schema_writer": {
+        "p_value": 0.37681159420289856,
+        "fever_label_p_value": 0.11444277861069466
+      },
+      "kvi_noinject_planner_vs_kvi_schema_verifier": {
+        "p_value": 1.0,
+        "fever_label_p_value": 1.0
+      }
+    },
+    "fever_label_metric": "First match in output of SUPPORTS | REFUTES | NOT ENOUGH INFO (case-insensitive); compare to gold label. Closer to FEVER shared-task label accuracy than relaxed EM."
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "dataset": "TRUTHFULQA",
+  "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/truthfulqa_eval.jsonl",
+  "n": 25,
+  "methods": [
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.2087,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.76,
+      "truthfulqa_mc2_proxy": 0.5857,
+      "truthfulqa_mc_valid_n": 25
+    },
+    {
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
+      "retrieval": "graph",
+      "injection": "KV + prompt (legacy)",
+      "em": 0.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 0.0,
+      "f1_mean": 0.34,
+      "correct": 0,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.6,
+      "truthfulqa_mc2_proxy": 0.5065,
+      "truthfulqa_mc_valid_n": 25
+    },
+    {
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "retrieval": "graph + schema",
+      "injection": "schema plan + evidence writer",
+      "em": 4.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 12.0,
+      "f1_mean": 0.3036,
+      "correct": 1,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.6,
+      "truthfulqa_mc2_proxy": 0.5392,
+      "truthfulqa_mc_valid_n": 25
+    },
+    {
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "retrieval": "graph + schema",
+      "injection": "planner only",
+      "em": 8.0,
+      "em_ci95_lo": 0.0,
+      "em_ci95_hi": 20.0,
+      "f1_mean": 0.3828,
+      "correct": 2,
+      "total": 25,
+      "truthfulqa_mc1_proxy": 0.68,
+      "truthfulqa_mc2_proxy": 0.5417,
+      "truthfulqa_mc_valid_n": 25
+    }
+  ],
+  "paths": {
+    "predictions": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_vnext_smoke25_20260429_171627/predictions.jsonl",
+    "results_md": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_vnext_smoke25_20260429_171627/results.md",
+    "results_csv": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/truthfulqa_vnext_smoke25_20260429_171627/results.csv"
+  },
+  "statistics": {
+    "methods": [
+      "graphrag",
+      "kvi_triple_legacy",
+      "kvi_schema_verifier",
+      "kvi_noinject_planner"
+    ],
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "truthfulqa_kvi_tuned_overrides": true,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_triple_legacy_vs_graphrag": {
+        "p_value": 0.5112443778110944
+      },
+      "kvi_triple_legacy_vs_kvi_schema_verifier": {
+        "p_value": 1.0
+      },
+      "kvi_triple_legacy_vs_kvi_noinject_planner": {
+        "p_value": 0.5147426286856571
+      },
+      "kvi_schema_verifier_vs_graphrag": {
+        "p_value": 1.0
+      },
+      "kvi_schema_verifier_vs_kvi_triple_legacy": {
+        "p_value": 1.0
+      },
+      "kvi_schema_verifier_vs_kvi_noinject_planner": {
+        "p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_graphrag": {
+        "p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_kvi_triple_legacy": {
+        "p_value": 0.5147426286856571
+      },
+      "kvi_noinject_planner_vs_kvi_schema_verifier": {
+        "p_value": 1.0
+      }
+    },
+    "truthfulqa_mc_note": "truthfulqa_mc1_proxy / truthfulqa_mc2_proxy are proxy metrics. likelihood_proxy mode scores options by average token log-prob under base model conditioned on question + method answer. Not identical to official TruthfulQA MC1/MC2 pipeline. For KVI-family methods: MC1/MC2 default (--truthfulqa_kvi_mc1_answer grounded) both condition on a shortened grounded KVI decode (diagnosis_result). Legacy `injected` uses full ANN injected_answer for KVI MC1 when kv_prefix is co-run. TruthfulQA can apply tuned KVI runtime overrides unless disabled for controlled ablations. Stored predictions / EM / F1 are unchanged.",
+    "truthfulqa_mc_mode": "likelihood_proxy",
+    "truthfulqa_kvi_mc1_answer": "grounded",
+    "kvi_truthfulqa_runtime_overrides": {
+      "kvi_max_kv_triples": 4,
+      "kvi_drm_threshold": 0.05,
+      "kvi_top_k_relations": 4,
+      "truthfulqa_kvi_minimal_prompt": true,
+      "truthfulqa_kvi_reconcile": true,
+      "kvi_max_new_tokens_effective": 96,
+      "kvi_reconcile_no_kv_decode_effective": true,
+      "kvi_mc_likelihood_shorten_max_chars": 384,
+      "kvi_use_grounded_answer_for_eval": true
+    }
+  }
+}

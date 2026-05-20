@@ -1,0 +1,137 @@
+{
+  "dataset": "FEVER",
+  "dataset_path": "/home/zd/dev/KVI/experiments/exp02_hallucination/data/fever_eval.jsonl",
+  "n": 50,
+  "methods": [
+    {
+      "method_key": "graphrag",
+      "method": "GraphRAG",
+      "retrieval": "graph",
+      "injection": "prompt",
+      "em": 68.0,
+      "em_ci95_lo": 54.0,
+      "em_ci95_hi": 80.0,
+      "f1_mean": 0.6433,
+      "correct": 34,
+      "total": 50,
+      "fever_label_accuracy": 68.0,
+      "fever_label_ci95_lo": 54.0,
+      "fever_label_ci95_hi": 80.0,
+      "fever_label_correct": 34
+    },
+    {
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
+      "retrieval": "graph",
+      "injection": "KV + prompt (legacy)",
+      "em": 90.0,
+      "em_ci95_lo": 82.0,
+      "em_ci95_hi": 98.0,
+      "f1_mean": 0.9,
+      "correct": 45,
+      "total": 50,
+      "fever_label_accuracy": 90.0,
+      "fever_label_ci95_lo": 82.0,
+      "fever_label_ci95_hi": 98.0,
+      "fever_label_correct": 45
+    },
+    {
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "retrieval": "graph + schema",
+      "injection": "schema plan + evidence writer",
+      "em": 76.0,
+      "em_ci95_lo": 64.0,
+      "em_ci95_hi": 86.0,
+      "f1_mean": 0.7017,
+      "correct": 38,
+      "total": 50,
+      "fever_label_accuracy": 70.0,
+      "fever_label_ci95_lo": 56.0,
+      "fever_label_ci95_hi": 82.0,
+      "fever_label_correct": 35
+    },
+    {
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "retrieval": "graph + schema",
+      "injection": "planner only",
+      "em": 76.0,
+      "em_ci95_lo": 64.0,
+      "em_ci95_hi": 86.0,
+      "f1_mean": 0.7017,
+      "correct": 38,
+      "total": 50,
+      "fever_label_accuracy": 70.0,
+      "fever_label_ci95_lo": 56.0,
+      "fever_label_ci95_hi": 82.0,
+      "fever_label_correct": 35
+    }
+  ],
+  "paths": {
+    "predictions": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_vnext_smoke50_20260430_150305/predictions.jsonl",
+    "results_md": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_vnext_smoke50_20260430_150305/results.md",
+    "results_csv": "/home/zd/dev/KVI/experiments/exp02_hallucination/results/fever_vnext_smoke50_20260430_150305/results.csv"
+  },
+  "statistics": {
+    "methods": [
+      "graphrag",
+      "kvi_triple_legacy",
+      "kvi_schema_verifier",
+      "kvi_noinject_planner"
+    ],
+    "em_mode": "relaxed",
+    "openqa_mode": true,
+    "kvi_minimal_prompt": false,
+    "kvi_max_kv_triples": 3,
+    "kvi_drm_threshold": 0.05,
+    "kvi_top_k_relations": 2,
+    "kvi_reconcile_no_kv_decode": false,
+    "truthfulqa_kvi_tuned_overrides": true,
+    "ci_method": "bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_samples": 1000,
+    "significance_method": "paired_permutation",
+    "permutation_samples": 2000,
+    "random_seed": 42,
+    "significance": {
+      "kvi_triple_legacy_vs_graphrag": {
+        "p_value": 0.022988505747126436,
+        "fever_label_p_value": 0.022988505747126436
+      },
+      "kvi_triple_legacy_vs_kvi_schema_verifier": {
+        "p_value": 0.14492753623188406,
+        "fever_label_p_value": 0.0384807596201899
+      },
+      "kvi_triple_legacy_vs_kvi_noinject_planner": {
+        "p_value": 0.14492753623188406,
+        "fever_label_p_value": 0.0384807596201899
+      },
+      "kvi_schema_verifier_vs_graphrag": {
+        "p_value": 0.11544227886056972,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_schema_verifier_vs_kvi_triple_legacy": {
+        "p_value": 0.14492753623188406,
+        "fever_label_p_value": 0.0384807596201899
+      },
+      "kvi_schema_verifier_vs_kvi_noinject_planner": {
+        "p_value": 1.0,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_graphrag": {
+        "p_value": 0.11544227886056972,
+        "fever_label_p_value": 1.0
+      },
+      "kvi_noinject_planner_vs_kvi_triple_legacy": {
+        "p_value": 0.14492753623188406,
+        "fever_label_p_value": 0.0384807596201899
+      },
+      "kvi_noinject_planner_vs_kvi_schema_verifier": {
+        "p_value": 1.0,
+        "fever_label_p_value": 1.0
+      }
+    },
+    "fever_label_metric": "First match in output of SUPPORTS | REFUTES | NOT ENOUGH INFO (case-insensitive); compare to gold label. Closer to FEVER shared-task label accuracy than relaxed EM."
+  }
+}

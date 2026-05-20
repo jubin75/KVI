@@ -1,0 +1,17 @@
+Exp04 paper figures (PDF + PNG alongside each stem)
+out_dir=/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703
+
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig01_attention_mass_vs_layer.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig02a_heatmap_rag_evidence.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig02b_heatmap_kvi_same_evidence.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig02c_heatmap_kvi_kv_prefix.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig03_cross_region_kv_prefix_minus_rag_evidence.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig03_paired_evidence_delta_kvi_minus_rag.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig04_demo_mass_example0.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig04_demo_mass_example1.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig05_logit_gain.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig06_paired_evidence_top_heads.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig06_supplement_cross_region_top_heads.pdf
+/home/zd/dev/KVI/experiments/exp04_attention_hotmap/results/run_20260506_220703/fig07_trajectory_paired_evidence.pdf
+
+Total: 12 figure stems (each has .pdf and .png).

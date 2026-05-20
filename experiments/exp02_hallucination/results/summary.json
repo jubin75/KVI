@@ -3,123 +3,123 @@
   "rows": [
     {
       "dataset": "truthfulqa",
-      "method_key": "llm",
-      "method": "LLM",
-      "metric_source": "mc1_proxy",
-      "score_percent": 100.0,
-      "hallucination_rate": 0.0
-    },
-    {
-      "dataset": "truthfulqa",
-      "method_key": "llm",
-      "method": "LLM",
-      "metric_source": "mc2_proxy",
-      "score_percent": 66.86,
-      "hallucination_rate": 33.14
-    },
-    {
-      "dataset": "truthfulqa",
-      "method_key": "rag",
-      "method": "RAG",
-      "metric_source": "mc1_proxy",
-      "score_percent": 100.0,
-      "hallucination_rate": 0.0
-    },
-    {
-      "dataset": "truthfulqa",
-      "method_key": "rag",
-      "method": "RAG",
-      "metric_source": "mc2_proxy",
-      "score_percent": 73.07,
-      "hallucination_rate": 26.93
-    },
-    {
-      "dataset": "truthfulqa",
       "method_key": "graphrag",
       "method": "GraphRAG",
       "metric_source": "mc1_proxy",
-      "score_percent": 100.0,
-      "hallucination_rate": 0.0
+      "score_percent": 62.0,
+      "hallucination_rate": 38.0
     },
     {
       "dataset": "truthfulqa",
       "method_key": "graphrag",
       "method": "GraphRAG",
       "metric_source": "mc2_proxy",
-      "score_percent": 78.06,
-      "hallucination_rate": 21.94
+      "score_percent": 53.19,
+      "hallucination_rate": 46.81
     },
     {
       "dataset": "truthfulqa",
-      "method_key": "kv_prefix",
-      "method": "KV Prefix",
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
       "metric_source": "mc1_proxy",
-      "score_percent": 100.0,
-      "hallucination_rate": 0.0
+      "score_percent": 45.0,
+      "hallucination_rate": 55.0
     },
     {
       "dataset": "truthfulqa",
-      "method_key": "kv_prefix",
-      "method": "KV Prefix",
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
       "metric_source": "mc2_proxy",
-      "score_percent": 63.45,
-      "hallucination_rate": 36.55
+      "score_percent": 47.06,
+      "hallucination_rate": 52.94
     },
     {
       "dataset": "truthfulqa",
-      "method_key": "kvi",
-      "method": "KVI",
+      "method_key": "kvi_schema_writer",
+      "method": "KVI Schema Writer",
       "metric_source": "mc1_proxy",
-      "score_percent": 100.0,
-      "hallucination_rate": 0.0
+      "score_percent": 52.0,
+      "hallucination_rate": 48.0
     },
     {
       "dataset": "truthfulqa",
-      "method_key": "kvi",
-      "method": "KVI",
+      "method_key": "kvi_schema_writer",
+      "method": "KVI Schema Writer",
       "metric_source": "mc2_proxy",
-      "score_percent": 69.2,
-      "hallucination_rate": 30.8
+      "score_percent": 50.92,
+      "hallucination_rate": 49.08
     },
     {
-      "dataset": "fever",
-      "method_key": "llm",
-      "method": "LLM",
-      "metric_source": "fever_label_accuracy",
-      "score_percent": 30.9,
-      "hallucination_rate": 69.1
+      "dataset": "truthfulqa",
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "metric_source": "mc1_proxy",
+      "score_percent": 49.0,
+      "hallucination_rate": 51.0
     },
     {
-      "dataset": "fever",
-      "method_key": "rag",
-      "method": "RAG",
-      "metric_source": "fever_label_accuracy",
-      "score_percent": 92.5,
-      "hallucination_rate": 7.5
+      "dataset": "truthfulqa",
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "metric_source": "mc2_proxy",
+      "score_percent": 49.73,
+      "hallucination_rate": 50.27
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "metric_source": "mc1_proxy",
+      "score_percent": 56.0,
+      "hallucination_rate": 44.0
+    },
+    {
+      "dataset": "truthfulqa",
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "metric_source": "mc2_proxy",
+      "score_percent": 50.98,
+      "hallucination_rate": 49.02
     },
     {
       "dataset": "fever",
       "method_key": "graphrag",
       "method": "GraphRAG",
       "metric_source": "fever_label_accuracy",
-      "score_percent": 68.8,
-      "hallucination_rate": 31.2
+      "score_percent": 66.0,
+      "hallucination_rate": 34.0
     },
     {
       "dataset": "fever",
-      "method_key": "kv_prefix",
-      "method": "KV Prefix",
+      "method_key": "kvi_triple_legacy",
+      "method": "KVI Triple Legacy",
       "metric_source": "fever_label_accuracy",
-      "score_percent": 72.3,
-      "hallucination_rate": 27.7
+      "score_percent": 88.0,
+      "hallucination_rate": 12.0
     },
     {
       "dataset": "fever",
-      "method_key": "kvi",
-      "method": "KVI",
+      "method_key": "kvi_schema_writer",
+      "method": "KVI Schema Writer",
       "metric_source": "fever_label_accuracy",
-      "score_percent": 89.3,
-      "hallucination_rate": 10.7
+      "score_percent": 77.0,
+      "hallucination_rate": 23.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kvi_schema_verifier",
+      "method": "KVI Schema Verifier",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 67.0,
+      "hallucination_rate": 33.0
+    },
+    {
+      "dataset": "fever",
+      "method_key": "kvi_noinject_planner",
+      "method": "KVI No-Inject Planner",
+      "metric_source": "fever_label_accuracy",
+      "score_percent": 67.0,
+      "hallucination_rate": 33.0
     }
   ]
 }

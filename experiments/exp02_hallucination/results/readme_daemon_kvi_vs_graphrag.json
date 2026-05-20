@@ -1,0 +1,485 @@
+{
+  "n_runs": 16,
+  "results_dir": "/home/zd/dev/KVI/experiments/exp02_hallucination/results",
+  "mean_truthfulqa_mc2_proxy": {
+    "graphrag": 0.5319,
+    "kvi_triple_legacy": 0.4706,
+    "kvi_schema_writer": 0.50895,
+    "kvi_schema_verifier": 0.4973,
+    "kvi_noinject_planner": 0.5098
+  },
+  "std_truthfulqa_mc2_proxy": {
+    "graphrag": 0.0,
+    "kvi_triple_legacy": 0.0,
+    "kvi_schema_writer": 0.00024999999999997247,
+    "kvi_schema_verifier": 0.0,
+    "kvi_noinject_planner": 0.0
+  },
+  "mean_fever_label_accuracy": {
+    "graphrag": 66.0,
+    "kvi_triple_legacy": 88.0,
+    "kvi_schema_writer": 77.0,
+    "kvi_schema_verifier": 67.0,
+    "kvi_noinject_planner": 67.0
+  },
+  "std_fever_label_accuracy": {
+    "graphrag": 0.0,
+    "kvi_triple_legacy": 0.0,
+    "kvi_schema_writer": 0.0,
+    "kvi_schema_verifier": 0.0,
+    "kvi_noinject_planner": 0.0
+  },
+  "per_run_wins": {
+    "truthfulqa_mc2_kvi_beats_graphrag": [],
+    "fever_label_kvi_beats_graphrag": [
+      {
+        "tag": "045c888b563d0f72_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "045c888b563d0f72_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "045c888b563d0f72_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "045c888b563d0f72_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "12069f0b6dbdd1c2_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "12069f0b6dbdd1c2_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "12069f0b6dbdd1c2_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "12069f0b6dbdd1c2_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "59a99fead13e08ab_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "59a99fead13e08ab_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "59a99fead13e08ab_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "5d41dfd55174f309_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "5d41dfd55174f309_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "5d41dfd55174f309_source_id_mx12_mn0p04",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "6aeab55e5095e289_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "6aeab55e5095e289_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "6aeab55e5095e289_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "6fd434186d6f9ae6_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "6fd434186d6f9ae6_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "6fd434186d6f9ae6_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "6fd434186d6f9ae6_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "984d5c246334d36f_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "984d5c246334d36f_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "984d5c246334d36f_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "984d5c246334d36f_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ad6219ff17261503_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "ad6219ff17261503_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ad6219ff17261503_source_id_mx8_mn0p05",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ba61ce5b4cd9ae05_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "ba61ce5b4cd9ae05_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ba61ce5b4cd9ae05_doc_id_mx12_mn0p04",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ca4cce106dc28438_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "ca4cce106dc28438_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ca4cce106dc28438_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "d16cdc1b33c51b2a_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "d16cdc1b33c51b2a_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "d16cdc1b33c51b2a_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "e928df99c5a5e391_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "e928df99c5a5e391_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "e928df99c5a5e391_source_id_mx16_mn0p03",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ef49bd1fddb62f01_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "ef49bd1fddb62f01_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "ef49bd1fddb62f01_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "ef49bd1fddb62f01_source_id_mx6_mn0p06",
+        "schema_group_by": "source_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f27ff776ad1e1082_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "f27ff776ad1e1082_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "f27ff776ad1e1082_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f27ff776ad1e1082_doc_id_mx16_mn0p03",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f2d28515fa8b2228_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "f2d28515fa8b2228_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "f2d28515fa8b2228_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f2d28515fa8b2228_doc_id_mx8_mn0p05",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f6c3c0505596689d_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_triple_legacy",
+        "fever_label_accuracy": 88.0,
+        "graphrag_fever": 66.0,
+        "delta": 22.0
+      },
+      {
+        "tag": "f6c3c0505596689d_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_writer",
+        "fever_label_accuracy": 77.0,
+        "graphrag_fever": 66.0,
+        "delta": 11.0
+      },
+      {
+        "tag": "f6c3c0505596689d_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_schema_verifier",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      },
+      {
+        "tag": "f6c3c0505596689d_doc_id_mx6_mn0p06",
+        "schema_group_by": "doc_id",
+        "method": "kvi_noinject_planner",
+        "fever_label_accuracy": 67.0,
+        "graphrag_fever": 66.0,
+        "delta": 1.0
+      }
+    ]
+  }
+}

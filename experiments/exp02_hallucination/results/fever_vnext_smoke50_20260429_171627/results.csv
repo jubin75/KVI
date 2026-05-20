@@ -1,0 +1,5 @@
+Method,Retrieval,Injection,EM,CI95 Low,CI95 High,F1 Mean,FEVER Label Acc,FEVER CI Lo,FEVER CI Hi
+GraphRAG,graph,prompt,70.0,56.0,82.0,0.6,68.0,54.0,80.0
+KVI Triple Legacy,graph,KV + prompt (legacy),84.0,74.0,94.0,0.8,84.0,74.0,94.0
+KVI Schema Verifier,graph + schema,schema plan + evidence writer,70.0,56.0,82.0,0.7,66.0,52.0,78.0
+KVI No-Inject Planner,graph + schema,planner only,70.0,56.0,82.0,0.7,66.0,52.0,78.0

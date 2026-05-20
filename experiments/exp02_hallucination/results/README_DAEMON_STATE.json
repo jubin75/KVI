@@ -1,0 +1,14 @@
+{
+  "p0": {
+    "skipped": true,
+    "reason": "P0 skip: missing hotpot_eval.jsonl or Hotpot artifacts"
+  },
+  "p0_done": true,
+  "last_ok": {
+    "tag": "readme_daemon_12069f0b6dbdd1c2_source_id_mx12_mn0p04",
+    "winners": [],
+    "ts": "2026-05-03T22:57:21Z"
+  },
+  "next_candidate_index": 11,
+  "rounds_completed": 27
+}

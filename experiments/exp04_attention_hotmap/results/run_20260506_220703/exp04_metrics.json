@@ -1,0 +1,116 @@
+{
+  "n_examples": 256,
+  "model": "/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct",
+  "mean_logit_gain": -1.258768804371357,
+  "std_logit_gain": 4.76035490061699,
+  "corr_logit_gain_vs_mean_kv_mass": -0.0272526939956517,
+  "mean_ev_mass_rag_last_token_global": 0.5192022618304349,
+  "mean_ev_mass_kvi_same_keys_last_token_global": 0.10387063923653105,
+  "mean_kv_prefix_mass_kvi_last_token_global": 0.42969390978980904,
+  "mean_delta_paired_evidence_keys_kvi_minus_rag": -0.4153316225939038,
+  "mean_delta_cross_kv_prefix_minus_rag_evidence": -0.08950835204062582,
+  "top10_heads_delta_paired_same_evidence": [
+    {
+      "layer": 14,
+      "head": 5,
+      "delta": -0.9998327547438879
+    },
+    {
+      "layer": 4,
+      "head": 7,
+      "delta": -0.9992533321616524
+    },
+    {
+      "layer": 4,
+      "head": 13,
+      "delta": -0.993163614247571
+    },
+    {
+      "layer": 8,
+      "head": 23,
+      "delta": -0.9867216498764932
+    },
+    {
+      "layer": 14,
+      "head": 7,
+      "delta": -0.9852920219435077
+    },
+    {
+      "layer": 14,
+      "head": 4,
+      "delta": -0.9627111172296055
+    },
+    {
+      "layer": 4,
+      "head": 10,
+      "delta": -0.9600577542451134
+    },
+    {
+      "layer": 17,
+      "head": 10,
+      "delta": -0.9513115406709858
+    },
+    {
+      "layer": 4,
+      "head": 8,
+      "delta": -0.948309699525467
+    },
+    {
+      "layer": 22,
+      "head": 6,
+      "delta": -0.9478147582314591
+    }
+  ],
+  "top10_heads_delta_cross_region": [
+    {
+      "layer": 2,
+      "head": 4,
+      "delta": -0.3630870767046872
+    },
+    {
+      "layer": 3,
+      "head": 8,
+      "delta": -0.36281170177971944
+    },
+    {
+      "layer": 14,
+      "head": 8,
+      "delta": -0.3047552524476487
+    },
+    {
+      "layer": 8,
+      "head": 24,
+      "delta": -0.29025306451512733
+    },
+    {
+      "layer": 2,
+      "head": 22,
+      "delta": -0.2849399678161717
+    },
+    {
+      "layer": 18,
+      "head": 16,
+      "delta": -0.2769024719164008
+    },
+    {
+      "layer": 16,
+      "head": 0,
+      "delta": -0.2740180249538753
+    },
+    {
+      "layer": 21,
+      "head": 25,
+      "delta": -0.27252594890642
+    },
+    {
+      "layer": 9,
+      "head": 2,
+      "delta": -0.26473547365458217
+    },
+    {
+      "layer": 19,
+      "head": 6,
+      "delta": -0.2575278539843566
+    }
+  ]
+}

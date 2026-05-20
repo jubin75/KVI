@@ -230,6 +230,7 @@ def _build_schema_planning_report(
     evidence_texts: List[str],
     selected_triples: Optional[List[dict]] = None,
     execution_mode: str = "",
+    schema_backend: str = "evidence_derived_prompt_schema",
 ) -> Dict[str, Any]:
     from src.runtime.slot_registry import (
         adjudicable_slots_for_query,
@@ -260,7 +261,7 @@ def _build_schema_planning_report(
     abstain_recommended = fail_closed or evidence_count <= 0
     return {
         "execution_mode": execution_mode,
-        "schema_backend": "evidence_derived_prompt_schema",
+        "schema_backend": str(schema_backend or "evidence_derived_prompt_schema"),
         "schema_text": schema_text,
         "fact_types": sorted(fact_types),
         "inferred_slots": sorted(inferred_slots),
@@ -400,6 +401,59 @@ def _text_search(
     return results[:max_results]
 
 
+def _schema_text_search(
+    query: str,
+    schema_blocks_jsonl: Path,
+    max_results: int = 8,
+    min_score: float = 0.05,
+) -> list[dict]:
+    """
+    Lightweight schema block retrieval over blocks.schema.jsonl.
+
+    Expected JSONL fields (best effort): text | schema_text | schema.
+    Returns ranked snippets with overlap score.
+    """
+    if not schema_blocks_jsonl.exists():
+        return []
+    q_tokens = _tokenize_chinese(query)
+    if not q_tokens:
+        return []
+    rows: list[dict] = []
+    try:
+        for line in schema_blocks_jsonl.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            text = str(
+                rec.get("schema_text")
+                or rec.get("text")
+                or rec.get("schema")
+                or ""
+            ).strip()
+            if not text:
+                continue
+            t_tokens = _tokenize_chinese(text)
+            if not t_tokens:
+                continue
+            overlap = len(q_tokens & t_tokens) / len(q_tokens)
+            if overlap >= min_score:
+                rows.append(
+                    {
+                        "text": text,
+                        "score": round(overlap, 4),
+                        "block_id": str(rec.get("block_id") or rec.get("id") or ""),
+                    }
+                )
+    except Exception:
+        return []
+    rows.sort(key=lambda x: x["score"], reverse=True)
+    return rows[:max_results]
+
+
 # ---------------------------------------------------------------------------
 # URL / verbatim detection
 # ---------------------------------------------------------------------------
@@ -511,6 +565,28 @@ def main() -> None:
     # Hybrid retrieval: text search fallback over raw evidence sentences
     p.add_argument("--sentences_jsonl", default="",
                    help="Path to sentences.tagged.jsonl (or sentences.jsonl) for text search fallback")
+    p.add_argument(
+        "--schema_blocks_jsonl",
+        default="",
+        help="Optional blocks.schema.jsonl path for schema-first planning/reporting (P2).",
+    )
+    p.add_argument(
+        "--schema_kv_dir",
+        default="",
+        help="Optional kvbank_schema dir (reserved for P2 runtime wiring; metadata only in P2-lite).",
+    )
+    p.add_argument(
+        "--max_schema_evidence",
+        type=int,
+        default=8,
+        help="Max schema snippets to use from --schema_blocks_jsonl.",
+    )
+    p.add_argument(
+        "--schema_min_score",
+        type=float,
+        default=0.05,
+        help="Min query-token overlap score for schema snippet retrieval.",
+    )
     p.add_argument("--use_chat_template", action="store_true")
     p.add_argument("--local_files_only", action="store_true")
     p.add_argument("--max_new_tokens", type=int, default=256)
@@ -884,12 +960,31 @@ def main() -> None:
         ranked_evidence_texts = ranked_evidence_texts[:max_oe]
     evidence_block = "\n".join(f"{i+1}. {t}" for i, t in enumerate(ranked_evidence_texts))
 
+    schema_evidence_texts = list(ranked_evidence_texts)
+    schema_backend = "evidence_derived_prompt_schema"
+    schema_blocks_path = Path(args.schema_blocks_jsonl) if str(args.schema_blocks_jsonl).strip() else None
+    if schema_blocks_path and schema_blocks_path.exists():
+        schema_hits = _schema_text_search(
+            args.prompt,
+            schema_blocks_path,
+            max_results=max(1, int(getattr(args, "max_schema_evidence", 8) or 8)),
+            min_score=float(getattr(args, "schema_min_score", 0.05) or 0.05),
+        )
+        if schema_hits:
+            schema_evidence_texts = [str(h.get("text") or "").strip() for h in schema_hits if str(h.get("text") or "").strip()]
+            schema_backend = "blocks_schema_jsonl"
+
     schema_planning_report = _build_schema_planning_report(
         query_text=args.prompt,
-        evidence_texts=ranked_evidence_texts,
+        evidence_texts=schema_evidence_texts,
         selected_triples=list(kv_injection_debug.get("selected_triples") or []),
         execution_mode=execution_mode,
+        schema_backend=schema_backend,
     )
+    if str(args.schema_kv_dir or "").strip():
+        schema_planning_report["schema_kv_dir"] = str(args.schema_kv_dir)
+    if schema_blocks_path and schema_blocks_path.exists():
+        schema_planning_report["schema_blocks_jsonl"] = str(schema_blocks_path)
     schema_summary_text = str(schema_planning_report.get("schema_text") or "").strip()
     evidence_only_writer_mode = execution_mode in {
         "schema_verify_then_evidence_write",

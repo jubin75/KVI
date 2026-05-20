@@ -57,6 +57,21 @@ def _approx_token_count(text: str) -> int:
     return int(len(units))
 
 
+def _group_key_for_record(rec: Dict[str, Any], group_by: str) -> str:
+    if group_by == "doc_id":
+        return str(rec.get("doc_id") or "").strip()
+    if group_by == "source_id":
+        sid = str(rec.get("source_id") or "").strip()
+        if sid:
+            return sid
+        meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+        sid = str(meta.get("source_id") or meta.get("question_id") or "").strip()
+        if sid:
+            return sid
+        return str(rec.get("block_id") or "").strip()
+    raise ValueError(f"Unsupported group_by={group_by!r}")
+
+
 def build_schema_blocks_from_evidence_jsonl(
     *,
     blocks_evidence_jsonl: Path,
@@ -66,10 +81,14 @@ def build_schema_blocks_from_evidence_jsonl(
     max_evidence_per_doc: int = 200,
     default_slots: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    if group_by not in {"doc_id"}:
-        raise ValueError("Only group_by='doc_id' is supported in this demo.")
+    """
+    max_docs: if > 0, cap the number of distinct group keys (doc_id or source_id buckets).
+    max_evidence_per_doc: max evidence rows accumulated per group key.
+    """
+    if group_by not in {"doc_id", "source_id"}:
+        raise ValueError("group_by must be 'doc_id' or 'source_id'.")
 
-    by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_group: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     total_in = 0
     with blocks_evidence_jsonl.open("r", encoding="utf-8") as f:
         for line in f:
@@ -80,19 +99,19 @@ def build_schema_blocks_from_evidence_jsonl(
             if not rec:
                 continue
             total_in += 1
-            doc_id = str(rec.get("doc_id") or "").strip()
-            if not doc_id:
+            gkey = _group_key_for_record(rec, group_by)
+            if not gkey:
                 continue
-            if int(max_docs) > 0 and len(by_doc) >= int(max_docs) and doc_id not in by_doc:
+            if int(max_docs) > 0 and len(by_group) >= int(max_docs) and gkey not in by_group:
                 continue
-            if len(by_doc[doc_id]) >= int(max_evidence_per_doc):
+            if len(by_group[gkey]) >= int(max_evidence_per_doc):
                 continue
-            by_doc[doc_id].append(rec)
+            by_group[gkey].append(rec)
 
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
     total_out = 0
     with out_jsonl.open("w", encoding="utf-8") as fout:
-        for doc_id, recs in by_doc.items():
+        for gkey, recs in by_group.items():
             ev_texts = [str(r.get("text") or "").strip() for r in recs if str(r.get("text") or "").strip()]
             if not ev_texts:
                 continue
@@ -105,7 +124,8 @@ def build_schema_blocks_from_evidence_jsonl(
             ev_block_ids = [str(r.get("block_id") or "") for r in recs if str(r.get("block_id") or "")]
             source_uri = recs[0].get("source_uri", None)
             lang = recs[0].get("lang", None)
-            block_id = f"{doc_id}::schema"
+            doc_id = str(recs[0].get("doc_id") or "").strip() or str(gkey)
+            block_id = f"{gkey}::schema"
 
             # Infer answerable_slots from evidence content (heuristic, minimal).
             # This is a simple keyword-based proxy; real labeling should happen upstream.
@@ -179,6 +199,7 @@ def build_schema_blocks_from_evidence_jsonl(
                 "metadata": {
                     "schema_version": "v1",
                     "group_by": group_by,
+                    "group_key": str(gkey),
                     "from_evidence_block_ids": ev_block_ids[:1000],
                     "num_evidence_blocks": int(len(ev_block_ids)),
                     "inferred_answerable_slots": inferred_answerable,  # debug trace
@@ -190,7 +211,7 @@ def build_schema_blocks_from_evidence_jsonl(
     return {
         "in_evidence_blocks": int(total_in),
         "out_schema_blocks": int(total_out),
-        "docs": int(len(by_doc)),
+        "docs": int(len(by_group)),
         "out_jsonl": str(out_jsonl),
     }
 
@@ -199,7 +220,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--blocks_jsonl_evidence", required=True)
     p.add_argument("--out_jsonl", required=True, help="Output blocks.schema.jsonl")
-    p.add_argument("--group_by", default="doc_id", choices=["doc_id"])
+    p.add_argument("--group_by", default="doc_id", choices=["doc_id", "source_id"])
     p.add_argument("--max_docs", type=int, default=0)
     p.add_argument("--max_evidence_per_doc", type=int, default=200)
     p.add_argument(

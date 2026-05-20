@@ -29,13 +29,15 @@ The plan below replaces ad-hoc KVI sweeps with a staged protocol that separates:
 
 Use the following method definitions going forward.
 
-| Method key | Retrieval | KV policy | Final answer writer | Primary use |
-|---|---|---|---|---|
-| `graphrag` | graph + sentence | no KV | evidence prompt only | baseline |
-| `kvi_triple_legacy` | graph + sentence | triple KV into generator | same generator | legacy ablation |
-| `kvi_schema_writer` | graph + sentence + schema retrieval | schema KV into generator | same generator | reasoning-oriented KVI |
-| `kvi_schema_verifier` | graph + sentence + schema retrieval | schema KV only for plan / verify / abstain | evidence-only writer | new Exp02 mainline |
+
+| Method key             | Retrieval                           | KV policy                                              | Final answer writer  | Primary use            |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------ | -------------------- | ---------------------- |
+| `graphrag`             | graph + sentence                    | no KV                                                  | evidence prompt only | baseline               |
+| `kvi_triple_legacy`    | graph + sentence                    | triple KV into generator                               | same generator       | legacy ablation        |
+| `kvi_schema_writer`    | graph + sentence + schema retrieval | schema KV into generator                               | same generator       | reasoning-oriented KVI |
+| `kvi_schema_verifier`  | graph + sentence + schema retrieval | schema KV only for plan / verify / abstain             | evidence-only writer | new Exp02 mainline     |
 | `kvi_noinject_planner` | graph + sentence + schema retrieval | no generator KV, schema used only for rerank / routing | evidence-only writer | isolate planning value |
+
 
 Short interpretation:
 
@@ -450,9 +452,9 @@ Design docs that constrain what "injection" means (schema vs evidence) live unde
 
 ### Remote env (Linux) — network & model cache
 
-- **HuggingFace connectivity**: Direct connection to `huggingface.co` is unreachable (timeout/Network unreachable). **Using a mirror works**: after `export HF_ENDPOINT=https://hf-mirror.com`, `curl https://hf-mirror.com` returns 200 (~0.5s), and `huggingface_hub` will use the mirror to generate download URLs (e.g. `https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/...`). It is recommended to set this in the experiment terminal or `~/.bashrc` and `source ~/.bashrc` to pull models from the mirror.
-- **Encoder local cache**: `sentence-transformers/all-MiniLM-L6-v2` already exists at **`/data/huggingface-cache/user/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2`**, readable by user `zd`. Usage: after `export HF_HOME=/data/huggingface-cache/user/huggingface`, transformers will load the encoder from that directory, **no internet required**.
-- **BASE_LLM (Qwen2.5-7B-Instruct)**: `build.base_llm` in `config/topics/SFTSV/config.json` is already set to **`/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct`** (local directory). For first use, download first: after `export HF_ENDPOINT=https://hf-mirror.com`, run `python scripts/download_qwen25_7b_local.py` (log: `experiments/logs/download_qwen25_7b.log`). After download, this path can be used directly as the local path for `from_pretrained`.
+- **HuggingFace connectivity**: Direct connection to `huggingface.co` is unreachable (timeout/Network unreachable). **Using a mirror works**: after `export HF_ENDPOINT=https://hf-mirror.com`, `curl https://hf-mirror.com` returns 200 (~~0.5s), and `huggingface_hub` will use the mirror to generate download URLs (e.g. `https://hf-mirror.com/Qwen/Qwen2.5-7B-Instruct/...`). It is recommended to set this in the experiment terminal or `~~/.bashrc`and`source ~/.bashrc` to pull models from the mirror.
+- **Encoder local cache**: `sentence-transformers/all-MiniLM-L6-v2` already exists at `**/data/huggingface-cache/user/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2`**, readable by user `zd`. Usage: after `export HF_HOME=/data/huggingface-cache/user/huggingface`, transformers will load the encoder from that directory, **no internet required**.
+- **BASE_LLM (Qwen2.5-7B-Instruct)**: `build.base_llm` in `config/topics/SFTSV/config.json` is already set to `**/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct`** (local directory). For first use, download first: after `export HF_ENDPOINT=https://hf-mirror.com`, run `python scripts/download_qwen25_7b_local.py` (log: `experiments/logs/download_qwen25_7b.log`). After download, this path can be used directly as the local path for `from_pretrained`.
 
 ### Exp01 dataset construction (HotpotQA + NQ)
 
@@ -487,3 +489,4 @@ Design docs that constrain what "injection" means (schema vs evidence) live unde
 - **FEVER** is **evidence stance** (SUPPORTS / REFUTES / NEI) against a corpus: strong on **retrieval + attribution**, not the same construct as TQA's "myth busting."
 - **PubMedQA** is **abstract-grounded MC** (yes/no/maybe): factual, but not primarily a **counter-misconception** benchmark.
 - For a **medical analogue to TruthfulQA**, look for benchmarks built as **medical myth / unsafe false claim** discrimination or dedicated **medical hallucination** test suites (literature names evolve; search for "medical hallucination benchmark" / "Med-HALT"-style suites and cite the exact paper). PubMedQA can remain as a **separate axis** (reading + evidence in abstracts), not a drop-in replacement for TQA-style hallucination rate.
+

@@ -28,6 +28,13 @@ env/
 .idea/
 _toy/
 
+# --- Local API keys / secrets (never commit) ---
+.env
+.env.*
+!.env.example
+secrets/
+*.secret
+
 # --- Topic pipeline: generated corpora / KV blocks (not source) ---
 config/topics/SFTSV/*.jsonl
 config/topics/SFTSV/blocks*.jsonl

@@ -99,6 +99,18 @@ def main() -> None:
         help="Suffix for dataset result directories, e.g. truthfulqa_<result_tag>/summary.json",
     )
     p.add_argument(
+        "--graph_schema_blocks_jsonl",
+        default="",
+        help="Optional global blocks.schema.jsonl path; empty uses per-dataset artifacts/<ds>/blocks.schema.jsonl.",
+    )
+    p.add_argument(
+        "--graph_schema_kv_dir",
+        default="",
+        help="Optional global kvbank_schema dir; empty uses per-dataset artifacts/<ds>/kvbank_schema.",
+    )
+    p.add_argument("--graph_max_schema_evidence", type=int, default=8)
+    p.add_argument("--graph_schema_min_score", type=float, default=0.05)
+    p.add_argument(
         "--only_datasets",
         default="truthfulqa,fever",
         help="Comma list: truthfulqa, fever (subset to run build+eval for)",
@@ -288,6 +300,8 @@ def main() -> None:
             )
 
         out_dir = res / f"{name}_{str(args.result_tag)}"
+        schema_blocks_arg = Path(args.graph_schema_blocks_jsonl) if str(args.graph_schema_blocks_jsonl).strip() else (ds_art / "blocks.schema.jsonl")
+        schema_kv_arg = Path(args.graph_schema_kv_dir) if str(args.graph_schema_kv_dir).strip() else (ds_art / "kvbank_schema")
         cmd = [
             str(root / "KVI" / "bin" / "python"),
             "-u",
@@ -314,6 +328,14 @@ def main() -> None:
             str(ds_art / "kvbank_sentences/pattern_sidecar"),
             "--ann_sidecar_dir",
             str(ds_art / "kvbank_sentences/pattern_sidecar"),
+            "--graph_schema_blocks_jsonl",
+            str(schema_blocks_arg),
+            "--graph_schema_kv_dir",
+            str(schema_kv_arg),
+            "--graph_max_schema_evidence",
+            str(int(args.graph_max_schema_evidence)),
+            "--graph_schema_min_score",
+            str(float(args.graph_schema_min_score)),
             "--methods",
             str(args.methods),
             "--out_dir",

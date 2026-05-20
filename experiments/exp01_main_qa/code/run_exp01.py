@@ -418,6 +418,10 @@ def _run_graph(
     audit_query_id: str = "",
     audit_method_key: str = "",
     audit_oracle_jsonl: str = "",
+    schema_blocks_jsonl: Optional[Path] = None,
+    schema_kv_dir: Optional[Path] = None,
+    max_schema_evidence: int = 8,
+    schema_min_score: float = 0.05,
 ) -> Dict[str, Any]:
     argv = [
         "--model",
@@ -431,6 +435,12 @@ def _run_graph(
     ]
     if sentences_jsonl:
         argv += ["--sentences_jsonl", str(sentences_jsonl)]
+    if schema_blocks_jsonl:
+        argv += ["--schema_blocks_jsonl", str(schema_blocks_jsonl)]
+    if schema_kv_dir:
+        argv += ["--schema_kv_dir", str(schema_kv_dir)]
+    argv += ["--max_schema_evidence", str(int(max_schema_evidence))]
+    argv += ["--schema_min_score", str(float(schema_min_score))]
     if enable_kvi:
         argv += ["--enable_kvi"]
         if triple_kvbank_dir:
@@ -608,6 +618,8 @@ def main() -> None:
     p.add_argument("--graph_index", required=True, help="graph_index.json path")
     p.add_argument("--triple_kvbank_dir", default="", help="triple_kvbank directory for KVI")
     p.add_argument("--graph_sentences_jsonl", default="", help="Optional sentences.jsonl for graph hybrid retrieval")
+    p.add_argument("--graph_schema_blocks_jsonl", default="", help="Optional blocks.schema.jsonl for schema-first planning.")
+    p.add_argument("--graph_schema_kv_dir", default="", help="Optional kvbank_schema directory for schema-first runtime.")
 
     # ANN channel (for RAG/KV Prefix)
     p.add_argument("--ann_kv_dir", default="", help="ANN KV directory for run_kvi2_runtime_test route/simple")
@@ -789,6 +801,18 @@ def main() -> None:
             "Use --no-truthfulqa_kvi_tuned_overrides for controlled ablations such as injection-level sweeps."
         ),
     )
+    p.add_argument(
+        "--graph_max_schema_evidence",
+        type=int,
+        default=8,
+        help="Max schema snippets to use from --graph_schema_blocks_jsonl in graph runner.",
+    )
+    p.add_argument(
+        "--graph_schema_min_score",
+        type=float,
+        default=0.05,
+        help="Min overlap score for schema snippet retrieval in graph runner.",
+    )
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -799,6 +823,8 @@ def main() -> None:
     graph_index = Path(args.graph_index)
     triple_kvbank_dir = Path(args.triple_kvbank_dir) if str(args.triple_kvbank_dir).strip() else None
     graph_sentences_jsonl = Path(args.graph_sentences_jsonl) if str(args.graph_sentences_jsonl).strip() else None
+    graph_schema_blocks_jsonl = Path(args.graph_schema_blocks_jsonl) if str(args.graph_schema_blocks_jsonl).strip() else None
+    graph_schema_kv_dir = Path(args.graph_schema_kv_dir) if str(args.graph_schema_kv_dir).strip() else None
 
     ann_kv_dir = Path(args.ann_kv_dir) if str(args.ann_kv_dir).strip() else None
     ann_sentences_jsonl = Path(args.ann_sentences_jsonl) if str(args.ann_sentences_jsonl).strip() else None
@@ -1057,6 +1083,10 @@ def main() -> None:
                         audit_query_id=str(ex.id),
                         audit_method_key=method_key,
                         audit_oracle_jsonl=graph_audit_oracle,
+                        schema_blocks_jsonl=graph_schema_blocks_jsonl,
+                        schema_kv_dir=graph_schema_kv_dir,
+                        max_schema_evidence=int(args.graph_max_schema_evidence),
+                        schema_min_score=float(args.graph_schema_min_score),
                     )
 
                 if any(m in {"llm", "graphrag"} for m in methods):

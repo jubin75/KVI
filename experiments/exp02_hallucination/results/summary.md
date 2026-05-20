@@ -10,8 +10,8 @@
 |---|---|
 | Model | `/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct` |
 | Methods | `LLM`, `RAG`, `GraphRAG`, `KV Prefix`, `KVI` |
-| TruthfulQA size | `2` |
-| FEVER size | `1000` |
+| TruthfulQA size | `100` |
+| FEVER size | `100` |
 | TruthfulQA evaluation source | `MC1/MC2 proxy` |
 | FEVER evaluation source | `fever_label_accuracy` |
 | Unified metric for plotting | `Hallucination Rate (%) = 100 - score(%)` |
@@ -27,29 +27,26 @@
 
 | Dataset | Method | Metric Source | Score (%) | Hallucination Rate (%) |
 |---|---|---|---:|---:|
-| fever | LLM | fever_label_accuracy | 30.9 | 69.1 |
-| fever | RAG | fever_label_accuracy | 92.5 | 7.5 |
-| fever | GraphRAG | fever_label_accuracy | 68.8 | 31.2 |
-| fever | KV Prefix | fever_label_accuracy | 72.3 | 27.7 |
-| fever | KVI | fever_label_accuracy | 89.3 | 10.7 |
-| truthfulqa | LLM | mc1_proxy | 100.0 | 0.0 |
-| truthfulqa | LLM | mc2_proxy | 66.9 | 33.1 |
-| truthfulqa | RAG | mc1_proxy | 100.0 | 0.0 |
-| truthfulqa | RAG | mc2_proxy | 73.1 | 26.9 |
-| truthfulqa | GraphRAG | mc1_proxy | 100.0 | 0.0 |
-| truthfulqa | GraphRAG | mc2_proxy | 78.1 | 21.9 |
-| truthfulqa | KV Prefix | mc1_proxy | 100.0 | 0.0 |
-| truthfulqa | KV Prefix | mc2_proxy | 63.5 | 36.5 |
-| truthfulqa | KVI | mc1_proxy | 100.0 | 0.0 |
-| truthfulqa | KVI | mc2_proxy | 69.2 | 30.8 |
+| fever | GraphRAG | fever_label_accuracy | 66.0 | 34.0 |
+| fever | KVI Triple Legacy | fever_label_accuracy | 88.0 | 12.0 |
+| fever | KVI Schema Writer | fever_label_accuracy | 77.0 | 23.0 |
+| fever | KVI Schema Verifier | fever_label_accuracy | 67.0 | 33.0 |
+| fever | KVI No-Inject Planner | fever_label_accuracy | 67.0 | 33.0 |
+| truthfulqa | GraphRAG | mc1_proxy | 62.0 | 38.0 |
+| truthfulqa | GraphRAG | mc2_proxy | 53.2 | 46.8 |
+| truthfulqa | KVI Triple Legacy | mc1_proxy | 45.0 | 55.0 |
+| truthfulqa | KVI Schema Writer | mc1_proxy | 52.0 | 48.0 |
+| truthfulqa | KVI Schema Verifier | mc1_proxy | 49.0 | 51.0 |
+| truthfulqa | KVI No-Inject Planner | mc1_proxy | 56.0 | 44.0 |
+| truthfulqa | KVI Triple Legacy | mc2_proxy | 47.1 | 52.9 |
+| truthfulqa | KVI Schema Writer | mc2_proxy | 50.9 | 49.1 |
+| truthfulqa | KVI Schema Verifier | mc2_proxy | 49.7 | 50.3 |
+| truthfulqa | KVI No-Inject Planner | mc2_proxy | 51.0 | 49.0 |
 
 ### Result Analysis (Primary metric: TruthfulQA MC2 proxy)
 
-- On TruthfulQA `MC1 proxy`, the lowest hallucination rate is `0.0%` by **LLM**.
-- On TruthfulQA `MC2 proxy`, the lowest hallucination rate is `21.9%` by **GraphRAG**.
-- On FEVER (`label accuracy` converted), the lowest hallucination rate is `7.5%` by **RAG**.
-- `KV Prefix` shows a large MC1/MC2 gap (`0.0%` vs `36.5%`), indicating unstable behavior across different TruthfulQA proxy criteria.
-- On TruthfulQA MC2 proxy, **KVI** (`30.8%`) is close to **GraphRAG** (`21.9%`), suggesting KVI is competitive on multi-choice mass proxy.
-- On FEVER, **RAG** remains better than **KVI** in this run (`7.5%` vs `10.7%`).
+- On TruthfulQA `MC1 proxy`, the lowest hallucination rate is `38.0%` by **GraphRAG**.
+- On TruthfulQA `MC2 proxy`, the lowest hallucination rate is `46.8%` by **GraphRAG**.
+- On FEVER (`label accuracy` converted), the lowest hallucination rate is `12.0%` by **KVI Triple Legacy**.
 
 **Note for paper writing**: TruthfulQA values here are proxy MC scores mapped into hallucination rate for unified plotting; they are suitable for internal comparison but should be explicitly labeled as proxy in final tables/figures.

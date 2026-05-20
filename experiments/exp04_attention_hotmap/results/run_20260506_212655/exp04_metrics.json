@@ -1,0 +1,61 @@
+{
+  "n_examples": 256,
+  "model": "/home/zd/dev/KVI/models/Qwen2.5-7B-Instruct",
+  "mean_logit_gain": -1.258768804371357,
+  "std_logit_gain": 4.76035490061699,
+  "corr_logit_gain_vs_mean_kv_mass": -0.0272526939956517,
+  "mean_kv_mass_kvi_last_token_global": 0.42969390978980904,
+  "mean_ev_mass_rag_last_token_global": 0.5192022618304349,
+  "top10_heads_delta": [
+    {
+      "layer": 2,
+      "head": 4,
+      "delta": -0.3630870767046872
+    },
+    {
+      "layer": 3,
+      "head": 8,
+      "delta": -0.36281170177971944
+    },
+    {
+      "layer": 14,
+      "head": 8,
+      "delta": -0.3047552524476487
+    },
+    {
+      "layer": 8,
+      "head": 24,
+      "delta": -0.29025306451512733
+    },
+    {
+      "layer": 2,
+      "head": 22,
+      "delta": -0.2849399678161717
+    },
+    {
+      "layer": 18,
+      "head": 16,
+      "delta": -0.2769024719164008
+    },
+    {
+      "layer": 16,
+      "head": 0,
+      "delta": -0.2740180249538753
+    },
+    {
+      "layer": 21,
+      "head": 25,
+      "delta": -0.27252594890642
+    },
+    {
+      "layer": 9,
+      "head": 2,
+      "delta": -0.26473547365458217
+    },
+    {
+      "layer": 19,
+      "head": 6,
+      "delta": -0.2575278539843566
+    }
+  ]
+}

@@ -4,16 +4,16 @@ TruthfulQA: Hallucination Rate (%) = `100 - relaxed EM`. FEVER: Hallucination Ra
 
 | Dataset | Method | Relaxed EM (%) | Hallucination Rate (%) |
 |---|---|---:|---:|
-| truthfulqa | LLM | 0.0 | 100.0 |
-| truthfulqa | RAG | 0.0 | 100.0 |
-| truthfulqa | GraphRAG | 0.0 | 100.0 |
-| truthfulqa | KV Prefix | 0.0 | 100.0 |
-| truthfulqa | KVI | 0.0 | 100.0 |
-| fever | LLM | 38.3 | 69.1 |
-| fever | RAG | 92.6 | 7.5 |
-| fever | GraphRAG | 73.0 | 31.2 |
-| fever | KV Prefix | 74.3 | 27.7 |
-| fever | KVI | 89.3 | 10.7 |
+| truthfulqa | GraphRAG | 9.0 | 91.0 |
+| truthfulqa | KVI Triple Legacy | 0.0 | 100.0 |
+| truthfulqa | KVI Schema Writer | 5.0 | 95.0 |
+| truthfulqa | KVI Schema Verifier | 2.0 | 98.0 |
+| truthfulqa | KVI No-Inject Planner | 6.0 | 94.0 |
+| fever | GraphRAG | 67.0 | 34.0 |
+| fever | KVI Triple Legacy | 88.0 | 12.0 |
+| fever | KVI Schema Writer | 77.0 | 23.0 |
+| fever | KVI Schema Verifier | 71.0 | 33.0 |
+| fever | KVI No-Inject Planner | 71.0 | 33.0 |
 
 ### TruthfulQA MC1/MC2 (proxy)
 
@@ -21,8 +21,8 @@ TruthfulQA: Hallucination Rate (%) = `100 - relaxed EM`. FEVER: Hallucination Ra
 
 | Method | MC1 Proxy (%) | MC2 Proxy (%) | Valid N |
 |---|---:|---:|---:|
-| LLM | 100.0 | 66.9 | 2 |
-| RAG | 100.0 | 73.1 | 2 |
-| GraphRAG | 100.0 | 78.1 | 2 |
-| KV Prefix | 100.0 | 63.4 | 2 |
-| KVI | 100.0 | 69.2 | 2 |
+| GraphRAG | 62.0 | 53.2 | 100 |
+| KVI Triple Legacy | 45.0 | 47.1 | 100 |
+| KVI Schema Writer | 52.0 | 50.9 | 100 |
+| KVI Schema Verifier | 49.0 | 49.7 | 100 |
+| KVI No-Inject Planner | 56.0 | 51.0 | 100 |
